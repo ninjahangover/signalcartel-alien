@@ -208,7 +208,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
     maxTrades: 999999,
     features: {
       baseStrategyEnabled: true,
-      confidenceThreshold: 0.70,
+      confidenceThreshold: 0.55, // REDUCED from 0.70 for more trades
       
       sentimentEnabled: true,
       sentimentSources: [
@@ -217,28 +217,28 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
         'google_trends', 'economic_indicators', 'social_volume',
         'defi_metrics', 'options_flow'
       ],
-      sentimentThreshold: 0.60,
+      sentimentThreshold: 0.45, // REDUCED from 0.60
       
       orderBookEnabled: true,
-      orderBookThreshold: 0.50,
+      orderBookThreshold: 0.40, // REDUCED from 0.50
       
       // FULL AI POWER
       multiLayerAIEnabled: true,
       mathematicalIntuitionEnabled: true,
       markovChainEnabled: true,
       
-      positionSizing: 0.008,
+      positionSizing: 0.015, // INCREASED from 0.008 for bigger positions
       stopLossEnabled: true,
-      stopLossPercent: 2,
+      stopLossPercent: 3, // More room from 2%
       takeProfitEnabled: true,
-      takeProfitPercent: 10,
+      takeProfitPercent: 5, // REDUCED from 10% for quicker profits
       
-      requireSentimentAlignment: true,
-      requireOrderBookConfirmation: true,
-      requireMultiLayerConsensus: true // Full consensus required
+      requireSentimentAlignment: false, // CHANGED - too restrictive
+      requireOrderBookConfirmation: false, // CHANGED - too restrictive
+      requireMultiLayerConsensus: false // CHANGED - let individual signals through
     },
-    targetWinRate: 58,
-    description: "Full QUANTUM FORGE™ intelligence suite. Maximum precision trading."
+    targetWinRate: 55, // More realistic
+    description: "Full QUANTUM FORGE™ intelligence suite. Balanced precision and frequency."
   }
 ];
 
