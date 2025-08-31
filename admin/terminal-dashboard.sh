@@ -160,12 +160,12 @@ get_db_stats() {
     local open_positions=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"status\" = 'open';")
     
     # Analytics database record counts (consolidated data)
-    local consolidated_trades=$(db_query "SELECT COUNT(*) FROM \"consolidated_trades\";" "signalcartel_analytics")
-    local consolidated_positions=$(db_query "SELECT COUNT(*) FROM \"consolidated_positions\";" "signalcartel_analytics") 
-    local consolidated_sentiment=$(db_query "SELECT COUNT(*) FROM \"consolidated_sentiment\";" "signalcartel_analytics")
-    local consolidated_market_data=$(db_query "SELECT COUNT(*) FROM \"consolidated_market_data\";" "signalcartel_analytics")
-    local consolidated_signals=$(db_query "SELECT COUNT(*) FROM \"consolidated_trading_signals\";" "signalcartel_analytics")
-    local consolidated_data_collection=$(db_query "SELECT COUNT(*) FROM \"consolidated_data_collection\";" "signalcartel_analytics")
+    local consolidated_trades=$(db_query "SELECT COUNT(*) FROM consolidated_trades;" "signalcartel_analytics")
+    local consolidated_positions=$(db_query "SELECT COUNT(*) FROM consolidated_positions;" "signalcartel_analytics") 
+    local consolidated_sentiment=$(db_query "SELECT COUNT(*) FROM consolidated_sentiment;" "signalcartel_analytics")
+    local consolidated_market_data=$(db_query "SELECT COUNT(*) FROM consolidated_market_data;" "signalcartel_analytics")
+    local consolidated_signals=$(db_query "SELECT COUNT(*) FROM consolidated_trading_signals;" "signalcartel_analytics")
+    local consolidated_data_collection=$(db_query "SELECT COUNT(*) FROM consolidated_data_collection;" "signalcartel_analytics")
     
     # Get actual data collection and sentiment counts from production
     local actual_data_collection=$(db_query "SELECT COUNT(*) FROM \"MarketDataCollection\";")
@@ -618,9 +618,9 @@ show_data_warehousing() {
     fi
     
     # Show consolidated data status - check if ANY consolidated data exists (not just market data)
-    local consolidated_trades=$(db_query "SELECT COUNT(*) FROM \"consolidated_trades\";" "signalcartel_analytics")
-    local consolidated_positions=$(db_query "SELECT COUNT(*) FROM \"consolidated_positions\";" "signalcartel_analytics") 
-    local consolidated_sentiment=$(db_query "SELECT COUNT(*) FROM \"consolidated_sentiment\";" "signalcartel_analytics")
+    local consolidated_trades=$(db_query "SELECT COUNT(*) FROM consolidated_trades;" "signalcartel_analytics")
+    local consolidated_positions=$(db_query "SELECT COUNT(*) FROM consolidated_positions;" "signalcartel_analytics") 
+    local consolidated_sentiment=$(db_query "SELECT COUNT(*) FROM consolidated_sentiment;" "signalcartel_analytics")
     local total_consolidated=$((consolidated_trades + consolidated_positions + consolidated_sentiment))
     if [[ "$total_consolidated" -gt 100 ]]; then
         echo -e "  ${WHITE}Multi-Instance Sync:${NC}  ${GREEN}ACTIVE${NC}"
@@ -645,13 +645,13 @@ show_analytics_status() {
     fi
     
     # Analytics database record counts (consolidated data)
-    local consolidated_trades=$(db_query "SELECT COUNT(*) FROM \"consolidated_trades\";" "signalcartel_analytics")
-    local consolidated_positions=$(db_query "SELECT COUNT(*) FROM \"consolidated_positions\";" "signalcartel_analytics") 
-    local consolidated_sentiment=$(db_query "SELECT COUNT(*) FROM \"consolidated_sentiment\";" "signalcartel_analytics")
-    local consolidated_market_data=$(db_query "SELECT COUNT(*) FROM \"consolidated_market_data\";" "signalcartel_analytics")
-    local consolidated_signals=$(db_query "SELECT COUNT(*) FROM \"consolidated_trading_signals\";" "signalcartel_analytics")
-    local consolidated_data_collection=$(db_query "SELECT COUNT(*) FROM \"consolidated_data_collection\";" "signalcartel_analytics")
-    local learning_insights=$(db_query "SELECT COUNT(*) FROM \"learning_insights\";" "signalcartel_analytics")
+    local consolidated_trades=$(db_query "SELECT COUNT(*) FROM consolidated_trades;" "signalcartel_analytics")
+    local consolidated_positions=$(db_query "SELECT COUNT(*) FROM consolidated_positions;" "signalcartel_analytics") 
+    local consolidated_sentiment=$(db_query "SELECT COUNT(*) FROM consolidated_sentiment;" "signalcartel_analytics")
+    local consolidated_market_data=$(db_query "SELECT COUNT(*) FROM consolidated_market_data;" "signalcartel_analytics")
+    local consolidated_signals=$(db_query "SELECT COUNT(*) FROM consolidated_trading_signals;" "signalcartel_analytics")
+    local consolidated_data_collection=$(db_query "SELECT COUNT(*) FROM consolidated_data_collection;" "signalcartel_analytics")
+    local learning_insights=$(db_query "SELECT COUNT(*) FROM learning_insights;" "signalcartel_analytics")
     
     # Get production data for comparison
     local intuition_analysis=$(db_query "SELECT COUNT(*) FROM \"IntuitionAnalysis\";")

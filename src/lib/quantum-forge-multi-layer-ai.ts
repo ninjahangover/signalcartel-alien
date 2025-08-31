@@ -13,6 +13,8 @@
 import { BaseStrategySignal, SentimentEnhancedSignal, UniversalSentimentEnhancer } from './sentiment/universal-sentiment-enhancer';
 import { quantumForgeOrderBookAI, OrderBookAISignal } from './quantum-forge-orderbook-ai';
 import consolidatedDataService from './consolidated-ai-data-service.js';
+import { marketRegimeFilter } from './quantum-forge-market-regime-filter';
+import { tradingWindowManager } from './quantum-forge-trading-windows';
 
 export interface MultiLayerAISignal {
   // Original Strategy Signal (Layer 1)
@@ -150,12 +152,69 @@ export class QuantumForgeMultiLayerAI {
       const { mathIntuitionEngine } = await import('./mathematical-intuition-engine');
       const mathematicalResult = await mathIntuitionEngine.runParallelAnalysis(sentimentSignal, signal);
       
-      // Fixed property mappings based on ParallelTradeComparison interface
-      console.log(`INTUITIVE RESULT: ${mathematicalResult.intuitive?.decision || 'UNKNOWN'} (feeling: ${parseFloat(mathematicalResult.intuitive?.overallFeeling || 0).toFixed(3)})`);
-      console.log(`💾 Stored parallel analysis: ${mathematicalResult.id || 'unknown'}`);
-      console.log(`🔄 PARALLEL RESULT: Calculated=${mathematicalResult.calculated?.decision || 'UNKNOWN'}, Intuitive=${mathematicalResult.intuitive?.decision || 'UNKNOWN'}, Final=${mathematicalResult.execution?.finalDecision || 'UNKNOWN'}`);
-      // Temporarily simplified for debugging
-      console.log(`🧠 INTUITION vs TRADITIONAL ANALYSIS: Analysis complete`);
+      // Extract intuitive insights for integration
+      const intuitiveConfidence = mathematicalResult.execution?.confidenceLevel || 0.5;
+      const intuitiveDecision = mathematicalResult.execution?.finalDecision || 'HOLD';
+      const agreementLevel = mathematicalResult.execution?.agreementLevel || 0.5;
+      
+      // NEW LAYER 2.6: Trading Window Analysis (Dev1 Experimental)
+      console.log(`   Layer 2.6 ⏰ Checking Trading Windows...`);
+      const windowStatus = tradingWindowManager.isTradingAllowed();
+      const windowParams = tradingWindowManager.getWindowParameters();
+      tradingWindowManager.logWindowStatus();
+      
+      // Apply trading window restrictions
+      if (!windowStatus.allowed) {
+        console.log(`   ❌ Trading blocked: ${windowStatus.reason}`);
+        return this.createSkipSignal(signal, windowStatus.reason);
+      }
+      
+      // NEW LAYER 2.7: Market Regime & Technical Pattern Analysis (Dev1 Experimental)
+      console.log(`   Layer 2.7 📊 Analyzing Market Regime & Technical Patterns...`);
+      
+      // Get market conditions from various sources
+      const marketConditions = {
+        rsi: 52, // TODO: Get from technical indicators
+        macd: { value: 0.012, signal: 0.009, histogram: 0.003 },
+        volume: { current: 1000000, average: 850000, ratio: 1.18 },
+        volatility: 0.035,
+        trend: 'neutral' as 'bullish' | 'bearish' | 'neutral',
+        orderBookPressure: 0.72, // Will get from order book layer
+        sentimentScore: sentimentSignal.sentimentScore
+      };
+      
+      const marketScore = await marketRegimeFilter.calculateMarketScore(marketConditions);
+      
+      // Get current open positions (TODO: integrate with position service)
+      const currentPositions = 3; // Placeholder - will get from position service
+      
+      // Check if we should allow trading based on market regime
+      const patterns: any[] = []; // TODO: Detect actual patterns
+      const regimeDecision = await marketRegimeFilter.shouldAllowTrading(
+        marketScore,
+        currentPositions,
+        patterns
+      );
+      
+      if (!regimeDecision.allowed) {
+        console.log(`   ❌ Market regime filter: ${regimeDecision.reason}`);
+        return this.createSkipSignal(signal, regimeDecision.reason);
+      }
+      
+      // Apply position limits from both window and regime
+      const maxPositions = Math.min(
+        windowParams.maxPositions,
+        marketRegimeFilter.getPositionLimit(marketScore)
+      );
+      
+      console.log(`   ✅ Market Regime: Score ${marketScore.toFixed(1)}%, Max positions: ${maxPositions}`);
+      const overallFeeling = mathematicalResult.intuitive?.overallFeeling || 0.5;
+      
+      // Calculate intuitive boost based on alignment and confidence
+      const intuitiveBoost = this.calculateIntuitiveBoost(intuitiveConfidence, agreementLevel, overallFeeling);
+      
+      console.log(`   Layer 2.5 ✅ Mathematical Intuition: ${intuitiveDecision} (feeling: ${overallFeeling.toFixed(3)}, boost: ${(intuitiveBoost * 100).toFixed(1)}%)`);
+      console.log(`🧠 INTUITION INTEGRATION: Agreement ${(agreementLevel * 100).toFixed(0)}%, Confidence ${(intuitiveConfidence * 100).toFixed(0)}%`);
       
       // LAYER 3: Order Book AI
       console.log(`   Layer 3 🔬 Processing Order Book AI...`);
@@ -169,8 +228,14 @@ export class QuantumForgeMultiLayerAI {
       console.log(`   🌐 Cross-Site ✅ AI Performance: ${(crossSiteEnhancement.aiPerformanceBoost || 1).toFixed(1)}x, Strategy Win Rate: ${((crossSiteEnhancement.strategyWinRate || 0.5) * 100).toFixed(1)}%`);
       
       // LAYER 4: Final Fusion Engine
-      console.log(`   Layer 4 ⚡ Running Final Fusion Engine with Cross-Site Intelligence...`);
-      const finalDecision = this.runFusionEngine(signal, sentimentSignal, orderBookSignal, crossSiteEnhancement, effectiveConfig);
+      console.log(`   Layer 4 ⚡ Running Final Fusion Engine with Mathematical Intuition + Cross-Site Intelligence...`);
+      const finalDecision = this.runFusionEngine(signal, sentimentSignal, orderBookSignal, crossSiteEnhancement, effectiveConfig, {
+        intuitiveBoost,
+        intuitiveDecision,
+        intuitiveConfidence,
+        agreementLevel,
+        overallFeeling
+      });
       
       // Cross-Layer Analysis
       const layerAgreement = this.analyzeLeyerAgreement(sentimentSignal, orderBookSignal);
@@ -231,7 +296,14 @@ export class QuantumForgeMultiLayerAI {
     sentimentSignal: SentimentEnhancedSignal,
     orderBookSignal: OrderBookAISignal,
     crossSiteEnhancement: any,
-    config: MultiLayerConfig
+    config: MultiLayerConfig,
+    intuitiveData?: {
+      intuitiveBoost: number;
+      intuitiveDecision: string;
+      intuitiveConfidence: number;
+      agreementLevel: number;
+      overallFeeling: number;
+    }
   ) {
     // Calculate weighted confidence
     const technicalConfidence = originalSignal.confidence;
@@ -244,13 +316,42 @@ export class QuantumForgeMultiLayerAI {
       orderBookConfidence * config.orderBookWeight
     );
     
-    // Calculate total boost from all layers including cross-site enhancement
+    // Calculate total boost from all layers including cross-site enhancement and intuition
     const crossSiteBoost = crossSiteEnhancement.confidenceBoost || 0;
-    const totalBoost = sentimentSignal.confidenceModifier + orderBookSignal.aiConfidenceBoost + crossSiteBoost;
-    const finalConfidence = Math.min(0.95, Math.max(0.05, weightedConfidence + totalBoost));
+    const intuitiveBoost = intuitiveData?.intuitiveBoost || 0;
+    const totalBoost = sentimentSignal.confidenceModifier + orderBookSignal.aiConfidenceBoost + crossSiteBoost + intuitiveBoost;
     
-    // Determine final action
+    // Apply intuitive influence on final confidence
+    let enhancedConfidence = weightedConfidence + totalBoost;
+    if (intuitiveData && intuitiveData.agreementLevel > 0.8) {
+      // High agreement between calculation and intuition - boost confidence
+      enhancedConfidence *= (1 + intuitiveData.agreementLevel * 0.1);
+    } else if (intuitiveData && intuitiveData.agreementLevel < 0.3) {
+      // Low agreement - reduce confidence (conflicting signals)
+      enhancedConfidence *= (0.9 - (0.3 - intuitiveData.agreementLevel) * 0.2);
+    }
+    
+    const finalConfidence = Math.min(0.95, Math.max(0.05, enhancedConfidence));
+    
+    // Determine final action - integrate intuitive guidance
     let finalAction: 'BUY' | 'SELL' | 'HOLD' | 'SKIP' = originalSignal.action;
+    
+    // Consider intuitive override if strong disagreement or high confidence
+    if (intuitiveData) {
+      if (intuitiveData.intuitiveConfidence > 0.8 && intuitiveData.overallFeeling > 0.7) {
+        // Strong intuitive buy signal
+        if (intuitiveData.intuitiveDecision === 'BUY' && finalAction !== 'BUY') {
+          console.log(`🧠 INTUITIVE OVERRIDE: Strong buy feeling (${intuitiveData.overallFeeling.toFixed(3)}) overrides calculated ${finalAction}`);
+          finalAction = 'BUY';
+        }
+      } else if (intuitiveData.intuitiveConfidence > 0.8 && intuitiveData.overallFeeling < 0.3) {
+        // Strong intuitive sell/avoid signal
+        if (intuitiveData.intuitiveDecision === 'SELL' || intuitiveData.intuitiveDecision === 'HOLD') {
+          console.log(`🧠 INTUITIVE OVERRIDE: Strong avoid feeling (${intuitiveData.overallFeeling.toFixed(3)}) overrides calculated ${finalAction}`);
+          finalAction = intuitiveData.intuitiveDecision as 'BUY' | 'SELL' | 'HOLD' | 'SKIP';
+        }
+      }
+    }
     
     // Check for layer conflicts
     if (sentimentSignal.sentimentConflict || orderBookSignal.executionRisk === 'VERY_HIGH') {
@@ -286,6 +387,20 @@ export class QuantumForgeMultiLayerAI {
     
     // Apply order book AI optimal sizing
     positionSizing *= orderBookSignal.optimalOrderSize;
+    
+    // NEW: Apply market regime position sizing (Dev1 Experimental)
+    const marketScore = 75; // This will come from earlier calculation
+    const baseSize = positionSizing;
+    positionSizing = marketRegimeFilter.calculatePositionSize(
+      baseSize,
+      marketScore,
+      [] // Patterns will come from earlier detection
+    );
+    
+    // NEW: Apply trading window multiplier (Dev1 Experimental)
+    const windowMultiplier = tradingWindowManager.getPositionSizeMultiplier();
+    positionSizing *= windowMultiplier;
+    console.log(`   📏 Position size: Base ${baseSize.toFixed(4)} → Final ${positionSizing.toFixed(4)} (window: ${windowMultiplier.toFixed(2)}x)`);
     
     // Cap position size
     positionSizing = Math.max(0.1, Math.min(config.maxPositionSize, positionSizing));
@@ -450,6 +565,82 @@ export class QuantumForgeMultiLayerAI {
       averageProcessingTime: undefined,
       successRate: undefined
     };
+  }
+  
+  /**
+   * Calculate boost from Mathematical Intuition Engine
+   */
+  /**
+   * Create a skip signal when trading conditions are not favorable
+   */
+  private createSkipSignal(signal: BaseStrategySignal, reason: string): MultiLayerAISignal {
+    return {
+      originalSignal: signal,
+      sentimentAnalysis: {
+        score: 0,
+        confidence: 0,
+        conflict: false,
+        boost: 0,
+        sources: []
+      },
+      orderBookAnalysis: {
+        microstructureScore: 0,
+        liquidityQuality: 'POOR',
+        executionRisk: 'HIGH',
+        aiBoost: 0,
+        whaleActivity: 0,
+        optimalOrderSize: 0
+      },
+      finalDecision: {
+        action: 'SKIP',
+        confidence: 0,
+        totalBoost: 0,
+        shouldExecute: false,
+        positionSizing: 0,
+        executionStrategy: 'NONE',
+        timeframe: 'N/A'
+      },
+      layerAgreement: {
+        sentimentOrderBookAlignment: 0,
+        conflictDetected: false,
+        consensusStrength: 0,
+        riskLevel: 'HIGH'
+      },
+      decisionExplanation: {
+        primaryFactors: [reason],
+        riskFactors: ['Trading conditions unfavorable'],
+        opportunityFactors: [],
+        layerContributions: {
+          technical: 0,
+          sentiment: 0,
+          orderBook: 0
+        }
+      },
+      processingTime: 0,
+      layersProcessed: 0,
+      dataQuality: 0,
+      timestamp: new Date(),
+      version: this.version
+    };
+  }
+
+  private calculateIntuitiveBoost(intuitiveConfidence: number, agreementLevel: number, overallFeeling: number): number {
+    // Base boost from intuitive confidence
+    let boost = (intuitiveConfidence - 0.5) * 0.1; // -0.05 to +0.05
+    
+    // Agreement bonus - when both approaches agree
+    if (agreementLevel > 0.7) {
+      boost += (agreementLevel - 0.7) * 0.15; // Up to +0.045 for perfect agreement
+    }
+    
+    // Feeling strength bonus - strong intuitive feelings get more weight
+    const feelingStrength = Math.abs(overallFeeling - 0.5) * 2; // 0 to 1
+    if (feelingStrength > 0.6) {
+      boost += (feelingStrength - 0.6) * 0.08; // Up to +0.032 for very strong feelings
+    }
+    
+    // Cap the boost to reasonable limits
+    return Math.max(-0.1, Math.min(0.15, boost));
   }
   
   /**

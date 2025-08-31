@@ -1,6 +1,6 @@
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -912,4 +912,167 @@ model UserLiveTradingSettings {
 
   @@index([liveTradingEnabled])
   @@index([userId])
+}
+
+// QUANTUM FORGE™ Pair Opportunity Scanner Tables
+model PairOpportunity {
+  id                String   @id @default(cuid())
+  symbol            String
+  baseAsset         String
+  quoteAsset        String
+  
+  // Core Scoring
+  opportunityScore  Float
+  confidence        Float
+  risk              Float
+  
+  // Analysis Results (JSON fields for flexibility)
+  orderBookAnalysis String   // JSON: liquidityScore, whaleActivity, executionQuality, optimalSize
+  markovAnalysis    String   // JSON: trendStrength, reversalProbability, momentumScore, stateTransitions
+  sentimentAnalysis String   // JSON: overallSentiment, socialMomentum, fearGreedImpact, newsImpact
+  bayesianInference String   // JSON: priorBelief, evidenceStrength, posteriorProbability, uncertainty
+  llmAssessment     String   // JSON: reasoning, marketContext, opportunityType, timeHorizon
+  
+  // Recommendation
+  recommendedAction String   // STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL, AVOID
+  positionSize      Float    // % of portfolio
+  urgency           String   // IMMEDIATE, HIGH, MEDIUM, LOW
+  stopLoss          Float
+  takeProfit        Float
+  
+  // Metadata
+  dataQuality       Float
+  analysisVersion   String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@unique([symbol])
+  @@index([opportunityScore])
+  @@index([recommendedAction])
+  @@index([urgency])
+  @@index([createdAt])
+}
+
+model OpportunityConfig {
+  id                  String   @id @default(cuid())
+  configName          String   @unique
+  maxPairs            Int      @default(50)
+  minLiquidity        Float    @default(1000000.0)
+  excludeStablecoins  Boolean  @default(true)
+  focusAssets         String?  // JSON array of assets to prioritize
+  riskTolerance       String   @default("MODERATE") // CONSERVATIVE, MODERATE, AGGRESSIVE
+  scanFrequency       Int      @default(15)         // Minutes between scans
+  enabled             Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@index([enabled])
+}
+
+model OpportunityAlert {
+  id              String   @id @default(cuid())
+  symbol          String
+  alertType       String   // NEW_OPPORTUNITY, SCORE_CHANGE, URGENT_ACTION
+  message         String
+  opportunityScore Float
+  previousScore   Float?
+  confidence      Float
+  urgency         String
+  processed       Boolean  @default(false)
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+  
+  @@index([symbol])
+  @@index([alertType])
+  @@index([processed])
+  @@index([createdAt])
+}
+
+// Dynamic Strategy Management for Multi-Pair Trading
+model DynamicStrategy {
+  id                String   @id @default(cuid())
+  strategyName      String
+  symbol            String
+  isActive          Boolean  @default(true)
+  
+  // Strategy Configuration (JSON for flexibility)
+  config            String   // JSON: all strategy parameters
+  
+  // Performance Tracking
+  totalTrades       Int      @default(0)
+  winningTrades     Int      @default(0)
+  winRate           Float    @default(0.0)
+  totalPnL          Float    @default(0.0)
+  averagePnL        Float    @default(0.0)
+  maxDrawdown       Float    @default(0.0)
+  
+  // Dynamic Adjustment
+  lastOptimized     DateTime?
+  optimizationScore Float    @default(0.5)
+  adaptationCount   Int      @default(0)
+  
+  // Metadata
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  lastExecuted      DateTime?
+  
+  @@unique([strategyName, symbol])
+  @@index([isActive])
+  @@index([symbol])
+  @@index([winRate])
+  @@index([totalPnL])
+}
+
+model PairStrategyPerformance {
+  id              String   @id @default(cuid())
+  strategyName    String
+  symbol          String
+  timeframe       String   // 1H, 4H, 1D, 1W
+  
+  // Performance Metrics
+  trades          Int
+  winRate         Float
+  totalPnL        Float
+  averagePnL      Float
+  maxWin          Float
+  maxLoss         Float
+  profitFactor    Float
+  sharpeRatio     Float?
+  maxDrawdown     Float
+  
+  // Period
+  periodStart     DateTime
+  periodEnd       DateTime
+  createdAt       DateTime @default(now())
+  
+  @@index([strategyName, symbol])
+  @@index([timeframe])
+  @@index([winRate])
+  @@index([totalPnL])
+}
+
+model PairStrategyOptimization {
+  id                String   @id @default(cuid())
+  strategyName      String
+  symbol            String
+  
+  // Optimization Parameters (JSON)
+  originalParams    String   // JSON: original strategy parameters
+  optimizedParams   String   // JSON: new optimized parameters
+  
+  // Optimization Results
+  backtestPeriod    Int      // Days of backtest
+  originalScore     Float
+  optimizedScore    Float
+  improvement       Float
+  
+  // Implementation
+  isApplied         Boolean  @default(false)
+  appliedAt         DateTime?
+  
+  createdAt         DateTime @default(now())
+  
+  @@index([strategyName, symbol])
+  @@index([isApplied])
+  @@index([improvement])
 }

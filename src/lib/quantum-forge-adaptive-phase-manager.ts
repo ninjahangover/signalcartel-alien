@@ -75,6 +75,10 @@ export class AdaptivePhaseManager {
     const qualityScore = await this.calculateDataQualityReadiness();
     readinessScores.push(qualityScore);
     
+    // 6. INTUITIVE ANALYSIS QUALITY (How well is intuitive analysis performing?)
+    const intuitiveScore = await this.calculateIntuitiveAnalysisReadiness();
+    readinessScores.push(intuitiveScore);
+    
     // Calculate weighted readiness score
     const totalWeight = readinessScores.reduce((sum, s) => sum + s.weight, 0);
     const weightedScore = readinessScores.reduce((sum, s) => sum + (s.score * s.weight), 0) / totalWeight;
@@ -118,16 +122,16 @@ export class AdaptivePhaseManager {
   }
   
   private async calculatePerformanceMetrics(): Promise<PerformanceMetrics> {
-    // Get completed trades
-    const trades = await prisma.managedTrade.findMany({
+    // Get completed positions (which represent full trade lifecycle)
+    const positions = await prisma.managedPosition.findMany({
       where: {
-        exitPrice: { not: null },
-        exitTime: { not: null }
+        status: 'CLOSED',
+        realizedPnL: { not: null }
       },
       orderBy: { exitTime: 'asc' }
     });
     
-    const totalTrades = trades.length;
+    const totalTrades = positions.length;
     if (totalTrades === 0) {
       return {
         totalTrades: 0,
@@ -141,21 +145,21 @@ export class AdaptivePhaseManager {
       };
     }
     
-    // Calculate metrics
-    const winningTrades = trades.filter(t => (t.pnl || 0) > 0);
-    const losingTrades = trades.filter(t => (t.pnl || 0) < 0);
-    const winRate = winningTrades.length / totalTrades;
+    // Calculate metrics using positions
+    const winningPositions = positions.filter(p => (p.realizedPnL || 0) > 0);
+    const losingPositions = positions.filter(p => (p.realizedPnL || 0) < 0);
+    const winRate = winningPositions.length / totalTrades;
     
-    const totalPnL = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const totalPnL = positions.reduce((sum, p) => sum + (p.realizedPnL || 0), 0);
     const avgPnL = totalPnL / totalTrades;
     
     // Profit factor (gross profit / gross loss)
-    const grossProfit = winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-    const grossLoss = Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0));
+    const grossProfit = winningPositions.reduce((sum, p) => sum + (p.realizedPnL || 0), 0);
+    const grossLoss = Math.abs(losingPositions.reduce((sum, p) => sum + (p.realizedPnL || 0), 0));
     const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 999 : 0;
     
     // Sharpe ratio approximation (return / volatility)
-    const returns = trades.map(t => (t.pnl || 0) / (t.entryPrice || 1));
+    const returns = positions.map(p => (p.realizedPnL || 0) / (p.entryPrice || 1));
     const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length;
     const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length;
     const stdDev = Math.sqrt(variance);
@@ -166,21 +170,21 @@ export class AdaptivePhaseManager {
     let maxDrawdown = 0;
     let runningPnL = 0;
     
-    for (const trade of trades) {
-      runningPnL += trade.pnl || 0;
+    for (const position of positions) {
+      runningPnL += position.realizedPnL || 0;
       peak = Math.max(peak, runningPnL);
       const drawdown = peak > 0 ? (peak - runningPnL) / peak : 0;
       maxDrawdown = Math.max(maxDrawdown, drawdown);
     }
     
     // Consistency score (how steady are the results)
-    const recentTrades = trades.slice(-20); // Last 20 trades
-    const recentWinRate = recentTrades.filter(t => (t.pnl || 0) > 0).length / Math.max(recentTrades.length, 1);
+    const recentPositions = positions.slice(-20); // Last 20 positions
+    const recentWinRate = recentPositions.filter(p => (p.realizedPnL || 0) > 0).length / Math.max(recentPositions.length, 1);
     const consistency = 1 - Math.abs(winRate - recentWinRate); // Closer to 1 = more consistent
     
     // Data quality (variety of conditions)
-    const uniqueHours = new Set(trades.map(t => new Date(t.entryTime).getHours())).size;
-    const uniqueStrategies = new Set(trades.map(t => t.strategy)).size;
+    const uniqueHours = new Set(positions.map(p => new Date(p.entryTime).getHours())).size;
+    const uniqueStrategies = new Set(positions.map(p => p.strategy)).size;
     const dataQuality = Math.min(1, (uniqueHours / 24 + uniqueStrategies / 4) / 2);
     
     return {
@@ -237,9 +241,10 @@ export class AdaptivePhaseManager {
   }
   
   private async calculateTrajectoryReadiness(): Promise<PhaseReadinessScore> {
-    // Look at recent performance trend
-    const recentTrades = await prisma.managedTrade.findMany({
+    // Look at recent performance trend using positions
+    const recentPositions = await prisma.managedPosition.findMany({
       where: {
+        status: 'CLOSED',
         exitTime: { not: null },
         exitTime: {
           gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
@@ -248,7 +253,7 @@ export class AdaptivePhaseManager {
       orderBy: { exitTime: 'asc' }
     });
     
-    if (recentTrades.length < 10) {
+    if (recentPositions.length < 10) {
       return {
         metric: 'Performance Trajectory',
         score: 0.5, // Neutral if not enough data
@@ -258,12 +263,12 @@ export class AdaptivePhaseManager {
     }
     
     // Split into halves and compare
-    const midPoint = Math.floor(recentTrades.length / 2);
-    const firstHalf = recentTrades.slice(0, midPoint);
-    const secondHalf = recentTrades.slice(midPoint);
+    const midPoint = Math.floor(recentPositions.length / 2);
+    const firstHalf = recentPositions.slice(0, midPoint);
+    const secondHalf = recentPositions.slice(midPoint);
     
-    const firstWinRate = firstHalf.filter(t => (t.pnl || 0) > 0).length / firstHalf.length;
-    const secondWinRate = secondHalf.filter(t => (t.pnl || 0) > 0).length / secondHalf.length;
+    const firstWinRate = firstHalf.filter(p => (p.realizedPnL || 0) > 0).length / firstHalf.length;
+    const secondWinRate = secondHalf.filter(p => (p.realizedPnL || 0) > 0).length / secondHalf.length;
     
     const improvement = secondWinRate - firstWinRate;
     let score = 0.5 + improvement; // 0.5 baseline, +/- based on improvement
@@ -312,9 +317,9 @@ export class AdaptivePhaseManager {
   }
   
   private async calculateDataQualityReadiness(): Promise<PhaseReadinessScore> {
-    // Assess diversity and quality of collected data
-    const trades = await prisma.managedTrade.findMany({
-      where: { exitTime: { not: null } },
+    // Assess diversity and quality of collected data using positions
+    const positions = await prisma.managedPosition.findMany({
+      where: { status: 'CLOSED' },
       select: {
         strategy: true,
         symbol: true,
@@ -323,7 +328,7 @@ export class AdaptivePhaseManager {
       }
     });
     
-    if (trades.length === 0) {
+    if (positions.length === 0) {
       return {
         metric: 'Data Quality',
         score: 0,
@@ -333,10 +338,10 @@ export class AdaptivePhaseManager {
     }
     
     // Diversity metrics
-    const uniqueStrategies = new Set(trades.map(t => t.strategy)).size;
-    const uniqueSymbols = new Set(trades.map(t => t.symbol)).size;
-    const uniqueHours = new Set(trades.map(t => new Date(t.entryTime).getHours())).size;
-    const buySellRatio = trades.filter(t => t.side === 'buy').length / trades.length;
+    const uniqueStrategies = new Set(positions.map(p => p.strategy)).size;
+    const uniqueSymbols = new Set(positions.map(p => p.symbol)).size;
+    const uniqueHours = new Set(positions.map(p => new Date(p.entryTime).getHours())).size;
+    const buySellRatio = positions.filter(p => p.side === 'buy').length / positions.length;
     
     let score = 0;
     
@@ -361,6 +366,76 @@ export class AdaptivePhaseManager {
     };
   }
   
+  private async calculateIntuitiveAnalysisReadiness(): Promise<PhaseReadinessScore> {
+    try {
+      // Get recent intuitive analysis results
+      const recentAnalyses = await prisma.intuitionAnalysis.findMany({
+        where: {
+          analysisTime: {
+            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+          }
+        },
+        orderBy: { analysisTime: 'desc' },
+        take: 100
+      });
+      
+      if (recentAnalyses.length < 10) {
+        return {
+          metric: 'Intuitive Analysis Quality',
+          score: 0.3, // Neutral if insufficient data
+          weight: 0.10,
+          reasoning: 'Insufficient intuitive analysis data (need 10+, have ' + recentAnalyses.length + ')'
+        };
+      }
+      
+      // Analyze intuitive performance
+      const avgAgreementLevel = recentAnalyses.reduce((sum, a) => sum + (a.performanceGap || 0.5), 0) / recentAnalyses.length;
+      const avgConfidenceGap = recentAnalyses.reduce((sum, a) => sum + (a.confidenceGap || 0.5), 0) / recentAnalyses.length;
+      const intuitiveRecommendations = recentAnalyses.filter(a => a.recommendation === 'intuition').length;
+      const intuitiveUsageRate = intuitiveRecommendations / recentAnalyses.length;
+      
+      // Score based on how well intuitive analysis is performing
+      let score = 0;
+      
+      // High agreement between calculation and intuition is good
+      if (avgAgreementLevel > 0.7) {
+        score += 0.4;
+      } else if (avgAgreementLevel > 0.5) {
+        score += 0.25;
+      }
+      
+      // Low confidence gap indicates stable analysis
+      if (avgConfidenceGap < 0.2) {
+        score += 0.3;
+      } else if (avgConfidenceGap < 0.4) {
+        score += 0.15;
+      }
+      
+      // Balanced usage of intuition (not too little, not too much)
+      if (intuitiveUsageRate >= 0.2 && intuitiveUsageRate <= 0.6) {
+        score += 0.3;
+      } else if (intuitiveUsageRate >= 0.1 && intuitiveUsageRate <= 0.8) {
+        score += 0.15;
+      }
+      
+      return {
+        metric: 'Intuitive Analysis Quality',
+        score: Math.min(1, score),
+        weight: 0.10, // 10% weight
+        reasoning: `Agreement: ${(avgAgreementLevel * 100).toFixed(0)}%, Gap: ${(avgConfidenceGap * 100).toFixed(0)}%, Usage: ${(intuitiveUsageRate * 100).toFixed(0)}%`
+      };
+      
+    } catch (error) {
+      console.error('Failed to calculate intuitive analysis readiness:', error);
+      return {
+        metric: 'Intuitive Analysis Quality',
+        score: 0.5, // Neutral on error
+        weight: 0.10,
+        reasoning: 'Error accessing intuitive analysis data'
+      };
+    }
+  }
+
   private getMinTradesForPhase(phase: number): number {
     // Minimum trades "suggested" for each phase
     // But can be overridden by performance
