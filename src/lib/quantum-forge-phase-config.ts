@@ -128,7 +128,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
     maxTrades: 1000,
     features: {
       baseStrategyEnabled: true,
-      confidenceThreshold: 0.50,
+      confidenceThreshold: 0.47, // OPTIMIZED: Lower threshold to capture Smart Hunter opportunities
       
       // Enable all sentiment sources
       sentimentEnabled: true,
