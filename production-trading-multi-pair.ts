@@ -104,17 +104,12 @@ class ProductionTradingEngine {
       let aiSystemsUsed: string[] = [];
       let enhancedSignal: any = null;
 
-      // Create base signal from market data
-      const baseSignal = {
-        action: Math.random() > 0.5 ? 'BUY' : 'SELL',
-        symbol: marketData.symbol,
-        price: marketData.price,
-        confidence: Math.random() * 0.6 + 0.2, // Base 20-80% confidence
-        timestamp: marketData.timestamp,
-        source: 'technical-analysis',
-        strategy: 'phase-' + phase.phase + '-ai-technical-analysis',
-        reason: 'Technical analysis signal based on market data'
-      };
+      // Generate REAL Pine Script technical signal (NO MORE RANDOM VALUES!)
+      const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
+      const baseSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(marketData.symbol, marketData.price);
+      
+      // Ensure signal has phase-appropriate strategy name
+      baseSignal.strategy = 'phase-' + phase.phase + '-' + baseSignal.strategy;
 
       // 🔥 PHASE 0: Raw signals only (ultra-low barriers)
       if (phase.phase === 0) {
