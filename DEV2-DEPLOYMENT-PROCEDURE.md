@@ -8,6 +8,26 @@
 
 ## 📋 CRITICAL CHANGES IMPLEMENTED (September 1, 2025)
 
+### 🎯 **PHASE 0 PARAMETER TUNING** (NEW - CRITICAL)
+**Problem Solved**: System was hemorrhaging money with ultra-loose Phase 0 settings  
+**Solution**: Tightened parameters for conservative risk management
+
+**File**: `src/lib/quantum-forge-phase-config.ts`  
+**Key Changes**:
+- Confidence threshold: 10% → 35% (filter noise)
+- Stop loss: 10% → 3% (cut losses faster)
+- Take profit: 10% → 5% (lock gains sooner)
+- Target win rate: 30% → 40% (quality over quantity)
+
+### 💾 **DATABASE CORRUPTION FIX**
+**Problem Solved**: Exit prices showing $107K+ causing fake $118K profit  
+**Solution**: Data cleanup scripts and proper foreign key handling
+
+**New Files**:
+- `admin/simple-working-reset.ts` - Handles foreign key constraints properly
+- `admin/reset-to-phase0-and-restart.sh` - Automated Phase 0 reset & restart
+- `admin/restart-trading-system.sh` - Quick system restart script
+
 ### 🔥 **PINE SCRIPT FOUNDATION FIX** (CORE IMPROVEMENT)
 **Problem Solved**: Strong BUY signals (>75% confidence) were being diluted by weighted averaging  
 **Solution**: Pine Script strategies now execute directly when above 75% confidence
@@ -38,13 +58,19 @@
 
 ### **Phase 1: File Synchronization**
 
-1. **Core Strategy Engine** (CRITICAL - Contains Pine Script Foundation Fix)
+1. **Phase Configuration** (CRITICAL - NEW CONSERVATIVE SETTINGS)
+   ```bash
+   # Copy updated Phase 0 configuration with tighter parameters
+   cp src/lib/quantum-forge-phase-config.ts /path/to/dev2/src/lib/
+   ```
+
+2. **Core Strategy Engine** (CRITICAL - Contains Pine Script Foundation Fix)
    ```bash
    # Copy optimized signal generator with Pine Script foundation
    cp src/lib/quantum-forge-signal-generator.ts /path/to/dev2/src/lib/
    ```
 
-2. **Fixed AI Components**
+3. **Fixed AI Components**
    ```bash
    # Copy working AI engines from dev1 optimizations
    cp src/lib/mathematical-intuition-engine.ts /path/to/dev2/src/lib/
@@ -52,13 +78,13 @@
    cp src/lib/bayesian-probability-engine.ts /path/to/dev2/src/lib/
    ```
 
-3. **Main Trading Engine**
+4. **Main Trading Engine**
    ```bash
    # Copy optimized production trading system
    cp production-trading-multi-pair.ts /path/to/dev2/
    ```
 
-4. **Smart Hunter System** (Already working on dev2 - verify only)
+5. **Smart Hunter System** (Already working on dev2 - verify only)
    ```bash
    # Verify these exist and are current:
    # - smart-hunter-service.ts
@@ -66,29 +92,36 @@
    # - src/lib/opportunity-alert-system.ts
    ```
 
-5. **Strategy Registry** (Verify 3 competition strategies)
+6. **Strategy Registry** (Verify 3 competition strategies)
    ```bash
    # Ensure this contains all 3 Pine Script strategies:
    cp src/lib/strategy-registry-competition.ts /path/to/dev2/src/lib/
    ```
 
-6. **Admin Scripts**
+7. **Admin Scripts** (NEW - Important for clean resets)
    ```bash
-   # Copy system reset tools
+   # Copy all admin tools including new reset scripts
    cp admin/simple-system-reset.ts /path/to/dev2/admin/
    cp admin/complete-system-reset.ts /path/to/dev2/admin/
+   cp admin/simple-working-reset.ts /path/to/dev2/admin/
+   cp admin/reset-to-phase0-and-restart.sh /path/to/dev2/admin/
+   cp admin/restart-trading-system.sh /path/to/dev2/admin/
+   chmod +x /path/to/dev2/admin/*.sh
    ```
 
 ### **Phase 2: Database Preparation**
 
-1. **Clean System Reset**
+1. **Clean System Reset** (USE NEW SCRIPT - Handles foreign keys properly)
    ```bash
-   # On dev2, run complete system reset
-   DATABASE_URL="your_dev2_db_url" npx tsx admin/simple-system-reset.ts
+   # On dev2, run the working reset script that handles foreign keys
+   DATABASE_URL="your_dev2_db_url" npx tsx admin/simple-working-reset.ts
    
-   # Or manual cleanup if needed:
+   # Or use the automated Phase 0 reset script:
+   ./admin/reset-to-phase0-and-restart.sh
+   
+   # Manual cleanup if needed (delete positions FIRST for foreign keys):
    PGPASSWORD=your_password docker exec your-container psql -c "
-   DELETE FROM \"ManagedPosition\";
+   DELETE FROM \"ManagedPosition\";  -- Must be first
    DELETE FROM \"ManagedTrade\"; 
    DELETE FROM \"IntuitionAnalysis\";
    DELETE FROM \"TradingSignal\";
