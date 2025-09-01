@@ -205,16 +205,11 @@ class AIFocusedTradingEngine {
     this.log(`🧠 AI TRADING CYCLE - Phase ${phase} (${config.description})`);
     this.log(`📊 Metrics: ${metrics.totalTrades} trades, ${metrics.winningTrades} wins, $${metrics.totalPnL.toFixed(2)} P&L`);
     
-    // Check trading velocity (last hour)
+    // UNLIMITED DATA COLLECTION MODE - No velocity limits for maximum learning
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
     this.recentTrades = this.recentTrades.filter(date => date > oneHourAgo);
     
-    if (this.recentTrades.length >= config.maxTradesPerHour) {
-      this.log(`🚦 Velocity limit reached: ${this.recentTrades.length}/${config.maxTradesPerHour} trades in last hour`);
-      return;
-    }
-    
-    this.log(`📈 Trading velocity: ${this.recentTrades.length}/${config.maxTradesPerHour} trades in last hour`);
+    this.log(`🚀 UNLIMITED MODE: ${this.recentTrades.length} trades in last hour (no limits for data collection)`);
 
     // AI-FOCUSED TRADING LOGIC - MAXIMUM LEARNING MODE
     for (const symbol of this.FOCUS_PAIRS) {
@@ -312,7 +307,7 @@ class AIFocusedTradingEngine {
           if (result.action === 'opened' || result.action === 'closed') {
             this.log(`✅ POSITION ${result.action.toUpperCase()}: ${symbol} ${finalAction} at $${currentPrice}`);
             
-            // Track trade for velocity control
+            // Track trade for data collection metrics
             this.recentTrades.push(new Date());
             
             // Continue to next symbol - AI can make multiple high-confidence trades per cycle
