@@ -5,6 +5,8 @@
 
 import { PositionManager } from './src/lib/position-management/position-manager';
 import { phaseManager } from './src/lib/quantum-forge-phase-config';
+import { EnhancedMarkovPredictor } from './src/lib/enhanced-markov-predictor';
+import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-engine';
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
@@ -45,6 +47,8 @@ class ProductionTradingEngine {
   private isRunning = false;
   private cycleCount = 0;
   private positionManager: PositionManager;
+  private enhancedMarkovPredictor2: EnhancedMarkovPredictor;
+  private mathEngine: MathematicalIntuitionEngine;
   
   // 🎯 PRE-VALIDATION PRICE CACHE SYSTEM
   private priceCache = new Map<string, { price: number; timestamp: Date; isValid: boolean }>();
@@ -71,6 +75,8 @@ class ProductionTradingEngine {
   
   constructor() {
     this.positionManager = new PositionManager(prisma);
+    this.enhancedMarkovPredictor2 = new EnhancedMarkovPredictor();
+    this.mathEngine = new MathematicalIntuitionEngine();
     log('🚀 QUANTUM FORGE™ PRODUCTION TRADING ENGINE');
     log('==========================================');
     log('✅ Complete position management lifecycle');
@@ -93,9 +99,9 @@ class ProductionTradingEngine {
       log(`📊 Current Trade Count: ${progress.currentTrades}`);
       log('');
       
-      // Initialize price cache with first validation
-      log('💰 Initializing pre-validation price cache...');
-      await this.updatePriceCache();
+      // Start background cache updater (non-blocking)
+      log('💰 Starting background price cache updater...');
+      this.startBackgroundCacheUpdater();
       
       return true;
     } catch (error) {
@@ -105,11 +111,24 @@ class ProductionTradingEngine {
   }
   
   /**
-   * 🎯 PRE-VALIDATION PRICE CACHE UPDATE
-   * Fetches and validates all prices OUTSIDE the trading pipeline
-   * Only valid pairs get sent to trading
+   * 🎯 BACKGROUND CACHE UPDATER (NON-BLOCKING)
+   * Runs in parallel to trading pipeline
    */
-  private async updatePriceCache() {
+  private startBackgroundCacheUpdater() {
+    // Start immediately and then every 2 minutes
+    this.updatePriceCacheBackground();
+    setInterval(() => {
+      this.updatePriceCacheBackground();
+    }, 120000); // 2 minutes
+    log('📡 Background cache updater started (updates every 2 minutes)');
+  }
+  
+  /**
+   * 🎯 BACKGROUND PRICE CACHE UPDATE
+   * Fetches and validates prices from Smart Hunter opportunities
+   * Only Smart Hunter + core pairs get cached
+   */
+  private async updatePriceCacheBackground() {
     const now = Date.now();
     
     // Skip if cache is still fresh
@@ -117,13 +136,23 @@ class ProductionTradingEngine {
       return;
     }
     
-    log('💰 Pre-validating prices for all trading pairs...');
+    log('💰 Updating cached prices for category-optimized pairs...');
     const startTime = Date.now();
     
-    // Fetch prices for all pairs simultaneously but handle failures gracefully
-    const pricePromises = this.ALL_PAIRS.map(async (symbol) => {
+    // Fetch prices for ALL_PAIRS sequentially with delays to avoid rate limits
+    const { realTimePriceFetcher } = await import('./src/lib/real-time-price-fetcher');
+    const results = [];
+    
+    for (let i = 0; i < this.ALL_PAIRS.length; i++) {
+      const symbol = this.ALL_PAIRS[i];
+      
       try {
-        const { realTimePriceFetcher } = await import('./src/lib/real-time-price-fetcher');
+        // Add delay between requests to avoid rate limiting (2 seconds per request)
+        if (i > 0) {
+          log(`⏳ Rate limit protection: waiting 2000ms before request for ${symbol}`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        
         const priceData = await realTimePriceFetcher.getCurrentPrice(symbol);
         
         if (priceData.success) {
@@ -132,14 +161,14 @@ class ProductionTradingEngine {
             timestamp: new Date(),
             isValid: true
           });
-          return { symbol, success: true, price: priceData.price };
+          results.push({ status: 'fulfilled', value: { symbol, success: true, price: priceData.price } });
         } else {
           this.priceCache.set(symbol, {
             price: 0,
             timestamp: new Date(),
             isValid: false
           });
-          return { symbol, success: false, error: priceData.error };
+          results.push({ status: 'fulfilled', value: { symbol, success: false, error: priceData.error } });
         }
       } catch (error) {
         this.priceCache.set(symbol, {
@@ -147,12 +176,9 @@ class ProductionTradingEngine {
           timestamp: new Date(),
           isValid: false
         });
-        return { symbol, success: false, error: error.message };
+        results.push({ status: 'rejected', reason: error, value: { symbol, success: false, error: error.message } });
       }
-    });
-    
-    // Wait for all price fetches to complete (don't fail on individual errors)
-    const results = await Promise.allSettled(pricePromises);
+    }
     
     // Count valid vs invalid pairs
     const validPairs = Array.from(this.priceCache.entries()).filter(([_, data]) => data.isValid);
@@ -160,7 +186,7 @@ class ProductionTradingEngine {
     
     const duration = Date.now() - startTime;
     log(`✅ Price validation complete in ${duration}ms`);
-    log(`💚 Valid pairs: ${validPairs.length}/${this.ALL_PAIRS.length} (${validPairs.map(([symbol]) => symbol).join(', ')})`);
+    log(`💚 Valid pairs: ${validPairs.length}/${this.ALL_PAIRS.length} category-optimized (${validPairs.map(([symbol]) => symbol).join(', ')})`);
     
     if (invalidPairs.length > 0) {
       log(`❌ Invalid pairs: ${invalidPairs.length} (${invalidPairs.map(([symbol]) => symbol).join(', ')})`);
@@ -189,8 +215,9 @@ class ProductionTradingEngine {
   }
   
   /**
-   * 🧠 SMART HUNTER DYNAMIC PAIRS INTEGRATION
-   * Fetches high-scoring opportunities from Smart Hunter and adds them to trading pool
+   * 🧠 SMART HUNTER CATEGORY-BASED PAIR OPTIMIZATION
+   * Uses CoinGecko categories (trending, volume leaders) instead of scanning all pairs
+   * MUCH faster and more efficient!
    */
   private async updateDynamicPairsFromSmartHunter() {
     const now = Date.now();
@@ -201,27 +228,39 @@ class ProductionTradingEngine {
     }
     
     try {
-      log('🧠 Fetching dynamic pairs from Smart Hunter...');
+      log('🧠 Category-based opportunity scanning (trending/volume/gainers)...');
       const { smartProfitHunter } = await import('./src/lib/smart-profit-hunter');
       const opportunities = await smartProfitHunter.findProfitableOpportunities();
       
-      // Filter for high-scoring opportunities (80%+ score) to add to trading pool
-      const highScoreOpportunities = opportunities
-        .filter(opp => opp.score >= 80) // Only top-tier opportunities
-        .slice(0, 5) // Max 5 dynamic pairs to keep system responsive
+      // Filter for HIGH-SCORING opportunities from category queries (80%+)
+      // These come from CoinGecko trending/volume/gainers - no timeout risk!
+      const highScoringPairs = opportunities
+        .filter(opp => opp.score >= 80) // High-scoring from categories only
+        .slice(0, 10) // Top 10 high-scoring from categories
         .map(opp => opp.symbol);
-      
-      // Update dynamic pairs if we found good opportunities
-      if (highScoreOpportunities.length > 0) {
-        const previousDynamic = [...this.dynamicPairs];
-        this.dynamicPairs = highScoreOpportunities;
         
-        log(`🚀 Smart Hunter integration: Added ${highScoreOpportunities.length} high-scoring pairs`);
-        log(`   Dynamic Pairs: ${highScoreOpportunities.join(', ')}`);
+      // Also include medium-scoring pairs for broader coverage
+      const mediumScoringPairs = opportunities
+        .filter(opp => opp.score >= 60 && opp.score < 80)
+        .slice(0, 5) // Top 5 medium-scoring
+        .map(opp => opp.symbol);
+        
+      const allCategoryPairs = [...highScoringPairs, ...mediumScoringPairs];
+      
+      // Update dynamic pairs with category-optimized high-scoring selection
+      if (allCategoryPairs.length > 0) {
+        const previousDynamic = [...this.dynamicPairs];
+        this.dynamicPairs = allCategoryPairs;
+        
+        log(`🚀 Category-derived scoring: ${highScoringPairs.length} high + ${mediumScoringPairs.length} medium scoring pairs`);
+        log(`   High-Scoring (80%+): ${highScoringPairs.join(', ')}`);
+        if (mediumScoringPairs.length > 0) {
+          log(`   Medium-Scoring (60-79%): ${mediumScoringPairs.join(', ')}`);
+        }
         
         // Log changes
-        const added = highScoreOpportunities.filter(pair => !previousDynamic.includes(pair));
-        const removed = previousDynamic.filter(pair => !highScoreOpportunities.includes(pair));
+        const added = allCategoryPairs.filter(pair => !previousDynamic.includes(pair));
+        const removed = previousDynamic.filter(pair => !allCategoryPairs.includes(pair));
         
         if (added.length > 0) {
           log(`   ✅ Added: ${added.join(', ')}`);
@@ -248,12 +287,98 @@ class ProductionTradingEngine {
   
   async shouldTrade(marketData: MarketDataPoint, phase: any): Promise<{ shouldTrade: boolean; confidence: number; signal?: any; aiSystems?: string[] }> {
     try {
-      // 🎯 QUANTUM FORGE™ PHASE-BASED AI PIPELINE
-      log(`🧠 Phase ${phase.phase} AI Analysis: ${marketData.symbol} @ $${marketData.price}`);
+      // 🎯 PRIMARY ENTRY LOGIC: PINE SCRIPT STRATEGY TECHNICAL SIGNALS
+      // Pine Script strategy with optimized inputs is the FOUNDATION
+      // AI systems optimize and validate these decisions for better wins and max profit
+      log(`🧠 Phase ${phase.phase} QUANTUM FORGE™ Analysis: ${marketData.symbol} @ $${marketData.price}`);
       
       let confidence = 0;
       let aiSystemsUsed: string[] = [];
       let enhancedSignal: any = null;
+      
+      // 🎯 PINE SCRIPT FOUNDATION: Get technical signal from Pine Script strategies
+      try {
+        const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
+        const pineSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(marketData.symbol, marketData.price);
+        
+        log(`🎯 PINE SCRIPT ENTRY SIGNAL: ${pineSignal.action} (${(pineSignal.confidence * 100).toFixed(1)}% confidence)`);
+        log(`📊 Pine Strategy: ${pineSignal.strategy} | Reason: ${pineSignal.reason}`);
+        
+        // Pine Script provides the BASE confidence
+        if (pineSignal.action !== 'HOLD') {
+          confidence = pineSignal.confidence; // Start with Pine Script confidence
+          enhancedSignal = pineSignal;
+          aiSystemsUsed.push(pineSignal.strategy);
+          log(`🎯 PINE SCRIPT BASE: ${(confidence * 100).toFixed(1)}% confidence from ${pineSignal.strategy}`);
+        } else {
+          log(`🎯 PINE SCRIPT: HOLD signal - checking AI for enhancement opportunities`);
+        }
+      } catch (error) {
+        log(`⚠️ Pine Script signal unavailable: ${error.message} - using AI fallback`);
+      }
+      
+      // 🧠 AI OPTIMIZATION 1: Enhanced Markov Chain Analysis
+      // AI enhances Pine Script decisions for better market timing
+      let markovAnalysis: any = null;
+      try {
+        // Use fresh instance
+        const ohlcData = { 
+          symbol: marketData.symbol, 
+          timestamp: marketData.timestamp, 
+          open: marketData.price, 
+          high: marketData.price, 
+          low: marketData.price, 
+          close: marketData.price, 
+          volume: 1000 
+        };
+        markovAnalysis = await this.enhancedMarkovPredictor2.processMarketData(
+          marketData.symbol, 
+          ohlcData, 
+          {}, // intelligence (empty for now)
+          [ohlcData] // recentHistory array
+        );
+        log(`🔮 MARKOV ENTRY: State ${markovAnalysis.currentState}, Expected Return: ${(markovAnalysis.expectedReturn * 100).toFixed(2)}%`);
+        
+        // AI ENHANCEMENT: Boost Pine Script confidence if Markov confirms direction
+        if (confidence > 0 && markovAnalysis.expectedReturn > 0) {
+          const markovBoost = Math.min(0.2, markovAnalysis.confidence * markovAnalysis.expectedReturn * 2); // Max 20% boost
+          confidence += markovBoost;
+          log(`🚀 AI BOOST: Markov chains CONFIRM Pine Script - boosting confidence by ${(markovBoost * 100).toFixed(1)}%`);
+          aiSystemsUsed.push('quantum-markov-chains');
+        } else if (confidence === 0 && markovAnalysis.expectedReturn > 0.01) {
+          // Fallback: Strong Markov signal when Pine Script shows HOLD
+          confidence = Math.min(0.3, markovAnalysis.confidence * markovAnalysis.expectedReturn * 10);
+          log(`🧠 AI FALLBACK: Strong Markov signal (${(confidence * 100).toFixed(1)}%) when Pine Script = HOLD`);
+          aiSystemsUsed.push('quantum-markov-fallback');
+        }
+      } catch (error) {
+        log(`⚠️ Markov Chain analysis failed: ${error.message}`);
+      }
+      
+      // 🧠 QUANTUM FORGE™ COMPONENT 2: Mathematical Intuition Engine  
+      let mathIntuitionAnalysis: any = null;
+      try {
+        const { MathematicalIntuitionEngine } = await import('./src/lib/mathematical-intuition-engine');
+        // Use fresh instance
+        
+        // Generate base signal first
+        const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
+        const baseSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(marketData.symbol, marketData.price);
+        
+        mathIntuitionAnalysis = await this.mathEngine.analyzeIntuitively(baseSignal, marketData);
+        log(`🎭 MATHEMATICAL INTUITION: Overall ${(mathIntuitionAnalysis.mathIntuition * 100).toFixed(1)}%, Flow Field ${mathIntuitionAnalysis.flowFieldStrength.toFixed(4)}`);
+        
+        // Mathematical Intuition confidence contribution
+        const intuitionScore = mathIntuitionAnalysis.mathIntuition;
+        const patternResonance = Math.max(0, mathIntuitionAnalysis.patternResonance);
+        const mathConfidence = (intuitionScore * 0.5) + (patternResonance * 0.5);
+        confidence += Math.max(0, Math.min(0.4, mathConfidence)); // Max 40% from Math Intuition
+        aiSystemsUsed.push('mathematical-intuition');
+        
+        enhancedSignal = baseSignal;
+      } catch (error) {
+        log(`⚠️ Mathematical Intuition analysis failed: ${error.message}`);
+      }
 
       // Generate REAL Pine Script technical signal (NO MORE RANDOM VALUES!)
       const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
@@ -306,12 +431,12 @@ class ProductionTradingEngine {
 
           // Mathematical Intuition Engine
           if (phase.features.mathematicalIntuitionEnabled) {
-            const { mathIntuitionEngine } = (await import('./src/lib/mathematical-intuition-engine')).default;
+            // Use already imported mathIntuitionEngine
             const marketData = { symbol: baseSignal.symbol, price: baseSignal.price };
-            const intuitionResult = await mathIntuitionEngine.runParallelAnalysis(enhancedSignal || baseSignal, marketData);
+            const intuitionResult = await this.mathEngine.runParallelAnalysis(enhancedSignal || baseSignal, marketData);
             
             // Blend calculated vs intuitive confidence using the parallel analysis
-            const intuitiveConfidence = intuitionResult.intuitive.overallFeeling;
+            const intuitiveConfidence = intuitionResult.intuitive?.mathIntuition || 0;
             const calculatedConfidence = enhancedSignal?.confidence || baseSignal.confidence;
             confidence = calculatedConfidence * 0.7 + intuitiveConfidence * 0.3;
             aiSystemsUsed.push('mathematical-intuition-engine');
@@ -358,12 +483,12 @@ class ProductionTradingEngine {
 
           // Mathematical Intuition Engine
           if (phase.features.mathematicalIntuitionEnabled) {
-            const { mathIntuitionEngine } = (await import('./src/lib/mathematical-intuition-engine')).default;
+            // Use already imported mathIntuitionEngine
             const marketData = { symbol: baseSignal.symbol, price: baseSignal.price };
-            const intuitionResult = await mathIntuitionEngine.runParallelAnalysis(workingSignal, marketData);
+            const intuitionResult = await this.mathEngine.runParallelAnalysis(workingSignal, marketData);
             
             // Stronger intuition weighting in Phase 3
-            const intuitiveConfidence = intuitionResult.intuitive.overallFeeling;
+            const intuitiveConfidence = intuitionResult.mathIntuition;
             confidence = workingSignal.confidence * 0.6 + intuitiveConfidence * 0.4;
             aiSystemsUsed.push('mathematical-intuition-engine');
             log(`🧠 Phase 3: Mathematical intuition enhanced confidence ${(confidence * 100).toFixed(1)}% (calc: ${(workingSignal.confidence * 100).toFixed(1)}%, intuition: ${(intuitiveConfidence * 100).toFixed(1)}%)`);
@@ -429,12 +554,12 @@ class ProductionTradingEngine {
 
     } catch (error) {
       log(`❌ AI analysis error: ${error.message}`);
-      // Fallback to basic signal
-      const basicConfidence = Math.random() * 0.4 + 0.1; // 10-50%
+      // Fallback to conservative signal based on phase threshold
+      const basicConfidence = phase.features.confidenceThreshold * 0.8; // 80% of phase threshold
       return {
-        shouldTrade: basicConfidence >= phase.features.confidenceThreshold,
+        shouldTrade: false, // Conservative: don't trade on AI errors
         confidence: basicConfidence,
-        aiSystems: ['fallback-basic']
+        aiSystems: ['fallback-conservative']
       };
     }
   }
@@ -463,56 +588,143 @@ class ProductionTradingEngine {
         const priceChange = (currentPrice - entryPrice) / entryPrice;
         const pnlPercent = side === 'long' ? priceChange * 100 : -priceChange * 100;
         
+        // 🎯 MATHEMATICAL INTUITION AI EXIT VALIDATION
+        // Use E = (W × A) - (L × B) equation for maximum profit optimization
+        const currentMarketData = { symbol, price: currentPrice, timestamp: new Date() };
+        const exitAnalysis = await this.shouldTrade(currentMarketData, phase);
+        
+        // 🚀 QUANTUM FORGE™ COGNITIVE CORE ACTIVATION
+        // Get Mathematical Intuition analysis
+        let mathIntuitionAnalysis: any;
+        try {
+          const { MathematicalIntuitionEngine } = await import('./src/lib/mathematical-intuition-engine');
+          // Use fresh instance
+          mathIntuitionAnalysis = await this.mathEngine.analyzeIntuitively(exitAnalysis.signal || {}, currentMarketData);
+        } catch (error) {
+          log(`⚠️ Mathematical Intuition unavailable: ${error.message}`);
+          mathIntuitionAnalysis = null;
+        }
+
+        // Get Enhanced Markov Chain predictions with LLN confidence
+        let markovPrediction: any;
+        try {
+          // Use fresh instance
+          const marketData = { symbol, timestamp: new Date(), open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice, volume: 1000 };
+          markovPrediction = await this.enhancedMarkovPredictor2.processMarketData(
+            symbol, 
+            marketData, 
+            {}, // intelligence (empty for now)
+            [marketData] // recentHistory array
+          );
+          log(`🔮 MARKOV CHAIN: Current state ${markovPrediction.currentState}, confidence ${(markovPrediction.confidence * 100).toFixed(1)}%`);
+        } catch (error) {
+          log(`⚠️ Markov Chain predictor unavailable: ${error.message}`);
+          markovPrediction = null;
+        }
+        
         let shouldExit = false;
         let exitReason = '';
         
-        // EXIT RULE 1: Confidence Reversal
-        // If market confidence has dropped significantly from entry confidence
-        if (entryConfidence > 0.7 && marketConfidence < 0.4) {
-          shouldExit = true;
-          exitReason = 'confidence_reversal';
+        // 🎯 PRIMARY EXIT LOGIC: PINE SCRIPT STRATEGY TECHNICAL SIGNALS
+        // The Pine Script strategy with optimized inputs is the FOUNDATION
+        // AI systems optimize, improve and validate these decisions
+        try {
+          const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
+          const pineExitSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(symbol, currentPrice);
+          
+          log(`🎯 PINE SCRIPT EXIT SIGNAL: ${pineExitSignal.action} (${(pineExitSignal.confidence * 100).toFixed(1)}% confidence)`);
+          log(`📊 Pine Strategy: ${pineExitSignal.strategy} | Reason: ${pineExitSignal.reason}`);
+          
+          // PRIMARY EXIT DECISION: Based on Pine Script Strategy
+          if (pineExitSignal.action === 'SELL' && side === 'long' && pineExitSignal.confidence > 0.5) {
+            shouldExit = true;
+            exitReason = `pine_script_sell_signal_${pineExitSignal.strategy}`;
+            log(`🎯 PINE SCRIPT EXIT: SELL signal for LONG position - ${pineExitSignal.reason}`);
+          }
+          else if (pineExitSignal.action === 'BUY' && side === 'short' && pineExitSignal.confidence > 0.5) {
+            shouldExit = true;
+            exitReason = `pine_script_buy_signal_${pineExitSignal.strategy}`;
+            log(`🎯 PINE SCRIPT EXIT: BUY signal for SHORT position - ${pineExitSignal.reason}`);
+          }
+          
+          // AI VALIDATION: Use Markov Chain to validate Pine Script decision
+          if (shouldExit && markovPrediction && markovPrediction.confidence > 0.7) {
+            const expectedReturn = markovPrediction.expectedReturn || 0;
+            const mostLikelyState = markovPrediction.mostLikelyNextState;
+            
+            log(`🧠 AI VALIDATION: Markov expects ${(expectedReturn * 100).toFixed(2)}% return, next state: ${mostLikelyState}`);
+            
+            // AI confirms Pine Script exit signal
+            if ((side === 'long' && mostLikelyState.includes('DOWN')) || 
+                (side === 'short' && mostLikelyState.includes('UP'))) {
+              log(`✅ AI CONFIRMATION: Markov chains CONFIRM Pine Script exit signal`);
+              exitReason += '_ai_confirmed';
+            } else {
+              log(`⚠️ AI DIVERGENCE: Markov chains suggest different direction than Pine Script`);
+            }
+          }
+          
+        } catch (error) {
+          log(`⚠️ Pine Script exit signal unavailable: ${error.message}`);
+          
+          // FALLBACK: Use AI-only exit logic if Pine Script fails
+          if (markovPrediction && markovPrediction.confidence > 0.8) {
+            const expectedReturn = markovPrediction.expectedReturn || 0;
+            const mostLikelyState = markovPrediction.mostLikelyNextState;
+            
+            log(`🧠 AI FALLBACK EXIT: Expected return ${(expectedReturn * 100).toFixed(2)}%, next state: ${mostLikelyState}`);
+            
+            // Strong AI signal for exit as fallback
+            if (expectedReturn < -0.01 && markovPrediction.confidence > 0.85) {
+              shouldExit = true;
+              exitReason = 'ai_fallback_strong_negative_expectation';
+            }
+            else if (side === 'long' && mostLikelyState.includes('DOWN') && markovPrediction.confidence > 0.8) {
+              shouldExit = true;
+              exitReason = 'ai_fallback_bearish_transition';
+            }
+            else if (side === 'short' && mostLikelyState.includes('UP') && markovPrediction.confidence > 0.8) {
+              shouldExit = true;
+              exitReason = 'ai_fallback_bullish_transition';
+            }
+          }
         }
         
-        // EXIT RULE 2: Quick Profit Taking (High Confidence Positions)
-        // High confidence positions can exit earlier for quick profits
-        else if (entryConfidence > 0.8 && pnlPercent > 2.0) {
-          shouldExit = true;
-          exitReason = 'quick_profit_high_confidence';
+        // 🧠 AI OPTIMIZATION: Mathematical Intuition can enhance Pine Script decisions
+        // Use Mathematical Intuition to optimize position sizing for remaining time
+        if (!shouldExit && mathIntuitionAnalysis && mathIntuitionAnalysis.traditional) {
+          const currentExpectancy = mathIntuitionAnalysis.traditional.expectancyScore;
+          const currentWinRate = mathIntuitionAnalysis.traditional.winRateProjection;
+          const riskRewardRatio = mathIntuitionAnalysis.traditional.riskRewardRatio;
+          
+          // Calculate expected value for continuing vs exiting
+          const avgWin = Math.abs(pnlPercent) > 0 ? Math.abs(pnlPercent) : 1.5; // Use current P&L or default
+          const avgLoss = avgWin / riskRewardRatio;
+          const continueExpectancy = (currentWinRate * avgWin) - ((1 - currentWinRate) * avgLoss);
+          
+          log(`📊 E = (W × A) - (L × B): (${(currentWinRate*100).toFixed(1)}% × ${avgWin.toFixed(2)}%) - (${((1-currentWinRate)*100).toFixed(1)}% × ${avgLoss.toFixed(2)}%) = ${continueExpectancy.toFixed(4)}`);
+          
+          // AI OPTIMIZATION: Warn about deteriorating expectancy but Pine Script still decides
+          if (continueExpectancy < 0) {
+            log(`⚠️ AI WARNING: Mathematical expectancy turned negative (${continueExpectancy.toFixed(4)}) - Pine Script will decide exit`);
+          }
+          else if (continueExpectancy < entryConfidence * 0.3) {
+            log(`⚠️ AI WARNING: Expectancy deteriorated from entry confidence - Pine Script will decide exit`);
+          }
         }
         
-        // EXIT RULE 3: Loss Cutting (Low Confidence Positions)
-        // Low confidence positions should exit losses quickly
-        else if (entryConfidence < 0.5 && pnlPercent < -1.5) {
+        // 🛡️ EMERGENCY RISK MANAGEMENT: Safety override regardless of Pine Script
+        // Only for extreme situations that require immediate action
+        if (positionAgeMinutes > 120 || Math.abs(pnlPercent) > 10.0) { // Increased thresholds
           shouldExit = true;
-          exitReason = 'cut_losses_low_confidence';
+          exitReason = 'emergency_risk_management_override';
+          log(`🚨 EMERGENCY EXIT: Position age ${positionAgeMinutes}min, P&L ${pnlPercent.toFixed(2)}% - OVERRIDING Pine Script`);
         }
         
-        // EXIT RULE 4: Time-Based Exit (Stale Positions) - More aggressive for Phase 0/1
-        // Positions held too long without significant profit
-        else if (positionAgeMinutes > 5 && Math.abs(pnlPercent) < 0.3) { // Shorter time, lower threshold
-          shouldExit = true;
-          exitReason = 'stale_position_timeout';
-        }
-        
-        // EXIT RULE 5: Quick Profit Taking - More aggressive
-        // Take profits at smaller gains for frequent exits
-        else if (pnlPercent > 1.0) { // Take 1%+ profits quickly
-          shouldExit = true;
-          exitReason = 'quick_profit_taking';
-        }
-        
-        // EXIT RULE 6: Loss Prevention - More aggressive  
-        // Cut losses quickly to prevent large drawdowns
-        else if (pnlPercent < -1.0) { // Cut -1%+ losses quickly
-          shouldExit = true;
-          exitReason = 'loss_prevention';
-        }
-        
-        // EXIT RULE 7: Random Exit for Phase 0/1 data collection
-        // Ensure positions actually close for data generation
-        else if ((phase.phase === 0 || phase.phase === 1) && Math.random() < 0.15) { // 15% chance
-          shouldExit = true;
-          exitReason = 'random_data_collection_exit';
+        // 📈 PROFIT PROTECTION: Secure gains when Pine Script doesn't exit but profit is high
+        else if (pnlPercent > 3.0 && positionAgeMinutes > 30) {
+          log(`💰 PROFIT PROTECTION: ${pnlPercent.toFixed(2)}% profit available - Pine Script will decide`);
+          // Let Pine Script decide - only log the opportunity
         }
         
         // Execute exit if criteria met
@@ -546,8 +758,7 @@ class ProductionTradingEngine {
       
       log(`🔄 Trading Cycle ${this.cycleCount} - Phase ${currentPhase.phase}`);
       
-      // 🎯 UPDATE PRICE CACHE (every 30 seconds, non-blocking)
-      await this.updatePriceCache();
+      // 🎯 PRICE CACHE RUNS IN BACKGROUND (no blocking)
       
       // 🧠 UPDATE SMART HUNTER DYNAMIC PAIRS (every 1 minute, non-blocking)
       await this.updateDynamicPairsFromSmartHunter();
