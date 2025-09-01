@@ -1282,8 +1282,14 @@ export class MathematicalIntuitionEngine {
       Math.sqrt(patternResonance * timingIntuition) * 0.1 +
       Math.sqrt(flowField * energyAlignment) * 0.05;
     
-    // Final synthesis with bounded output
-    const synthesis = swish * 0.75 + interactions;
+    // CONFIDENCE PRESERVATION FIX: Preserve high-confidence signals
+    // Previous: synthesis = swish * 0.75 + interactions (killed 95% → 34% signals)
+    // New: Dynamic confidence preservation based on mathIntuition strength
+    const confidencePreservation = mathIntuition > 0.8 ? 0.95 : 
+                                  mathIntuition > 0.7 ? 0.90 :
+                                  mathIntuition > 0.6 ? 0.85 : 0.75;
+    
+    const synthesis = swish * confidencePreservation + interactions;
     
     return Math.max(0, Math.min(1, synthesis));
   }
