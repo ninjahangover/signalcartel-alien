@@ -48,15 +48,15 @@ export interface PhaseConfig {
 const PHASE_CONFIGURATIONS: PhaseConfig[] = [
   {
     phase: 0,
-    name: "Maximum Data Collection Phase",
+    name: "Controlled Data Collection Phase",
     minTrades: 0,
     maxTrades: 100,
     features: {
-      // ULTRA-LOW barriers for maximum trades
+      // TIGHTER barriers - quality over quantity
       baseStrategyEnabled: true,
-      confidenceThreshold: 0.10, // Extremely low - accept almost any signal
+      confidenceThreshold: 0.35, // Higher threshold - filter out noise
       
-      // No intelligent filters
+      // No intelligent filters yet
       sentimentEnabled: false,
       sentimentSources: [],
       sentimentThreshold: 0,
@@ -70,20 +70,20 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
       mathematicalIntuitionEnabled: false,
       markovChainEnabled: false,
       
-      // Small positions to minimize risk while learning
-      positionSizing: 0.01, // 1% per trade - smaller risk
+      // Conservative risk management
+      positionSizing: 0.01, // 1% per trade - keep small
       stopLossEnabled: true,
-      stopLossPercent: 10, // Wide stop loss - let trades breathe
+      stopLossPercent: 3, // Tighter stop loss - cut losses quickly
       takeProfitEnabled: true, 
-      takeProfitPercent: 10, // Wide take profit
+      takeProfitPercent: 5, // Smaller take profit - lock gains sooner
       
-      // No validation - execute everything
+      // No validation - but higher confidence required
       requireSentimentAlignment: false,
       requireOrderBookConfirmation: false,
       requireMultiLayerConsensus: false
     },
-    targetWinRate: 30, // Don't care about win rate yet
-    description: "MAXIMUM TRADES: Gathering raw market data. Win rate doesn't matter."
+    targetWinRate: 40, // Aim for better quality from start
+    description: "CONTROLLED LEARNING: Quality signals only. Tight risk management."
   },
   
   {

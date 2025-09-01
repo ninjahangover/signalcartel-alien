@@ -488,7 +488,7 @@ class ProductionTradingEngine {
             const intuitionResult = await this.mathEngine.runParallelAnalysis(workingSignal, marketData);
             
             // Stronger intuition weighting in Phase 3
-            const intuitiveConfidence = intuitionResult.mathIntuition;
+            const intuitiveConfidence = intuitionResult.intuitive?.mathIntuition || 0.5;
             confidence = workingSignal.confidence * 0.6 + intuitiveConfidence * 0.4;
             aiSystemsUsed.push('mathematical-intuition-engine');
             log(`🧠 Phase 3: Mathematical intuition enhanced confidence ${(confidence * 100).toFixed(1)}% (calc: ${(workingSignal.confidence * 100).toFixed(1)}%, intuition: ${(intuitiveConfidence * 100).toFixed(1)}%)`);

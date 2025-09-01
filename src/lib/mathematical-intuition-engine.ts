@@ -287,7 +287,8 @@ export class MathematicalIntuitionEngine {
     try {
       const bayesianEngine = BayesianProbabilityEngine.getInstance();
       const evidence = await bayesianEngine.gatherMarketEvidence(signal.symbol);
-      const bayesianSignal = await bayesianEngine.generateSignal(signal.symbol, evidence);
+      const currentPrice = marketData?.price || signal?.price || 0;
+      const bayesianSignal = await bayesianEngine.generateSignal(signal.symbol, evidence, currentPrice);
       bayesianConfidence = bayesianSignal.confidence;
       
       console.log(`🎯 BAYESIAN: ${bayesianSignal.mostLikelyRegime} regime (${(bayesianSignal.bullishProbability * 100).toFixed(1)}% bull, ${(bayesianSignal.bearishProbability * 100).toFixed(1)}% bear)`);

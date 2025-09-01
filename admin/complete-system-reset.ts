@@ -87,15 +87,15 @@ async function performCompleteSystemReset() {
   
   console.log('\n\n🧹 STARTING COMPLETE DATA PURGE...\n')
   
-  // Step 1: Delete all trading data
+  // Step 1: Delete all trading data (order matters due to foreign keys)
   await executeQuery(
-    'Deleting all ManagedTrade records',
-    'DELETE FROM "ManagedTrade"'
+    'Deleting all ManagedPosition records (this will handle foreign key constraints)',
+    'DELETE FROM "ManagedPosition"'
   )
   
   await executeQuery(
-    'Deleting all ManagedPosition records',
-    'DELETE FROM "ManagedPosition"'
+    'Deleting all remaining ManagedTrade records',
+    'DELETE FROM "ManagedTrade"'
   )
   
   await executeQuery(

@@ -291,7 +291,7 @@ export class BayesianProbabilityEngine {
   /**
    * Generate trading signal from current belief state
    */
-  async generateSignal(symbol: string, evidence: MarketEvidence): Promise<BayesianSignal> {
+  async generateSignal(symbol: string, evidence: MarketEvidence, currentPrice: number = 0): Promise<BayesianSignal> {
     // Update beliefs with new evidence
     const belief = await this.updateBelief(evidence);
 
@@ -367,7 +367,7 @@ export class BayesianProbabilityEngine {
 
     // Store Bayesian analysis (non-blocking)
     try {
-      await this.storeBayesianAnalysis(symbol, belief, recommendation, confidence);
+      await this.storeBayesianAnalysis(symbol, belief, recommendation, confidence, currentPrice);
     } catch (error) {
       console.log('⚠️ Bayesian storage failed (continuing analysis):', error.message);
     }
@@ -441,27 +441,29 @@ export class BayesianProbabilityEngine {
     symbol: string,
     belief: BayesianBelief,
     recommendation: string,
-    confidence: number
+    confidence: number,
+    signalPrice: number = 0
   ): Promise<void> {
     try {
       await prisma.intuitionAnalysis.create({
         data: {
           symbol,
-          strategy: 'bayesian-probability-engine',  // Add strategy field
-          flowFieldResonance: belief.posteriors.get(MarketRegime.BULL) || 0,
-          patternResonance: belief.posteriors.get(MarketRegime.BEAR) || 0,
-          harmonicResonance: belief.posteriors.get(MarketRegime.NEUTRAL) || 0,
-          quantumProbability: confidence,
-          marketEnergy: belief.evidence.volatility || 0,
-          overallIntuition: confidence,
-          recommendation,
-          reasoning: `Bayesian inference: ${recommendation} with ${(confidence * 100).toFixed(1)}% confidence`,
-          crossSiteResonance: 0,
-          traditionalWinRate: 0,
-          intuitionWinRate: 0,
+          strategy: 'bayesian-probability-engine',
           signalType: recommendation === 'STRONG_BUY' || recommendation === 'BUY' ? 'BUY' : 
                      recommendation === 'STRONG_SELL' || recommendation === 'SELL' ? 'SELL' : 'WAIT',
-          originalConfidence: confidence  // Add missing field
+          originalConfidence: confidence,
+          signalPrice: signalPrice,
+          flowFieldResonance: belief.posteriors.get(MarketRegime.BULL) || 0,
+          patternResonance: belief.posteriors.get(MarketRegime.BEAR) || 0,
+          temporalIntuition: confidence * 0.9,
+          overallIntuition: confidence,
+          expectancyScore: confidence * 0.8,
+          winRateProjection: confidence * 0.75,
+          riskRewardRatio: 1.5,
+          recommendation,
+          performanceGap: 0,
+          confidenceGap: 0,
+          learningWeight: 1.0
         }
       });
     } catch (error) {
