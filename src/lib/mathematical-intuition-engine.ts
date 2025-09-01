@@ -147,7 +147,7 @@ export class MathematicalIntuitionEngine {
    * Get real market price for a symbol - NO fallbacks
    */
   private async getRealPrice(symbol: string): Promise<number> {
-    const { realTimePriceFetcher } = await import('@/lib/real-time-price-fetcher');
+    const { realTimePriceFetcher } = await import('./real-time-price-fetcher');
     const priceData = await realTimePriceFetcher.getCurrentPrice(symbol);
     
     if (!priceData.success || priceData.price <= 0) {
@@ -478,7 +478,7 @@ export class MathematicalIntuitionEngine {
           winRateProjection: comparison.calculated?.confidence || 0,
           riskRewardRatio: 2.0 // Fixed for now
         },
-        recommendation: comparison.execution?.finalDecision?.toLowerCase() === 'hold' ? 'calculation' : 'intuition',
+        recommendation: comparison.intuitive?.decision || comparison.execution?.finalDecision || 'HOLD',
         performanceGap: comparison.execution?.agreementLevel || 0,
         confidenceGap: Math.abs((comparison.calculated?.confidence || 0) - (comparison.intuitive?.overallFeeling || 0))
       };
@@ -501,7 +501,7 @@ export class MathematicalIntuitionEngine {
         winRateProjection: 0.5,
         riskRewardRatio: 2.0
       },
-      recommendation: 'calculation',
+      recommendation: 'HOLD',
       performanceGap: 0,
       confidenceGap: 0.2
     };
@@ -1432,7 +1432,7 @@ export class MathematicalIntuitionEngine {
           riskRewardRatio: 2.0,
           
           // Comparison and Recommendation
-          recommendation: comparison.execution.finalDecision.toLowerCase() === 'hold' ? 'calculation' : 'intuition',
+          recommendation: comparison.intuitive.decision || comparison.execution.finalDecision || 'HOLD',
           performanceGap: comparison.execution.agreementLevel,
           confidenceGap: Math.abs(comparison.calculated.confidence - comparison.intuitive.overallFeeling)
         }

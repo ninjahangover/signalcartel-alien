@@ -14,6 +14,7 @@ export interface Position {
   quantity: number;
   entryTradeId: string;
   entryTime: Date;
+  openTime: Date; // Alias for entryTime for compatibility
   
   // Exit details (when closed)
   exitPrice?: number;
@@ -29,6 +30,14 @@ export interface Position {
   stopLoss?: number;
   takeProfit?: number;
   maxHoldTime?: number; // milliseconds
+  
+  // Additional metadata for trading engine
+  metadata?: {
+    confidence?: number;
+    aiSystemsUsed?: string[];
+    signalStrength?: number;
+    [key: string]: any;
+  };
 }
 
 export interface ExitStrategy {
@@ -95,7 +104,7 @@ export class PositionManager {
     trade?: PositionTrade;
     pnl?: number;
   }> {
-    const openPositions = this.getOpenPositions(signal.strategy, signal.symbol);
+    const openPositions = this.getOpenPositionsByStrategy(signal.strategy, signal.symbol);
     
     if (signal.action === 'BUY') {
       // Check if we should close short positions first
@@ -150,6 +159,12 @@ export class PositionManager {
     price: number;
     quantity: number;
     timestamp: Date;
+    metadata?: {
+      confidence?: number;
+      aiSystems?: string[];
+      phase?: number;
+      [key: string]: any;
+    };
   }): Promise<{ action: 'opened'; position: Position; trade: PositionTrade }> {
     
     const positionId = `${params.strategy}-${params.symbol}-${Date.now()}`;
@@ -182,7 +197,9 @@ export class PositionManager {
       quantity: params.quantity,
       entryTradeId: tradeId,
       entryTime: params.timestamp,
+      openTime: params.timestamp, // Set openTime for compatibility
       status: 'open',
+      metadata: params.metadata || {}, // Include metadata
       
       // Apply exit strategy rules
       stopLoss: exitStrategy?.stopLossPercent ? 
@@ -374,7 +391,7 @@ export class PositionManager {
   /**
    * Get open positions for a strategy/symbol
    */
-  private getOpenPositions(strategy: string, symbol: string): Position[] {
+  private getOpenPositionsByStrategy(strategy: string, symbol: string): Position[] {
     return Array.from(this.positions.values()).filter(
       p => p.strategy === strategy && p.symbol === symbol && p.status === 'open'
     );
@@ -387,6 +404,57 @@ export class PositionManager {
     return Array.from(this.positions.values()).filter(
       p => p.symbol === symbol && p.status === 'open'
     );
+  }
+
+  /**
+   * Get all open positions across all symbols and strategies (public method)
+   */
+  async getOpenPositions(): Promise<Position[]> {
+    // First sync with database to get latest positions
+    await this.loadPositionsFromDatabase();
+    
+    return Array.from(this.positions.values()).filter(
+      p => p.status === 'open'
+    );
+  }
+
+  /**
+   * Load positions from database to sync in-memory cache
+   */
+  private async loadPositionsFromDatabase(): Promise<void> {
+    try {
+      const dbPositions = await this.prisma.managedPosition.findMany({
+        where: { status: 'open' },
+        include: { entryTrade: true, exitTrade: true }
+      });
+
+      // Sync database positions to memory
+      for (const dbPos of dbPositions) {
+        const position: Position = {
+          id: dbPos.id,
+          strategy: dbPos.strategy,
+          symbol: dbPos.symbol,
+          side: dbPos.side as 'long' | 'short',
+          entryPrice: parseFloat(dbPos.entryPrice),
+          quantity: parseFloat(dbPos.quantity),
+          entryTradeId: dbPos.entryTradeId,
+          entryTime: dbPos.openTime,
+          openTime: dbPos.openTime, // Set openTime for compatibility
+          exitPrice: dbPos.exitPrice ? parseFloat(dbPos.exitPrice) : undefined,
+          exitTradeId: dbPos.exitTradeId || undefined,
+          exitTime: dbPos.exitTime || undefined,
+          status: dbPos.status.toLowerCase() as 'open' | 'closed' | 'partial',
+          realizedPnL: dbPos.realizedPnL ? parseFloat(dbPos.realizedPnL) : undefined,
+          stopLoss: dbPos.stopLoss ? parseFloat(dbPos.stopLoss) : undefined,
+          takeProfit: dbPos.takeProfit ? parseFloat(dbPos.takeProfit) : undefined,
+          metadata: {} // Initialize empty metadata
+        };
+        
+        this.positions.set(position.id, position);
+      }
+    } catch (error) {
+      console.error('Error loading positions from database:', error);
+    }
   }
   
   /**

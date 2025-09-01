@@ -5,11 +5,11 @@
  */
 
 import { smartProfitHunter } from './src/lib/smart-profit-hunter';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const LOG_DIR = '/tmp/signalcartel-logs';
-const PROFIT_PREDATOR_LOG = path.join(LOG_DIR, 'profit-preditor.log');
+const PROFIT_PREDATOR_LOG = path.join(LOG_DIR, 'profit-predator.log');
 const OPPORTUNITIES_FILE = path.join(LOG_DIR, 'smart-hunter-opportunities.json');
 
 // Ensure log directory exists

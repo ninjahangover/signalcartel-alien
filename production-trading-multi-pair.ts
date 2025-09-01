@@ -8,8 +8,8 @@ import { phaseManager } from './src/lib/quantum-forge-phase-config';
 import { EnhancedMarkovPredictor } from './src/lib/enhanced-markov-predictor';
 import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-engine';
 import { PrismaClient } from '@prisma/client';
-import fs from 'fs';
-import path from 'path';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const prisma = new PrismaClient({
   log: ['error'],
@@ -63,7 +63,7 @@ class ProductionTradingEngine {
     'AVAXUSD', 'DOTUSD', 'MATICUSD'
   ];
   
-  // 🧠 DYNAMIC PAIRS from Smart Hunter (updated every cycle)
+  // 🐅 DYNAMIC PAIRS from PROFIT PREDATOR™ (updated every cycle)
   private dynamicPairs: string[] = [];
   private lastSmartHunterUpdate = 0;
   private readonly SMART_HUNTER_UPDATE_INTERVAL = 60000; // 1 minute
@@ -125,8 +125,8 @@ class ProductionTradingEngine {
   
   /**
    * 🎯 BACKGROUND PRICE CACHE UPDATE
-   * Fetches and validates prices from Smart Hunter opportunities
-   * Only Smart Hunter + core pairs get cached
+   * Fetches and validates prices from PROFIT PREDATOR™ opportunities
+   * Only PROFIT PREDATOR™ + core pairs get cached
    */
   private async updatePriceCacheBackground() {
     const now = Date.now();
@@ -201,7 +201,7 @@ class ProductionTradingEngine {
   private getValidatedTradingPairs(): MarketDataPoint[] {
     const validPairs: MarketDataPoint[] = [];
     
-    for (const [symbol, data] of this.priceCache.entries()) {
+    for (const [symbol, data] of Array.from(this.priceCache.entries())) {
       if (data.isValid && data.price > 0) {
         validPairs.push({
           symbol,
@@ -215,14 +215,14 @@ class ProductionTradingEngine {
   }
   
   /**
-   * 🧠 SMART HUNTER CATEGORY-BASED PAIR OPTIMIZATION
+   * 🐅 PROFIT PREDATOR™ CATEGORY-BASED PAIR OPTIMIZATION
    * Uses CoinGecko categories (trending, volume leaders) instead of scanning all pairs
    * MUCH faster and more efficient!
    */
-  private async updateDynamicPairsFromSmartHunter() {
+  private async updateDynamicPairsFromProfitPredator() {
     const now = Date.now();
     
-    // Skip if Smart Hunter data is still fresh
+    // Skip if PROFIT PREDATOR™ data is still fresh
     if (now - this.lastSmartHunterUpdate < this.SMART_HUNTER_UPDATE_INTERVAL) {
       return;
     }
@@ -270,13 +270,13 @@ class ProductionTradingEngine {
         }
       } else {
         // No high-scoring opportunities, keep existing dynamic pairs
-        log(`📊 Smart Hunter: No 80%+ opportunities found, keeping existing dynamic pairs`);
+        log(`📊 PROFIT PREDATOR™: No 80%+ opportunities found, keeping existing dynamic pairs`);
       }
       
       this.lastSmartHunterUpdate = now;
       
     } catch (error) {
-      log(`⚠️ Smart Hunter integration error: ${error.message}`);
+      log(`⚠️ PROFIT PREDATOR™ integration error: ${error.message}`);
       // Don't update dynamic pairs on error, keep existing ones
     }
   }
@@ -331,10 +331,56 @@ class ProductionTradingEngine {
           close: marketData.price, 
           volume: 1000 
         };
+        // Create minimal MarketIntelligenceData for Markov analysis
+        const intelligenceData = {
+          symbol: marketData.symbol,
+          captureStartTime: new Date(Date.now() - 24 * 60 * 60 * 1000),
+          captureEndTime: new Date(),
+          dataPoints: [{...ohlcData, price: ohlcData.close}],
+          patterns: [],
+          momentum: {
+            symbol: marketData.symbol,
+            timeframe: '1h' as const,
+            momentum: 0,
+            volume_trend: 'stable' as const,
+            price_velocity: 0,
+            volatility: 0.1,
+            support_level: marketData.price * 0.98,
+            resistance_level: marketData.price * 1.02,
+            trend_strength: 50
+          },
+          regime: {
+            regime: 'sideways' as const,
+            confidence: 0.5,
+            duration_hours: 1,
+            key_levels: {
+              support: [marketData.price * 0.98],
+              resistance: [marketData.price * 1.02],
+              pivot: marketData.price
+            },
+            volume_profile: 'medium' as const,
+            volatility_level: 'low' as const
+          },
+          predictiveSignals: {
+            next_1h: 'neutral' as const,
+            next_4h: 'neutral' as const,
+            next_24h: 'neutral' as const,
+            confidence: 0.5
+          },
+          confidence: 0.5,
+          lastUpdated: new Date(),
+          tradingAdjustments: {
+            position_sizing: 1.0,
+            stop_loss_adjustment: 0,
+            take_profit_adjustment: 0,
+            entry_timing: 'immediate' as const
+          }
+        };
+        
         markovAnalysis = await this.enhancedMarkovPredictor2.processMarketData(
           marketData.symbol, 
           ohlcData, 
-          {}, // intelligence (empty for now)
+          intelligenceData,
           [ohlcData] // recentHistory array
         );
         log(`🔮 MARKOV ENTRY: State ${markovAnalysis.currentState}, Expected Return: ${(markovAnalysis.expectedReturn * 100).toFixed(2)}%`);
@@ -461,11 +507,18 @@ class ProductionTradingEngine {
           // Multi-source sentiment
           if (phase.features.sentimentEnabled) {
             const { universalSentimentEnhancer } = await import('./src/lib/sentiment/universal-sentiment-enhancer');
-            workingSignal = await universalSentimentEnhancer.enhanceSignal(baseSignal, {
+            const enhancedSignal = await universalSentimentEnhancer.enhanceSignal(baseSignal, {
               conflictThreshold: phase.features.sentimentThreshold,
               minSentimentConfidence: phase.features.sentimentThreshold,
               enableOrderBookValidation: true // Enable order book in Phase 3
             });
+            
+            // Ensure required TechnicalSignal properties
+            workingSignal = {
+              ...enhancedSignal,
+              timestamp: new Date(),
+              source: 'sentiment-enhanced'
+            };
             aiSystemsUsed.push('multi-source-sentiment');
           }
 
@@ -475,8 +528,7 @@ class ProductionTradingEngine {
             const orderBookAnalysis = await quantumForgeOrderBookAI.enhanceSignalWithOrderBookAI(workingSignal);
             workingSignal = {
               ...workingSignal,
-              confidence: orderBookAnalysis.enhancedConfidence,
-              aiBoost: (workingSignal.aiBoost || 0) + orderBookAnalysis.aiConfidenceBoost
+              confidence: orderBookAnalysis.enhancedConfidence
             };
             aiSystemsUsed.push('order-book-intelligence');
           }
@@ -517,7 +569,7 @@ class ProductionTradingEngine {
             skipOnConflict: phase.features.requireMultiLayerConsensus
           });
           
-          confidence = multiLayerResult.finalDecision?.confidence || multiLayerResult.confidence || baseSignal.confidence;
+          confidence = multiLayerResult.finalDecision?.confidence || baseSignal.confidence;
           enhancedSignal = multiLayerResult;
           aiSystemsUsed = ['quantum-forge-multi-layer-ai', 'consensus-validation'];
           log(`🚀 Phase 4: QUANTUM FORGE™ consensus confidence ${(confidence * 100).toFixed(1)}%`);
@@ -610,10 +662,56 @@ class ProductionTradingEngine {
         try {
           // Use fresh instance
           const marketData = { symbol, timestamp: new Date(), open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice, volume: 1000 };
+          // Create minimal MarketIntelligenceData for exit analysis
+          const exitIntelligenceData = {
+            symbol,
+            captureStartTime: new Date(Date.now() - 24 * 60 * 60 * 1000),
+            captureEndTime: new Date(),
+            dataPoints: [{...marketData, price: marketData.close}],
+            patterns: [],
+            momentum: {
+              symbol,
+              timeframe: '1h' as const,
+              momentum: 0,
+              volume_trend: 'stable' as const,
+              price_velocity: 0,
+              volatility: 0.1,
+              support_level: marketData.close * 0.98,
+              resistance_level: marketData.close * 1.02,
+              trend_strength: 50
+            },
+            regime: {
+              regime: 'sideways' as const,
+              confidence: 0.5,
+              duration_hours: 1,
+              key_levels: {
+                support: [marketData.close * 0.98],
+                resistance: [marketData.close * 1.02],
+                pivot: marketData.close
+              },
+              volume_profile: 'medium' as const,
+              volatility_level: 'low' as const
+            },
+            predictiveSignals: {
+              next_1h: 'neutral' as const,
+              next_4h: 'neutral' as const,
+              next_24h: 'neutral' as const,
+              confidence: 0.5
+            },
+            confidence: 0.5,
+            lastUpdated: new Date(),
+            tradingAdjustments: {
+              position_sizing: 1.0,
+              stop_loss_adjustment: 0,
+              take_profit_adjustment: 0,
+              entry_timing: 'immediate' as const
+            }
+          };
+          
           markovPrediction = await this.enhancedMarkovPredictor2.processMarketData(
             symbol, 
             marketData, 
-            {}, // intelligence (empty for now)
+            exitIntelligenceData,
             [marketData] // recentHistory array
           );
           log(`🔮 MARKOV CHAIN: Current state ${markovPrediction.currentState}, confidence ${(markovPrediction.confidence * 100).toFixed(1)}%`);
@@ -635,30 +733,31 @@ class ProductionTradingEngine {
           log(`🎯 PINE SCRIPT EXIT SIGNAL: ${pineExitSignal.action} (${(pineExitSignal.confidence * 100).toFixed(1)}% confidence)`);
           log(`📊 Pine Strategy: ${pineExitSignal.strategy} | Reason: ${pineExitSignal.reason}`);
           
-          // PRIMARY EXIT DECISION: Based on Pine Script Strategy
+          // FAST EXIT TRIGGER: ANY strategy can trigger exit at 50% confidence
           if (pineExitSignal.action === 'SELL' && side === 'long' && pineExitSignal.confidence > 0.5) {
             shouldExit = true;
-            exitReason = `pine_script_sell_signal_${pineExitSignal.strategy}`;
-            log(`🎯 PINE SCRIPT EXIT: SELL signal for LONG position - ${pineExitSignal.reason}`);
+            exitReason = `fast_exit_${pineExitSignal.strategy}`;
+            log(`⚡ FAST EXIT TRIGGER: ${pineExitSignal.strategy} SELL signal at ${(pineExitSignal.confidence * 100).toFixed(1)}%`);
           }
           else if (pineExitSignal.action === 'BUY' && side === 'short' && pineExitSignal.confidence > 0.5) {
             shouldExit = true;
-            exitReason = `pine_script_buy_signal_${pineExitSignal.strategy}`;
-            log(`🎯 PINE SCRIPT EXIT: BUY signal for SHORT position - ${pineExitSignal.reason}`);
+            exitReason = `fast_exit_${pineExitSignal.strategy}`;
+            log(`⚡ FAST EXIT TRIGGER: ${pineExitSignal.strategy} BUY signal at ${(pineExitSignal.confidence * 100).toFixed(1)}%`);
           }
           
-          // AI VALIDATION: Use Markov Chain to validate Pine Script decision
-          if (shouldExit && markovPrediction && markovPrediction.confidence > 0.7) {
+          // INDEPENDENT AI EXIT: Markov can trigger exit independently at 60% confidence
+          if (!shouldExit && markovPrediction && markovPrediction.confidence > 0.6) {
             const expectedReturn = markovPrediction.expectedReturn || 0;
             const mostLikelyState = markovPrediction.mostLikelyNextState;
             
             log(`🧠 AI VALIDATION: Markov expects ${(expectedReturn * 100).toFixed(2)}% return, next state: ${mostLikelyState}`);
             
-            // AI confirms Pine Script exit signal
+            // AI can independently trigger exit
             if ((side === 'long' && mostLikelyState.includes('DOWN')) || 
                 (side === 'short' && mostLikelyState.includes('UP'))) {
-              log(`✅ AI CONFIRMATION: Markov chains CONFIRM Pine Script exit signal`);
-              exitReason += '_ai_confirmed';
+              shouldExit = true;
+              exitReason = 'fast_exit_markov_ai';
+              log(`⚡ FAST AI EXIT: Markov detected reversal at ${(markovPrediction.confidence * 100).toFixed(1)}% confidence`);
             } else {
               log(`⚠️ AI DIVERGENCE: Markov chains suggest different direction than Pine Script`);
             }
@@ -760,8 +859,8 @@ class ProductionTradingEngine {
       
       // 🎯 PRICE CACHE RUNS IN BACKGROUND (no blocking)
       
-      // 🧠 UPDATE SMART HUNTER DYNAMIC PAIRS (every 1 minute, non-blocking)
-      await this.updateDynamicPairsFromSmartHunter();
+      // 🐅 UPDATE PROFIT PREDATOR™ DYNAMIC PAIRS (every 1 minute, non-blocking)
+      await this.updateDynamicPairsFromProfitPredator();
       
       // 🎯 GET PRE-VALIDATED TRADING PAIRS (NO API CALLS IN PIPELINE!)
       const marketData = this.getValidatedTradingPairs();
@@ -773,8 +872,24 @@ class ProductionTradingEngine {
       
       log(`✅ Trading with ${marketData.length} validated pairs: ${marketData.map(d => d.symbol).join(', ')}`);
       
+      // 🛡️ POSITION LIMIT CHECK - prevent runaway trading
+      const openPositions = await this.positionManager.getOpenPositions();
+      const maxPositions = currentPhase.phase === 0 ? 5 : 10; // Phase 0: max 5 positions
+      
+      if (openPositions.length >= maxPositions) {
+        log(`🛑 Position limit reached: ${openPositions.length}/${maxPositions} positions open`);
+        return;
+      }
+      
       // Process each market with QUANTUM FORGE™ AI analysis
       for (const data of marketData) {
+        // Skip if we've hit position limits during this cycle
+        const currentOpenPositions = await this.positionManager.getOpenPositions();
+        if (currentOpenPositions.length >= maxPositions) {
+          log(`🛑 Position limit reached during cycle: ${currentOpenPositions.length}/${maxPositions}`);
+          break;
+        }
+        
         const aiAnalysis = await this.shouldTrade(data, currentPhase);
         
         if (aiAnalysis.shouldTrade) {
@@ -879,8 +994,8 @@ class ProductionTradingEngine {
           cycleTimeout
         ]);
         
-        // Wait 5 seconds between cycles (reduced for faster response)
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Wait 30 seconds between cycles (prevent runaway trading)
+        await new Promise(resolve => setTimeout(resolve, 30000));
         
       } catch (error) {
         log(`❌ Critical trading engine error: ${error.message}`);

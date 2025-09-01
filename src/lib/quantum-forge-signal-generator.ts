@@ -3,7 +3,7 @@
  * Integrates Pine Script strategies with Phase-based AI system
  */
 
-import { PineScriptInputOptimizer } from './pine-script-input-optimizer';
+import { pineScriptInputOptimizer } from './pine-script-input-optimizer';
 import { competitionStrategyRegistry } from './strategy-registry-competition';
 
 export interface TechnicalSignal {
@@ -471,30 +471,30 @@ class QuantumForgeSignalGenerator {
       console.log(`🎯 ${result.strategyName}: ${result.signal} (${(result.confidence * 100).toFixed(1)}%)`);
     });
     
-    // PINE SCRIPT FOUNDATION: Find strongest signal above 75% confidence
+    // FAST TRIGGER SYSTEM: ANY signal above 50% can execute independently
     let action: 'BUY' | 'SELL' | 'HOLD';
     let confidence: number;
     let primaryStrategy: string;
     
-    // Check for high-confidence BUY signals (>75%)
-    if (strongestSignals.BUY.length > 0 && strongestSignals.BUY[0].confidence > 0.75) {
+    // FAST ENTRY: Check for ANY BUY signal above 50% (no cross-validation)
+    if (strongestSignals.BUY.length > 0 && strongestSignals.BUY[0].confidence > 0.50) {
       const strongest = strongestSignals.BUY[0];
       action = 'BUY';
       confidence = strongest.confidence;
       primaryStrategy = strongest.strategyName;
-      console.log(`🚀 STRONG BUY SIGNAL: ${primaryStrategy} at ${(confidence * 100).toFixed(1)}% confidence`);
+      console.log(`⚡ FAST BUY TRIGGER: ${primaryStrategy} at ${(confidence * 100).toFixed(1)}% confidence`);
       
-    // Check for high-confidence SELL signals (>75%)
-    } else if (strongestSignals.SELL.length > 0 && strongestSignals.SELL[0].confidence > 0.75) {
+    // FAST EXIT: Check for ANY SELL signal above 50%
+    } else if (strongestSignals.SELL.length > 0 && strongestSignals.SELL[0].confidence > 0.50) {
       const strongest = strongestSignals.SELL[0];
       action = 'SELL';
       confidence = strongest.confidence;
       primaryStrategy = strongest.strategyName;
-      console.log(`🚀 STRONG SELL SIGNAL: ${primaryStrategy} at ${(confidence * 100).toFixed(1)}% confidence`);
+      console.log(`⚡ FAST SELL TRIGGER: ${primaryStrategy} at ${(confidence * 100).toFixed(1)}% confidence`);
       
     // Fall back to weighted consensus for weaker signals
     } else {
-      console.log(`📊 NO STRONG SIGNALS >75%, using weighted consensus...`);
+      console.log(`📊 NO FAST TRIGGERS >50%, checking weighted consensus...`);
       
       let buyScore = 0, sellScore = 0, holdScore = 0;
       

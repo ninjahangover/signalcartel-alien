@@ -208,7 +208,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
     maxTrades: 999999,
     features: {
       baseStrategyEnabled: true,
-      confidenceThreshold: 0.55, // REDUCED from 0.70 for more trades
+      confidenceThreshold: 0.45, // FAST TRIGGER: 45% for aggressive entries
       
       sentimentEnabled: true,
       sentimentSources: [
@@ -217,25 +217,25 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
         'google_trends', 'economic_indicators', 'social_volume',
         'defi_metrics', 'options_flow'
       ],
-      sentimentThreshold: 0.45, // REDUCED from 0.60
+      sentimentThreshold: 0.40, // FAST TRIGGER: Lower for more signals
       
       orderBookEnabled: true,
-      orderBookThreshold: 0.40, // REDUCED from 0.50
+      orderBookThreshold: 0.35, // FAST TRIGGER: Lower for quick execution
       
       // FULL AI POWER
       multiLayerAIEnabled: true,
       mathematicalIntuitionEnabled: true,
       markovChainEnabled: true,
       
-      positionSizing: 0.015, // INCREASED from 0.008 for bigger positions
+      positionSizing: 0.02, // AGGRESSIVE: 2% positions for higher profit
       stopLossEnabled: true,
-      stopLossPercent: 3, // More room from 2%
+      stopLossPercent: 2, // TIGHT: Quick exits on bad trades
       takeProfitEnabled: true,
-      takeProfitPercent: 5, // REDUCED from 10% for quicker profits
+      takeProfitPercent: 4, // FAST: Take profits quickly
       
-      requireSentimentAlignment: false, // CHANGED - too restrictive
-      requireOrderBookConfirmation: false, // CHANGED - too restrictive
-      requireMultiLayerConsensus: false // CHANGED - let individual signals through
+      requireSentimentAlignment: false, // FAST TRIGGER: No cross-validation
+      requireOrderBookConfirmation: false, // FAST TRIGGER: Independent signals
+      requireMultiLayerConsensus: false // FAST TRIGGER: Any AI can execute
     },
     targetWinRate: 55, // More realistic
     description: "Full QUANTUM FORGE™ intelligence suite. Balanced precision and frequency."

@@ -4,7 +4,21 @@
  * Contains only the 3 competition strategies for clean testing
  */
 
-import { CRYPTO_TRADING_PAIRS, POPULAR_PAIRS, isValidTradingPair } from './crypto-trading-pairs';
+import { CRYPTO_TRADING_PAIRS } from './crypto-trading-pairs';
+
+// Define popular pairs locally since they don't exist in crypto-trading-pairs
+const POPULAR_PAIRS = [
+  'BTCUSD', 'ETHUSD', 'ADAUSD', 'SOLUSD', 'AVAXUSD', 'LINKUSD', 'DOTUSD', 'MATICUSD'
+];
+
+// Define validation function locally
+function isValidTradingPair(symbol: string): boolean {
+  return CRYPTO_TRADING_PAIRS.some(pair => 
+    pair.symbol === symbol || 
+    pair.symbol === symbol.replace('USD', 'USDT') || 
+    pair.symbol === symbol.replace('USD', 'USDC')
+  );
+}
 
 export interface PineScriptStrategy {
   id: string;

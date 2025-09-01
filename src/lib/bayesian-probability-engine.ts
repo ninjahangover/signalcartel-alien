@@ -85,7 +85,7 @@ export class BayesianProbabilityEngine {
   async initializeWithHistoricalData(symbol: string): Promise<void> {
     try {
       // Get last 100 market observations
-      const historicalData = await prisma.marketDataPoint.findMany({
+      const historicalData = await prisma.marketData.findMany({
         where: { symbol },
         orderBy: { timestamp: 'desc' },
         take: 100
@@ -477,7 +477,7 @@ export class BayesianProbabilityEngine {
   async gatherMarketEvidence(symbol: string): Promise<MarketEvidence> {
     try {
       // Get recent price data
-      const recentPrices = await prisma.marketDataPoint.findMany({
+      const recentPrices = await prisma.marketData.findMany({
         where: { symbol },
         orderBy: { timestamp: 'desc' },
         take: 20
