@@ -170,25 +170,62 @@ export class PositionService {
   
   /**
    * Get current market prices for position monitoring - REAL DATA ONLY
+   * Uses Kraken for open position symbols, falls back to multi-source for others
    */
   private async getCurrentMarketPrices(): Promise<{ [symbol: string]: number }> {
-    const { realTimePriceFetcher } = await import('@/lib/real-time-price-fetcher');
-    const symbols = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'LINKUSD', 'DOTUSD', 'AVAXUSD', 'MATICUSD'];
     const prices: { [symbol: string]: number } = {};
     
-    await Promise.all(symbols.map(async (symbol) => {
+    // Get open positions to determine which symbols to fetch from Kraken
+    const openPositions = await this.getOpenPositions();
+    const positionSymbols = [...new Set(openPositions.map(p => p.symbol))];
+    const allSymbols = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'LINKUSD', 'DOTUSD', 'AVAXUSD', 'MATICUSD'];
+    const otherSymbols = allSymbols.filter(s => !positionSymbols.includes(s));
+    
+    console.log(`📊 Fetching prices: ${positionSymbols.length} from Kraken (open positions), ${otherSymbols.length} from multi-source`);
+    
+    // Fetch position prices from Kraken for accuracy
+    if (positionSymbols.length > 0) {
       try {
-        const priceData = await realTimePriceFetcher.getCurrentPrice(symbol);
-        if (priceData.success && priceData.price > 0) {
-          prices[symbol] = priceData.price;
-        } else {
-          console.error(`❌ Failed to get real price for ${symbol}: ${priceData.error || 'Unknown error'}`);
+        const { krakenPositionPriceFetcher } = await import('@/lib/kraken-position-price-fetcher');
+        const krakenResults = await krakenPositionPriceFetcher.getMultiplePositionPrices(positionSymbols);
+        
+        for (const result of krakenResults) {
+          if (result.success && result.price > 0) {
+            prices[result.symbol] = result.price;
+            console.log(`🔵 Kraken position price: ${result.symbol} = $${result.price.toLocaleString()}`);
+          } else {
+            console.error(`❌ Failed to get Kraken position price for ${result.symbol}: ${result.error}`);
+          }
         }
       } catch (error) {
-        console.error(`❌ Error fetching price for ${symbol}:`, error);
+        console.error(`❌ Error fetching Kraken position prices:`, error);
       }
-    }));
+    }
     
+    // Fetch other prices from multi-source fetcher
+    if (otherSymbols.length > 0) {
+      try {
+        const { realTimePriceFetcher } = await import('@/lib/real-time-price-fetcher');
+        
+        await Promise.all(otherSymbols.map(async (symbol) => {
+          try {
+            const priceData = await realTimePriceFetcher.getCurrentPrice(symbol);
+            if (priceData.success && priceData.price > 0) {
+              prices[symbol] = priceData.price;
+              console.log(`🔄 Multi-source price: ${symbol} = $${priceData.price.toLocaleString()} (from ${priceData.source})`);
+            } else {
+              console.error(`❌ Failed to get multi-source price for ${symbol}: ${priceData.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            console.error(`❌ Error fetching multi-source price for ${symbol}:`, error);
+          }
+        }));
+      } catch (error) {
+        console.error(`❌ Error fetching multi-source prices:`, error);
+      }
+    }
+    
+    console.log(`📊 Retrieved ${Object.keys(prices).length} prices total`);
     return prices;
   }
   

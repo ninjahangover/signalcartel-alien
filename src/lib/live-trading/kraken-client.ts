@@ -3,7 +3,7 @@
  * Professional-grade wrapper for live cryptocurrency trading
  */
 
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import axios, { AxiosInstance } from 'axios';
 
 export interface KrakenBalance {
@@ -169,7 +169,14 @@ export class KrakenClient {
    */
   async getTicker(pair: string): Promise<KrakenTicker> {
     const result = await this.publicCall('Ticker', { pair });
-    return result[pair];
+    
+    // Kraken returns ticker data with the pair name as key
+    const pairKey = Object.keys(result)[0];
+    if (!pairKey || !result[pairKey]) {
+      throw new Error(`No ticker data found for pair: ${pair}`);
+    }
+    
+    return result[pairKey];
   }
 
   /**

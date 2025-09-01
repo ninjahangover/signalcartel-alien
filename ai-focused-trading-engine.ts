@@ -15,11 +15,41 @@ import { PrismaClient } from '@prisma/client';
 import { quantumForgeSignalGenerator } from './src/lib/quantum-forge-signal-generator';
 import { mathematicalIntuitionEngine } from './src/lib/mathematical-intuition-engine';
 import { PositionManager, Position } from './src/lib/position-management/position-manager';
-// Simple logging without external dependencies
+import { marketRegimeDetector, MarketRegime } from './src/lib/market-regime-detector';
+import { pineScriptOptimizer, PineScriptParameters, MarketContext, LearningObjective, PerformanceMetrics } from './src/lib/pine-script-parameter-optimizer';
+import { preTradingCalibrator, CalibratedStrategy } from './src/lib/pre-trading-calibration-pipeline';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Ensure log directory exists
+const logDir = '/tmp/signalcartel-logs';
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
+}
+
+// Log file path - ALWAYS use production-trading.log
+const logFile = path.join(logDir, 'production-trading.log');
+
+// Enhanced logging with file output
 const logger = {
-  info: (msg: string) => console.log(`[INFO] ${msg}`),
-  error: (msg: string) => console.error(`[ERROR] ${msg}`),
-  warn: (msg: string) => console.warn(`[WARN] ${msg}`)
+  info: (msg: string) => {
+    const timestamp = new Date().toISOString();
+    const logMsg = `[${timestamp}] ${msg}`;
+    console.log(logMsg);
+    fs.appendFileSync(logFile, logMsg + '\n');
+  },
+  error: (msg: string) => {
+    const timestamp = new Date().toISOString();
+    const logMsg = `[${timestamp}] ❌ ERROR: ${msg}`;
+    console.error(logMsg);
+    fs.appendFileSync(logFile, logMsg + '\n');
+  },
+  warn: (msg: string) => {
+    const timestamp = new Date().toISOString();
+    const logMsg = `[${timestamp}] ⚠️ WARN: ${msg}`;
+    console.warn(logMsg);
+    fs.appendFileSync(logFile, logMsg + '\n');
+  }
 };
 
 interface TradingMetrics {
@@ -34,9 +64,13 @@ class AIFocusedTradingEngine {
   private prisma: PrismaClient;
   private positionManager: PositionManager;
   private isRunning = false;
+  private isPaused = false;
+  private pauseReason = '';
+  private lastRegimeCheck = new Date();
+  private calibratedStrategies: Map<string, CalibratedStrategy> = new Map();
   
-  // Core trading pairs (minimal set for maximum focus)
-  private readonly FOCUS_PAIRS = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'AVAXUSD'];
+  // Core trading pairs will be dynamically determined by calibration
+  private tradingPairs: string[] = [];
   
   // Velocity-based trading controls (100 trades/hour max)
   private readonly PHASE_CONFIG = {
@@ -55,8 +89,6 @@ class AIFocusedTradingEngine {
   }
 
   private log(message: string): void {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${message}`);
     logger.info(message);
   }
 
@@ -95,41 +127,141 @@ class AIFocusedTradingEngine {
     };
   }
 
-  private async generateAISignal(symbol: string, price: number): Promise<{action: 'BUY' | 'SELL' | 'HOLD', confidence: number}> {
-    // AI-FOCUSED SIGNAL GENERATION - Maximum profit focus
-    // This is a simplified but effective AI signal generator for testing
+  private async getOptimizedPineScriptParameters(phase: number, metrics: TradingMetrics, symbol?: string): Promise<PineScriptParameters> {
+    // If we have calibrated parameters for this symbol, use them
+    if (symbol && this.calibratedStrategies.has(symbol)) {
+      const calibrated = this.calibratedStrategies.get(symbol)!;
+      
+      // Return appropriate phase parameters
+      switch (phase) {
+        case 0: return calibrated.phase0Parameters;
+        case 1: return calibrated.phase1Parameters;
+        case 2: return calibrated.phase2Parameters;
+        default: return calibrated.phase0Parameters;
+      }
+    }
+    // Analyze recent performance
+    const recentTrades = await this.prisma.managedPosition.findMany({
+      where: { status: 'closed' },
+      orderBy: { exitTime: 'desc' },
+      take: 50
+    });
+
+    const last10Trades = recentTrades.slice(0, 10);
+    const last10WinRate = last10Trades.filter(t => (t.realizedPnL || 0) > 0).length / Math.max(1, last10Trades.length);
+    const last50WinRate = recentTrades.filter(t => (t.realizedPnL || 0) > 0).length / Math.max(1, recentTrades.length);
+    
+    const winningTrades = recentTrades.filter(t => (t.realizedPnL || 0) > 0);
+    const losingTrades = recentTrades.filter(t => (t.realizedPnL || 0) < 0);
+    
+    const avgProfit = winningTrades.length > 0 ?
+      winningTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0) / winningTrades.length : 0;
+    const avgLoss = losingTrades.length > 0 ?
+      Math.abs(losingTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0) / losingTrades.length) : 0;
+    
+    const performance: PerformanceMetrics = {
+      last10TradesWinRate: last10WinRate,
+      last50TradesWinRate: last50WinRate,
+      recentAvgProfit: avgProfit,
+      recentAvgLoss: avgLoss,
+      maxDrawdown: metrics.totalPnL,
+      profitFactor: avgLoss > 0 ? avgProfit / avgLoss : 1.0
+    };
+
+    // Determine market context (simplified for now)
+    const marketContext: MarketContext = {
+      volatility: Math.abs(metrics.totalPnL) > 1000 ? 'HIGH' : 'MEDIUM',
+      trend: last10WinRate > 0.6 ? 'BULL' : last10WinRate < 0.4 ? 'BEAR' : 'NEUTRAL',
+      volume: 'NORMAL',
+      timeOfDay: 'US_OPEN'
+    };
+
+    // Determine learning objectives
+    const learningObjective: LearningObjective = {
+      needMoreBuyData: metrics.totalTrades < 500 || last10WinRate < 0.3,
+      needMoreSellData: metrics.totalTrades < 500 || last10WinRate > 0.7,
+      needMoreVolatileData: Math.abs(metrics.totalPnL) < 100,
+      currentDataCount: metrics.totalTrades,
+      targetDataCount: phase === 0 ? 100 : phase === 1 ? 500 : 1000,
+      recentWinRate: last10WinRate
+    };
+
+    return pineScriptOptimizer.optimizeParameters(
+      phase,
+      marketContext,
+      learningObjective,
+      performance
+    );
+  }
+
+  private async generateAISignal(symbol: string, price: number, pineParams: PineScriptParameters): Promise<{action: 'BUY' | 'SELL' | 'HOLD', confidence: number}> {
+    // PINE SCRIPT PARAMETER-DRIVEN SIGNAL GENERATION
+    // Uses optimized parameters to naturally create learning opportunities
     
     try {
-      // Simulate intelligent market analysis with pattern recognition
+      // Simulate RSI calculation using Pine Script parameters
+      const rsiValue = this.calculateSimulatedRSI(symbol, price, pineParams.rsiPeriod);
+      
+      // Simulate momentum and trend analysis
       const marketSentiment = this.analyzeMarketSentiment(symbol, price);
       const technicalStrength = this.analyzeTechnicalStrength(symbol, price);
-      const volatilityScore = this.analyzeVolatility(symbol, price);
-      
-      // AI combines multiple factors for high-confidence decisions
-      const bullishScore = (marketSentiment + technicalStrength + volatilityScore) / 3;
+      const volatilityScore = this.analyzeVolatility(symbol, price) * pineParams.volatilityMultiplier;
       
       let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
-      let confidence = 0;
+      let rawConfidence = 0;
       
-      // Phase 0: Aggressive learning mode - lower thresholds for more trades
-      if (bullishScore > 0.5) {
-        action = 'BUY';
-        confidence = Math.min(0.95, bullishScore * 1.5 + 0.2); // Boost confidence for learning
-      } else if (bullishScore < 0.4) {
+      // Pine Script parameter-driven decision making
+      if (rsiValue >= pineParams.rsiOverbought) {
+        // Overbought - potential SELL signal
         action = 'SELL';
-        confidence = Math.min(0.95, (1 - bullishScore) * 1.5 + 0.2);
+        rawConfidence = 0.6 + ((rsiValue - pineParams.rsiOverbought) / (100 - pineParams.rsiOverbought)) * 0.3;
+      } else if (rsiValue <= pineParams.rsiOversold) {
+        // Oversold - potential BUY signal
+        action = 'BUY';
+        rawConfidence = 0.6 + ((pineParams.rsiOversold - rsiValue) / pineParams.rsiOversold) * 0.3;
       } else {
-        // Even neutral positions get some confidence for learning
-        action = Math.random() > 0.5 ? 'BUY' : 'SELL';
-        confidence = 0.4 + (Math.random() * 0.3); // 40-70% confidence
+        // Middle zone - use trend and momentum
+        const combinedScore = (marketSentiment * pineParams.momentumFactor + 
+                              technicalStrength * pineParams.trendStrength + 
+                              volatilityScore) / 3;
+        
+        if (combinedScore > 0.55) {
+          action = 'BUY';
+          rawConfidence = combinedScore;
+        } else if (combinedScore < 0.45) {
+          action = 'SELL';
+          rawConfidence = 1 - combinedScore;
+        } else {
+          action = 'HOLD';
+          rawConfidence = 0.3;
+        }
       }
+      
+      // Apply entry confidence threshold from Pine Script parameters
+      const confidence = rawConfidence >= pineParams.entryConfidenceThreshold ? 
+        Math.min(0.95, rawConfidence * 1.1) : rawConfidence * 0.8;
       
       return { action, confidence };
       
     } catch (error) {
-      console.error(`AI Signal generation error for ${symbol}:`, error);
+      console.error(`Pine Script signal generation error for ${symbol}:`, error);
       return { action: 'HOLD', confidence: 0.1 };
     }
+  }
+
+  private calculateSimulatedRSI(symbol: string, price: number, period: number): number {
+    // Simulate RSI calculation based on price and symbol characteristics
+    // In production, this would use actual price history
+    const hash = symbol.split('').reduce((a, b) => { 
+      a = ((a << 5) - a) + b.charCodeAt(0); 
+      return a & a; 
+    }, 0);
+    
+    const priceNormalized = (price % 100) / 100;
+    const baseRSI = 30 + (Math.abs(hash) % 40); // Base between 30-70
+    const priceInfluence = priceNormalized * 20; // Price adds variation
+    
+    return Math.min(100, Math.max(0, baseRSI + priceInfluence + (Math.random() * 10 - 5)));
   }
   
   private analyzeMarketSentiment(symbol: string, price: number): number {
@@ -211,51 +343,19 @@ class AIFocusedTradingEngine {
     
     this.log(`🚀 UNLIMITED MODE: ${this.recentTrades.length} trades in last hour (no limits for data collection)`);
 
-    // AI-FOCUSED TRADING LOGIC - MAXIMUM LEARNING MODE
-    for (const symbol of this.FOCUS_PAIRS) {
+    // AI-FOCUSED TRADING WITH SYMBOL-SPECIFIC CALIBRATED PARAMETERS
+    for (const symbol of this.tradingPairs) {
       try {
-        // In Phase 0 maximum learning, we want MORE positions, not fewer
-        // Check existing positions but allow multiple per symbol for learning
+        // Check existing positions for this symbol
         const existingPositions = await this.prisma.managedPosition.findMany({
           where: { symbol, status: 'open' }
         });
 
-        // For maximum learning, rotate positions if we have 3 or more
-        if (existingPositions.length >= 3) {
-          // Close oldest position to make room for new learning
-          const oldestPosition = existingPositions.sort((a, b) => 
-            new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime()
-          )[0];
-          
-          this.log(`🔄 Rotating position: Closing oldest ${symbol} position for new learning opportunity`);
-          
-          try {
-            // Close position through Position Manager
-            const currentPrice = await this.getMinimalPrice(symbol);
-            if (currentPrice > 0) {
-              // Here we would need to access the Position Manager's closePosition method
-              // For now, let's manually close via database and continue with new position
-              await this.prisma.managedPosition.update({
-                where: { id: oldestPosition.id },
-                data: {
-                  status: 'closed',
-                  exitPrice: currentPrice,
-                  exitTime: new Date(),
-                  realizedPnL: oldestPosition.side === 'long' ? 
-                    (currentPrice - oldestPosition.entryPrice) * oldestPosition.quantity :
-                    (oldestPosition.entryPrice - currentPrice) * oldestPosition.quantity
-                }
-              });
-              
-              this.log(`✅ Position rotation: Closed ${symbol} ${oldestPosition.side} for AI learning`);
-            }
-          } catch (error) {
-            this.log(`⚠️ Position rotation failed: ${error.message}`);
-            continue;
-          }
-        }
-
-        this.log(`🎯 Analyzing ${symbol} with QUANTUM FORGE™ AI...`);
+        // Get symbol-specific calibrated parameters
+        const symbolParams = await this.getOptimizedPineScriptParameters(phase, metrics, symbol);
+        
+        this.log(`🎯 Analyzing ${symbol} with CALIBRATED QUANTUM FORGE™ AI...`);
+        this.log(`🔧 ${symbol} Calibrated: RSI ${symbolParams.rsiOverbought}/${symbolParams.rsiOversold}, Entry ${(symbolParams.entryConfidenceThreshold * 100).toFixed(1)}%, Risk ${symbolParams.stopLossPercent}%`);
 
         // Get minimal price data
         const currentPrice = await this.getMinimalPrice(symbol);
@@ -264,12 +364,12 @@ class AIFocusedTradingEngine {
           continue;
         }
 
-        // CORE AI PIPELINE - This is where the magic happens
-        this.log(`🧠 Running Mathematical Intuition Engine for ${symbol}...`);
+        // CORE AI PIPELINE - Symbol-specific calibrated parameters
+        this.log(`🧠 Running Symbol-Calibrated Pine Script AI for ${symbol}...`);
         
-        // Generate AI-focused high-confidence signal
-        const quantumSignal = await this.generateAISignal(symbol, currentPrice);
-        this.log(`⚡ AI Signal: ${quantumSignal.action} at $${currentPrice} (confidence: ${quantumSignal.confidence.toFixed(1)}%)`);
+        // Generate Pine Script parameter-driven signal with symbol-specific params
+        const quantumSignal = await this.generateAISignal(symbol, currentPrice, symbolParams);
+        this.log(`⚡ ${symbol} Signal: ${quantumSignal.action} at $${currentPrice} (confidence: ${(quantumSignal.confidence * 100).toFixed(1)}%)`);
 
         if (!quantumSignal || quantumSignal.confidence < config.confidenceThreshold) {
           this.log(`📉 Below AI confidence threshold for ${symbol}, skipping`);
@@ -328,6 +428,29 @@ class AIFocusedTradingEngine {
   async start(): Promise<void> {
     this.log('🚀 AI-FOCUSED QUANTUM FORGE™ TRADING ENGINE STARTING');
     this.log('🎯 PRIORITY: Maximum AI performance, minimal infrastructure overhead');
+    this.log(`📁 Logging to: ${logFile}`);
+    
+    // RUN PRE-TRADING CALIBRATION PIPELINE
+    this.log('🔧 Running Pre-Trading Strategy Calibration...');
+    try {
+      this.calibratedStrategies = await preTradingCalibrator.runCalibration({
+        includeHotOpportunities: true,
+        includeBasePairs: true,
+        minimumOpportunityScore: 50,
+        maxSymbolsToCalibrate: 8,
+        useHistoricalData: true
+      });
+      
+      // Extract trading pairs from calibrated strategies
+      this.tradingPairs = Array.from(this.calibratedStrategies.keys());
+      this.log(`✅ Calibration complete! Trading ${this.tradingPairs.length} symbols: ${this.tradingPairs.join(', ')}`);
+      
+    } catch (error) {
+      this.log(`❌ Calibration failed: ${error.message}`);
+      // Fallback to basic pairs
+      this.tradingPairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'AVAXUSD'];
+      this.log(`🔄 Using fallback pairs: ${this.tradingPairs.join(', ')}`);
+    }
     
     this.isRunning = true;
     let cycleCount = 0;

@@ -90,13 +90,13 @@ async function performSimpleSystemReset() {
   
   // Step 1: Delete all trading data in correct order (foreign key constraints)
   await executeQuery(
-    'Deleting all ManagedTrade records',
-    'DELETE FROM "ManagedTrade"'
+    'Deleting all ManagedPosition records', 
+    'DELETE FROM "ManagedPosition"'
   )
   
   await executeQuery(
-    'Deleting all ManagedPosition records', 
-    'DELETE FROM "ManagedPosition"'
+    'Deleting all ManagedTrade records',
+    'DELETE FROM "ManagedTrade"'
   )
   
   await executeQuery(

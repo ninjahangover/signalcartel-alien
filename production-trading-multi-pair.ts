@@ -109,6 +109,24 @@ class ProductionTradingEngine {
       return false;
     }
   }
+
+  /**
+   * Get current price for a symbol (FIXED: uses emergency cache)
+   */
+  private async getCurrentPrice(symbol: string): Promise<number | null> {
+    try {
+      const { fixedPriceFetcher } = await import('./src/lib/fixed-price-fetcher');
+      const priceData = await fixedPriceFetcher.getCurrentPrice(symbol);
+      if (priceData) {
+        log(`💰 ${symbol}: $${priceData.price} (${priceData.source})`);
+        return priceData.price;
+      }
+      return null;
+    } catch (error) {
+      log(`⚠️ Fixed price fetch failed for ${symbol}: ${error.message}`);
+      return null;
+    }
+  }
   
   /**
    * 🎯 BACKGROUND CACHE UPDATER (NON-BLOCKING)
@@ -625,24 +643,90 @@ class ProductionTradingEngine {
    */
   private async evaluateExitOpportunities(symbol: string, currentPrice: number, marketConfidence: number, phase: any) {
     try {
-      const openPositions = this.positionManager.getOpenPositionsBySymbol(symbol);
+      // ✅ FIX: Check ALL open positions on every cycle, not just current symbol
+      const openPositions = await this.positionManager.getOpenPositions();
       
-      log(`🔍 Smart Exit Check: ${symbol} - Found ${openPositions.length} open positions`);
+      log(`🔍 Smart Exit Check: ALL POSITIONS - Found ${openPositions.length} open positions to evaluate`);
       
       for (const position of openPositions) {
         const entryPrice = position.entryPrice;
         const side = position.side;
+        const positionSymbol = position.symbol;
         const entryConfidence = position.metadata?.confidence || 0.5;
         const positionAgeMs = Date.now() - new Date(position.openTime).getTime();
         const positionAgeMinutes = positionAgeMs / (1000 * 60);
         
-        // Calculate current P&L
-        const priceChange = (currentPrice - entryPrice) / entryPrice;
+        // ✅ FIX: Get current price for THIS position's symbol, not the analysis symbol
+        const positionCurrentPrice = await this.getCurrentPrice(positionSymbol);
+        if (!positionCurrentPrice) {
+          log(`⚠️ Cannot get current price for ${positionSymbol} - skipping exit evaluation`);
+          continue;
+        }
+        
+        // Calculate current P&L using correct current price
+        const priceChange = (positionCurrentPrice - entryPrice) / entryPrice;
         const pnlPercent = side === 'long' ? priceChange * 100 : -priceChange * 100;
         
+        log(`📊 ${positionSymbol}: Entry $${entryPrice} → Current $${positionCurrentPrice} = ${pnlPercent.toFixed(2)}% (${positionAgeMinutes.toFixed(1)}min)`);
+        
+        // 🎯 CALIBRATED STRATEGY EXIT CONDITIONS
+        // Use each Pine Script's optimized take profit and stop loss percentages
+        let shouldExit = false;
+        let exitReason = '';
+        
+        // Get calibrated parameters for this specific symbol/strategy
+        const optimizedParams = await this.getOptimizedPineScriptParameters(positionSymbol);
+        // ENHANCED TARGETS: Higher take profit allows AI to optimize earlier exits
+        const TAKE_PROFIT_PERCENT = Math.min(optimizedParams.takeProfitPercent || 5.5, 5.5);  // Max 5.5% take profit
+        const STOP_LOSS_PERCENT = Math.min(optimizedParams.stopLossPercent || 3.5, 3.5);     // Max 3.5% stop loss
+        
+        log(`📋 ${positionSymbol} Exit Targets: Take Profit ${TAKE_PROFIT_PERCENT}%, Stop Loss ${STOP_LOSS_PERCENT}%`);
+        
+        // Check percentage-based exits using calibrated strategy parameters
+        if (pnlPercent >= TAKE_PROFIT_PERCENT) {
+          shouldExit = true;
+          exitReason = `calibrated_take_profit_${TAKE_PROFIT_PERCENT}pct`;
+          log(`🎯 CALIBRATED TAKE PROFIT: ${positionSymbol} profit ${pnlPercent.toFixed(2)}% ≥ ${TAKE_PROFIT_PERCENT}%`);
+        }
+        else if (pnlPercent <= -STOP_LOSS_PERCENT) {
+          shouldExit = true;
+          exitReason = `calibrated_stop_loss_${STOP_LOSS_PERCENT}pct`;
+          log(`🚨 CALIBRATED STOP LOSS: ${positionSymbol} loss ${pnlPercent.toFixed(2)}% ≤ -${STOP_LOSS_PERCENT}%`);
+        }
+        
+        // BACKUP: Legacy stop loss/take profit price checks (if set)
+        else if (position.stopLoss && ((side === 'long' && positionCurrentPrice <= position.stopLoss) || (side === 'short' && positionCurrentPrice >= position.stopLoss))) {
+          shouldExit = true;
+          exitReason = 'legacy_stop_loss_hit';
+          log(`🚨 LEGACY STOP LOSS: ${positionSymbol} ${positionCurrentPrice} ${side === 'long' ? '≤' : '≥'} ${position.stopLoss}`);
+        }
+        else if (position.takeProfit && ((side === 'long' && positionCurrentPrice >= position.takeProfit) || (side === 'short' && positionCurrentPrice <= position.takeProfit))) {
+          shouldExit = true;
+          exitReason = 'legacy_take_profit_hit';
+          log(`🎯 LEGACY TAKE PROFIT: ${positionSymbol} ${positionCurrentPrice} ${side === 'long' ? '≥' : '≤'} ${position.takeProfit}`);
+        }
+        
+        // Skip AI analysis if stop loss or take profit already triggered
+        if (shouldExit) {
+          try {
+            const closedPosition = await this.positionManager.closePosition(
+              position.id,
+              positionCurrentPrice,
+              exitReason
+            );
+            
+            const winLoss = closedPosition.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
+            log(`🎯 IMMEDIATE EXIT: ${closedPosition.position.id} | ${exitReason.toUpperCase()} | P&L: $${closedPosition.pnl.toFixed(2)} | ${winLoss}`);
+            
+          } catch (exitError) {
+            log(`❌ Immediate exit failed for ${position.id}: ${exitError.message}`);
+          }
+          continue; // Move to next position
+        }
+        
         // 🎯 MATHEMATICAL INTUITION AI EXIT VALIDATION
-        // Use E = (W × A) - (L × B) equation for maximum profit optimization
-        const currentMarketData = { symbol, price: currentPrice, timestamp: new Date() };
+        // Use E = (W × A) - (L × B) equation for maximum profit optimization  
+        const currentMarketData = { symbol: positionSymbol, price: positionCurrentPrice, timestamp: new Date() };
         const exitAnalysis = await this.shouldTrade(currentMarketData, phase);
         
         // 🚀 QUANTUM FORGE™ COGNITIVE CORE ACTIVATION
@@ -661,10 +745,10 @@ class ProductionTradingEngine {
         let markovPrediction: any;
         try {
           // Use fresh instance
-          const marketData = { symbol, timestamp: new Date(), open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice, volume: 1000 };
+          const marketData = { symbol: positionSymbol, timestamp: new Date(), open: positionCurrentPrice, high: positionCurrentPrice, low: positionCurrentPrice, close: positionCurrentPrice, volume: 1000 };
           // Create minimal MarketIntelligenceData for exit analysis
           const exitIntelligenceData = {
-            symbol,
+            symbol: positionSymbol,
             captureStartTime: new Date(Date.now() - 24 * 60 * 60 * 1000),
             captureEndTime: new Date(),
             dataPoints: [{...marketData, price: marketData.close}],
@@ -709,7 +793,7 @@ class ProductionTradingEngine {
           };
           
           markovPrediction = await this.enhancedMarkovPredictor2.processMarketData(
-            symbol, 
+            positionSymbol, 
             marketData, 
             exitIntelligenceData,
             [marketData] // recentHistory array
@@ -720,17 +804,15 @@ class ProductionTradingEngine {
           markovPrediction = null;
         }
         
-        let shouldExit = false;
-        let exitReason = '';
-        
-        // 🎯 PRIMARY EXIT LOGIC: PINE SCRIPT STRATEGY TECHNICAL SIGNALS
-        // The Pine Script strategy with optimized inputs is the FOUNDATION
-        // AI systems optimize, improve and validate these decisions
-        try {
-          const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
-          const pineExitSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(symbol, currentPrice);
-          
-          log(`🎯 PINE SCRIPT EXIT SIGNAL: ${pineExitSignal.action} (${(pineExitSignal.confidence * 100).toFixed(1)}% confidence)`);
+        // 🎯 AI-ENHANCED EXIT DECISIONS: Pine Script + Percentage Guarantees
+        // AI can make smarter exits within our guaranteed percentage bounds
+        // This provides both safety (guaranteed exits) and optimization (AI timing)
+        if (!shouldExit) { // Only run AI analysis if percentage limits haven't triggered
+          try {
+            const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
+            const pineExitSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(positionSymbol, positionCurrentPrice);
+            
+            log(`🎯 PINE SCRIPT EXIT SIGNAL: ${pineExitSignal.action} (${(pineExitSignal.confidence * 100).toFixed(1)}% confidence)`);
           log(`📊 Pine Strategy: ${pineExitSignal.strategy} | Reason: ${pineExitSignal.reason}`);
           
           // FAST EXIT TRIGGER: ANY strategy can trigger exit at 50% confidence
@@ -872,9 +954,9 @@ class ProductionTradingEngine {
       
       log(`✅ Trading with ${marketData.length} validated pairs: ${marketData.map(d => d.symbol).join(', ')}`);
       
-      // 🛡️ POSITION LIMIT CHECK - prevent runaway trading
+      // 🚀 OPPORTUNITY CAPTURE - maximize profitable trading
       const openPositions = await this.positionManager.getOpenPositions();
-      const maxPositions = currentPhase.phase === 0 ? 5 : 10; // Phase 0: max 5 positions
+      const maxPositions = currentPhase.phase === 0 ? 25 : 35; // 🤠 LET THE BULL RUN! Full position capacity
       
       if (openPositions.length >= maxPositions) {
         log(`🛑 Position limit reached: ${openPositions.length}/${maxPositions} positions open`);
@@ -897,21 +979,44 @@ class ProductionTradingEngine {
           const signal = aiAnalysis.signal || {};
           const side = signal.action === 'SELL' ? 'short' : 'long';
           
-          // 🎯 CONFIDENCE-BASED POSITION SIZING
-          // Higher confidence = larger position size (within phase limits)
+          // 🧠 MATHEMATICAL INTUITION DYNAMIC POSITION SIZING
+          // Multi-AI validation + USD profit maximization
           const baseSize = currentPhase.features.positionSizing; // Phase-based base size
-          const confidenceMultiplier = Math.min(aiAnalysis.confidence * 1.5, 2.0); // Max 2x multiplier
-          const quantity = baseSize * confidenceMultiplier;
           
-          // 🎯 CONFIDENCE-BASED STOP LOSS/TAKE PROFIT
-          // Higher confidence = tighter stops (we're more sure of direction)
+          // Multi-AI Validation Multiplier (when multiple systems agree)
+          const aiSystemCount = aiAnalysis.aiSystems ? aiAnalysis.aiSystems.length : 1;
+          const multiAIBonus = Math.min(aiSystemCount * 0.25, 1.0); // Max +100% for 4+ systems
+          
+          // Confidence-based sizing (stronger signals = larger positions)  
+          const confidenceMultiplier = Math.min(aiAnalysis.confidence * 1.8, 2.5); // Max 2.5x multiplier
+          
+          // USD/USDT Profit Optimization: Account balance factor
+          // For our current balance, optimize for meaningful returns
+          const isStablecoin = data.symbol.includes('USDT') || data.symbol.includes('USDC');
+          const lowPriceBoost = data.price < 10 ? 1.5 : 1.0; // Boost smaller price assets for better returns
+          const stablecoinBoost = isStablecoin ? 1.2 : 1.0; // USDT pairs often have better liquidity
+          const balanceOptimization = lowPriceBoost * stablecoinBoost;
+          
+          // Mathematical Intuition Final Sizing
+          const mathIntuitionMultiplier = (1 + multiAIBonus) * confidenceMultiplier * balanceOptimization;
+          const quantity = baseSize * mathIntuitionMultiplier;
+          
+          log(`🧠 MATH INTUITION SIZING: Base $${baseSize} × AI(${aiSystemCount}) × Conf(${(aiAnalysis.confidence * 100).toFixed(1)}%) × Balance = $${quantity.toFixed(2)}`);
+          
+          // 🎯 MATHEMATICAL INTUITION RISK MANAGEMENT
+          // Multi-AI validation = more aggressive profit targets, tighter risk controls
           const stopLossPercent = currentPhase.features.stopLossPercent / 100;
           const takeProfitPercent = currentPhase.features.takeProfitPercent / 100;
           
-          // Adjust based on confidence: higher confidence = tighter stops
-          const confidenceAdjustment = aiAnalysis.confidence * 0.3; // 0-30% adjustment
-          const adjustedStopLoss = stopLossPercent * (1 - confidenceAdjustment);
-          const adjustedTakeProfit = takeProfitPercent * (1 + confidenceAdjustment);
+          // Multi-AI Risk Optimization: More systems agreeing = tighter risk control
+          const multiAIRiskBonus = Math.min(aiSystemCount * 0.1, 0.4); // Max 40% tighter risk
+          const confidenceAdjustment = (aiAnalysis.confidence * 0.3) + multiAIRiskBonus; // 0-70% adjustment
+          
+          // USD Profit Maximization: Tighter stops, bigger profits when confident
+          const adjustedStopLoss = stopLossPercent * (1 - confidenceAdjustment * 0.5); // Tighter stops when confident
+          const adjustedTakeProfit = takeProfitPercent * (1 + confidenceAdjustment * 1.5); // Bigger profits when confident
+          
+          log(`🎯 RISK MANAGEMENT: Stop ${(adjustedStopLoss*100).toFixed(1)}% | Profit ${(adjustedTakeProfit*100).toFixed(1)}% (AI Systems: ${aiSystemCount})`);
           
           const stopLoss = data.price * (side === 'long' ? (1 - adjustedStopLoss) : (1 + adjustedStopLoss));
           const takeProfit = data.price * (side === 'long' ? (1 + adjustedTakeProfit) : (1 - adjustedTakeProfit));
@@ -943,6 +1048,23 @@ class ProductionTradingEngine {
             log(`❌ Position error: ${positionError.message}`);
           }
         }
+      }
+      
+      // 🎯 CONTINUOUS EXIT MONITORING - Run on every cycle to check all positions
+      log(`🔍 Running exit evaluation for all open positions...`);
+      try {
+        // Run exit evaluation with a representative symbol and current phase
+        // This will check ALL open positions, not just for one symbol
+        if (marketData.length > 0) {
+          await this.evaluateExitOpportunities(
+            marketData[0].symbol, 
+            marketData[0].price, 
+            0.5, // placeholder confidence 
+            currentPhase
+          );
+        }
+      } catch (exitError) {
+        log(`⚠️ Exit evaluation error: ${exitError.message}`);
       }
       
       // Update trade count and check for phase transitions (only every 10 cycles to avoid DB overload)
