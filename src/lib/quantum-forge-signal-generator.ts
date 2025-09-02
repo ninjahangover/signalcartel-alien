@@ -5,6 +5,7 @@
 
 import { pineScriptInputOptimizer } from './pine-script-input-optimizer';
 import { competitionStrategyRegistry } from './strategy-registry-competition';
+import { gpuService } from './gpu-acceleration-service';
 
 export interface TechnicalSignal {
   action: 'BUY' | 'SELL' | 'HOLD';
@@ -26,10 +27,19 @@ export interface TechnicalSignal {
 
 export interface PineStrategyResult {
   strategyName: string;
-  signal: 'BUY' | 'SELL' | 'HOLD';
+  recommendation: 'BUY' | 'SELL' | 'HOLD';
   confidence: number;
-  indicators: any;
-  reason: string;
+  entryReason: string;
+  riskScore: number;
+  technicalIndicators: {
+    rsi: number;
+    macd: number;
+    ema: number;
+    momentum: number;
+    volatility: number;
+  };
+  executionTime: number;
+  gpuAccelerated?: boolean;
 }
 
 class QuantumForgeSignalGenerator {
@@ -45,6 +55,9 @@ class QuantumForgeSignalGenerator {
    */
   async generateTechnicalSignal(symbol: string, price: number): Promise<TechnicalSignal> {
     try {
+      console.log(`⚡ GPU PINE SCRIPT: Parallel execution for ${symbol}`);
+      const startTime = Date.now();
+      
       // Get available Pine strategies
       const strategies = competitionStrategyRegistry.getActiveStrategies();
       
@@ -53,27 +66,74 @@ class QuantumForgeSignalGenerator {
         return this.generateBasicTechnicalSignal(symbol, price);
       }
       
-      // Run multiple Pine strategies and combine results
-      const strategyResults: PineStrategyResult[] = [];
+      // GPU PARALLEL EXECUTION - All strategies at once!
+      const strategyNames = strategies.slice(0, 3).map(s => s.name);
+      const gpuResults = await gpuService.executePineScriptsParallel(
+        [symbol],
+        strategyNames
+      );
       
-      for (const strategy of strategies.slice(0, 3)) { // Top 3 strategies
-        try {
-          const result = await this.runPineStrategy(strategy, symbol, price);
-          strategyResults.push(result);
-        } catch (error) {
-          console.log(`Strategy ${strategy.name} failed: ${error.message}`);
+      const gpuTime = Date.now() - startTime;
+      console.log(`✅ GPU PINE: ${strategyNames.length} strategies executed in ${gpuTime}ms (vs ~${strategyNames.length * 200}ms CPU)`);
+      
+      // Convert GPU results to strategy results format
+      const strategyResults: PineStrategyResult[] = [];
+      const symbolResults = gpuResults.get(symbol);
+      
+      if (symbolResults && Array.isArray(symbolResults) && symbolResults.length > 0) {
+        console.log(`🔥 GPU: Processing ${symbolResults.length} strategy results for ${symbol}`);
+        
+        for (let i = 0; i < symbolResults.length && i < strategyNames.length; i++) {
+          const gpuResult = symbolResults[i];
+          const strategyName = strategyNames[i];
+          const strategy = strategies.find(s => s.name === strategyName);
+          
+          if (gpuResult && strategy) {
+            console.log(`✅ GPU: Converting ${strategyName} result (confidence: ${gpuResult.confidence}%)`);
+            
+            // Convert GPU result to Pine strategy format
+            const convertedResult: PineStrategyResult = {
+              strategyName: strategy.name,
+              recommendation: gpuResult.signals.buy ? 'BUY' : 
+                           gpuResult.signals.sell ? 'SELL' : 'HOLD',
+              confidence: gpuResult.confidence,
+              entryReason: gpuResult.technicalAnalysis ? 
+                          `GPU: RSI ${gpuResult.technicalAnalysis.rsi?.toFixed(1)}, MACD ${gpuResult.technicalAnalysis.macd?.toFixed(3)}, Trend ${gpuResult.technicalAnalysis.trend}` :
+                          'GPU-accelerated analysis',
+              riskScore: gpuResult.technicalAnalysis?.risk === 'high' ? 0.8 : 
+                        gpuResult.technicalAnalysis?.risk === 'low' ? 0.2 : 0.5,
+              technicalIndicators: {
+                rsi: gpuResult.signals.rsi || 50,
+                macd: gpuResult.signals.macd || 0,
+                ema: gpuResult.signals.ema || price,
+                momentum: gpuResult.signals.momentum || 0,
+                volatility: gpuResult.signals.volatility || 0
+              },
+              executionTime: gpuResult.executionTime || 0,
+              gpuAccelerated: true
+            };
+            
+            strategyResults.push(convertedResult);
+          }
         }
       }
       
       if (strategyResults.length === 0) {
+        console.log('⚠️ GPU results empty or invalid format, falling back to basic analysis');
+        console.log(`🔍 Debug: symbolResults = ${JSON.stringify(symbolResults)}`);
         return this.generateBasicTechnicalSignal(symbol, price);
       }
       
-      // Combine strategy results
-      return this.combinePineStrategyResults(strategyResults, symbol, price);
+      // Combine strategy results (enhanced with GPU performance data)
+      const combinedResult = this.combinePineStrategyResults(strategyResults, symbol, price);
+      
+      // Add GPU performance metadata
+      combinedResult.source = `GPU-accelerated (${gpuTime}ms)`;
+      
+      return combinedResult;
       
     } catch (error) {
-      console.log(`Signal generation error: ${error.message}`);
+      console.log(`⚠️ GPU Pine Script error, falling back to CPU: ${error.message}`);
       return this.generateBasicTechnicalSignal(symbol, price);
     }
   }
@@ -105,10 +165,18 @@ class QuantumForgeSignalGenerator {
       
       return {
         strategyName: strategy.name,
-        signal: signal.action,
+        recommendation: signal.action,
         confidence: signal.confidence,
-        indicators,
-        reason: signal.reason
+        entryReason: signal.reason,
+        riskScore: 0.5, // Default moderate risk
+        technicalIndicators: {
+          rsi: indicators.rsi || 50,
+          macd: indicators.macd || 0,
+          ema: indicators.ema || 0,
+          momentum: indicators.momentum || 0,
+          volatility: 0 // Default
+        },
+        executionTime: 0
       };
       
     } catch (error) {
@@ -443,9 +511,9 @@ class QuantumForgeSignalGenerator {
     
     // Find the strongest individual signal first (Pine Script foundation principle)
     const strongestSignals = {
-      BUY: results.filter(r => r.signal === 'BUY').sort((a, b) => b.confidence - a.confidence),
-      SELL: results.filter(r => r.signal === 'SELL').sort((a, b) => b.confidence - a.confidence),
-      HOLD: results.filter(r => r.signal === 'HOLD').sort((a, b) => b.confidence - a.confidence)
+      BUY: results.filter(r => r.recommendation === 'BUY').sort((a, b) => b.confidence - a.confidence),
+      SELL: results.filter(r => r.recommendation === 'SELL').sort((a, b) => b.confidence - a.confidence),
+      HOLD: results.filter(r => r.recommendation === 'HOLD').sort((a, b) => b.confidence - a.confidence)
     };
     
     // Strategy priority weights for tie-breaking and enhancement
@@ -462,13 +530,13 @@ class QuantumForgeSignalGenerator {
       
       actionDetails.push({
         strategy: result.strategyName,
-        signal: result.signal,
+        signal: result.recommendation,
         confidence: result.confidence,
         weight: weight,
-        reason: result.reason
+        reason: result.entryReason
       });
       
-      console.log(`🎯 ${result.strategyName}: ${result.signal} (${(result.confidence * 100).toFixed(1)}%)`);
+      console.log(`🎯 ${result.strategyName}: ${result.recommendation} (${(result.confidence * 100).toFixed(1)}%)`);
     });
     
     // FAST TRIGGER SYSTEM: ANY signal above 50% can execute independently
@@ -502,7 +570,7 @@ class QuantumForgeSignalGenerator {
         const weight = strategyWeights[result.strategyName] || 0.33;
         const score = result.confidence * weight;
         
-        switch (result.signal) {
+        switch (result.recommendation) {
           case 'BUY':
             buyScore += score;
             break;
@@ -612,7 +680,7 @@ class QuantumForgeSignalGenerator {
    * Calculate confluence boost when multiple strategies agree
    */
   private calculateConfluenceBoost(results: PineStrategyResult[], finalAction: string) {
-    const agreementCount = results.filter(r => r.signal === finalAction).length;
+    const agreementCount = results.filter(r => r.recommendation === finalAction).length;
     const agreementRatio = agreementCount / results.length;
     
     // Boost confidence when strategies agree
@@ -697,9 +765,9 @@ class QuantumForgeSignalGenerator {
     // Combine indicators from all strategies
     const combined: any = {};
     results.forEach(result => {
-      Object.keys(result.indicators).forEach(key => {
+      Object.keys(result.technicalIndicators).forEach(key => {
         if (!combined[key]) combined[key] = [];
-        combined[key].push(result.indicators[key]);
+        combined[key].push(result.technicalIndicators[key]);
       });
     });
     
