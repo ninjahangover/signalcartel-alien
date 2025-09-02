@@ -248,16 +248,20 @@ export class GPUAccelerationService {
     const startTime = Date.now();
     
     try {
-      // Mock market data for demonstration (in real system, fetch from market data)
-      const mockPrices = Array.from({length: 100}, (_, i) => 100 + Math.sin(i * 0.1) * 10 + Math.random() * 5);
+      // Get REAL market data - not mock data!
+      const realPrices = await this.getRealMarketData(symbol);
+      if (!realPrices || realPrices.length < 50) {
+        console.warn(`⚠️ Insufficient real market data for ${symbol}, using fallback`);
+        return { strategy, symbol, confidence: 0, recommendation: 'HOLD', reason: 'insufficient_data' };
+      }
       
-      // GPU-accelerated technical analysis  
+      // GPU-accelerated technical analysis with REAL data
       const [rsi, macd, ema, momentum, volatility] = await Promise.all([
-        this.calculateRSIBatch([mockPrices], 14),
-        this.calculateMACDBatch([mockPrices], 12, 26),
-        this.calculateEMABatch([mockPrices], 20),
-        this.calculateMomentumBatch([mockPrices], 10),
-        this.calculateVolatilityBatch([mockPrices], 20)
+        this.calculateRSIBatch([realPrices], 14),
+        this.calculateMACDBatch([realPrices], 12, 26),
+        this.calculateEMABatch([realPrices], 20),
+        this.calculateMomentumBatch([realPrices], 10),
+        this.calculateVolatilityBatch([realPrices], 20)
       ]);
       
       // Strategy-specific analysis
@@ -270,7 +274,7 @@ export class GPUAccelerationService {
       const currentEMA = ema[0];
       const currentMomentum = momentum[0];
       const currentVolatility = volatility[0];
-      const currentPrice = mockPrices[mockPrices.length - 1];
+      const currentPrice = realPrices[realPrices.length - 1];
       
       // Strategy logic based on Pine Script patterns
       if (strategy.includes('rsi') || strategy.includes('RSI')) {
@@ -650,6 +654,55 @@ export class GPUAccelerationService {
     return 'NEUTRAL';
   }
   
+  /**
+   * Get real market data for a symbol - CRITICAL FIX
+   */
+  private async getRealMarketData(symbol: string): Promise<number[]> {
+    try {
+      // Use existing market data service (similar to quantum forge signal generator)
+      const response = await fetch(`https://api.coingecko.com/api/v3/coins/${this.getCoingeckoId(symbol)}/market_chart?vs_currency=usd&days=7&interval=hourly`);
+      
+      if (!response.ok) {
+        console.warn(`⚠️ Failed to fetch real data for ${symbol}, status: ${response.status}`);
+        return [];
+      }
+      
+      const data = await response.json();
+      if (!data.prices || !Array.isArray(data.prices)) {
+        console.warn(`⚠️ Invalid price data format for ${symbol}`);
+        return [];
+      }
+      
+      // Extract prices (second element of each [timestamp, price] pair)
+      const prices = data.prices.map((p: [number, number]) => p[1]);
+      console.log(`✅ GPU: Retrieved ${prices.length} real price points for ${symbol}`);
+      return prices;
+      
+    } catch (error) {
+      console.error(`❌ GPU: Error fetching real market data for ${symbol}:`, error.message);
+      return [];
+    }
+  }
+  
+  /**
+   * Map trading symbols to CoinGecko IDs
+   */
+  private getCoingeckoId(symbol: string): string {
+    const symbolMap: { [key: string]: string } = {
+      'BTCUSD': 'bitcoin',
+      'ETHUSD': 'ethereum', 
+      'SOLUSD': 'solana',
+      'AVAXUSD': 'avalanche-2',
+      'WLFIUSD': 'wrapped-wolfcoin',
+      'CROUSD': 'crypto-com-coin',
+      'TRUMPUSD': 'trumpcoin',
+      'HYPEUSD': 'hypercycle'
+    };
+    
+    const baseSymbol = symbol.replace('USD', '');
+    return symbolMap[symbol] || symbolMap[baseSymbol + 'USD'] || symbol.toLowerCase();
+  }
+
   /**
    * Cleanup GPU resources
    */

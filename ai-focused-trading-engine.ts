@@ -728,35 +728,45 @@ class AIFocusedTradingEngine {
       let exitScore = 0;
       let reasoning = '';
       
-      // ENHANCED Mathematical Intuition Exit Logic - More sensitive for maximum cash generation
+      // FIXED Mathematical Intuition Exit Logic - Realistic thresholds for actual data
       if (side === 'long') {
-        // Stronger exit signals for opposing sentiment
-        if (recommendation === 'SELL' && overallFeeling < 0.45) {
-          exitScore = Math.min(1.0, (0.45 - overallFeeling) * 2.2); // More sensitive threshold
+        // Exit signals for opposing sentiment with reasonable thresholds
+        if (recommendation === 'SELL' && overallFeeling < 0.48) {
+          exitScore = Math.min(1.0, (0.50 - overallFeeling) * 5.0); // More sensitive scoring
           reasoning = `Mathematical intuition suggests SELL with ${(overallFeeling * 100).toFixed(1)}% feeling`;
         } 
-        // WAIT signals can also trigger exits if mathematical feeling is weak
-        else if (recommendation === 'WAIT' && overallFeeling < 0.38) {
-          exitScore = Math.min(0.8, (0.38 - overallFeeling) * 3.0); // New: WAIT + low feeling = exit
-          reasoning = `Mathematical WAIT signal with low ${(overallFeeling * 100).toFixed(1)}% feeling suggests exit`;
+        // WAIT signals trigger exits when feeling is below average
+        else if (recommendation === 'WAIT' && overallFeeling < 0.45) {
+          exitScore = Math.min(0.8, (0.48 - overallFeeling) * 4.0); // Reasonable WAIT threshold
+          reasoning = `Mathematical WAIT signal with ${(overallFeeling * 100).toFixed(1)}% feeling suggests exit`;
         }
-        // Profit-taking with neutral/negative mathematical feeling
-        else if (recommendation === 'HOLD' && pnlPercent > 0.5 && overallFeeling < 0.5) {
-          exitScore = 0.4 + (pnlPercent * 0.02); // Scale with profit
-          reasoning = `Profitable position with weak mathematical feeling`;
+        // HOLD positions can still exit if mathematical feeling is weak
+        else if (recommendation === 'HOLD' && overallFeeling < 0.42) {
+          exitScore = Math.min(0.6, (0.45 - overallFeeling) * 3.0); // Exit weak HOLD positions
+          reasoning = `Weak mathematical feeling ${(overallFeeling * 100).toFixed(1)}% suggests caution`;
+        }
+        // Profit-taking with any negative mathematical sentiment
+        else if (pnlPercent > 0.3 && overallFeeling < 0.47) {
+          exitScore = 0.2 + (pnlPercent * 0.01) + ((0.48 - overallFeeling) * 2.0);
+          reasoning = `Profitable position with sub-optimal mathematical feeling`;
         }
       } else if (side === 'short') {
-        if (recommendation === 'BUY' && overallFeeling > 0.55) {
-          exitScore = Math.min(1.0, (overallFeeling - 0.55) * 2.2);
+        if (recommendation === 'BUY' && overallFeeling > 0.52) {
+          exitScore = Math.min(1.0, (overallFeeling - 0.50) * 5.0);
           reasoning = `Mathematical intuition suggests BUY with ${(overallFeeling * 100).toFixed(1)}% feeling`;
         }
-        else if (recommendation === 'WAIT' && overallFeeling > 0.62) {
-          exitScore = Math.min(0.8, (overallFeeling - 0.62) * 3.0);
-          reasoning = `Mathematical WAIT signal with high ${(overallFeeling * 100).toFixed(1)}% feeling suggests exit`;
+        else if (recommendation === 'WAIT' && overallFeeling > 0.55) {
+          exitScore = Math.min(0.8, (overallFeeling - 0.52) * 4.0);
+          reasoning = `Mathematical WAIT signal with ${(overallFeeling * 100).toFixed(1)}% feeling suggests exit`;
         }
-        else if (recommendation === 'HOLD' && pnlPercent > 0.5 && overallFeeling > 0.5) {
-          exitScore = 0.4 + (pnlPercent * 0.02);
-          reasoning = `Profitable position with strong mathematical feeling`;
+        else if (recommendation === 'HOLD' && overallFeeling > 0.58) {
+          exitScore = Math.min(0.6, (overallFeeling - 0.55) * 3.0);
+          reasoning = `Strong mathematical feeling ${(overallFeeling * 100).toFixed(1)}% suggests short exit`;
+        }
+        // Profit-taking with positive mathematical sentiment
+        else if (pnlPercent > 0.3 && overallFeeling > 0.53) {
+          exitScore = 0.2 + (pnlPercent * 0.01) + ((overallFeeling - 0.52) * 2.0);
+          reasoning = `Profitable short with strengthening mathematical feeling`;
         }
       }
       

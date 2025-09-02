@@ -1,0 +1,1 @@
+import { competitionStrategyRegistry } from "./src/lib/strategy-registry-competition"; console.log("Active strategies:", competitionStrategyRegistry.getActiveStrategies().length); console.log("Strategy names:", competitionStrategyRegistry.getActiveStrategies().map(s => s.name));
