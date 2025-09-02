@@ -425,6 +425,85 @@ class AIFocusedTradingEngine {
     }
   }
 
+  private async getCurrentPrice(symbol: string): Promise<number | null> {
+    try {
+      // Use the existing minimal price fetch method
+      const price = await this.getMinimalPrice(symbol);
+      return price;
+    } catch (error) {
+      this.log(`❌ Price fetch failed for ${symbol}: ${error.message}`);
+      return null;
+    }
+  }
+
+  private async evaluateExitOpportunities(): Promise<void> {
+    try {
+      const openPositions = await this.positionManager.getOpenPositions();
+      
+      this.log(`🔍 Smart Exit Check: Found ${openPositions.length} open positions to evaluate`);
+      
+      for (const position of openPositions) {
+        const entryPrice = position.entryPrice;
+        const side = position.side;
+        const positionSymbol = position.symbol;
+        const positionAgeMs = Date.now() - new Date(position.openTime).getTime();
+        const positionAgeMinutes = positionAgeMs / (1000 * 60);
+        
+        // Get current price for this position's symbol
+        const positionCurrentPrice = await this.getCurrentPrice(positionSymbol);
+        if (!positionCurrentPrice) {
+          this.log(`⚠️ Cannot get current price for ${positionSymbol} - skipping exit evaluation`);
+          continue;
+        }
+        
+        // Calculate current P&L
+        const priceChange = (positionCurrentPrice - entryPrice) / entryPrice;
+        const pnlPercent = side === 'long' ? priceChange * 100 : -priceChange * 100;
+        
+        this.log(`📊 ${positionSymbol}: Entry $${entryPrice} → Current $${positionCurrentPrice} = ${pnlPercent.toFixed(2)}% (${positionAgeMinutes.toFixed(1)}min)`);
+        
+        // 🎯 HYBRID EXIT SYSTEM: Guaranteed bounds with AI optimization
+        let shouldExit = false;
+        let exitReason = '';
+        
+        const TAKE_PROFIT_PERCENT = 5.5;  // Ceiling
+        const STOP_LOSS_PERCENT = 1.5;    // Floor - Proven strategy from user experience
+        
+        // Check percentage-based exits (guaranteed bounds)
+        if (pnlPercent >= TAKE_PROFIT_PERCENT) {
+          shouldExit = true;
+          exitReason = `take_profit_${TAKE_PROFIT_PERCENT}pct`;
+          this.log(`🎯 TAKE PROFIT HIT: ${positionSymbol} profit ${pnlPercent.toFixed(2)}% ≥ ${TAKE_PROFIT_PERCENT}%`);
+        }
+        else if (pnlPercent <= -STOP_LOSS_PERCENT) {
+          shouldExit = true;
+          exitReason = `stop_loss_${STOP_LOSS_PERCENT}pct`;
+          this.log(`🚨 STOP LOSS HIT: ${positionSymbol} loss ${pnlPercent.toFixed(2)}% ≤ -${STOP_LOSS_PERCENT}%`);
+        }
+        
+        // Execute exit if criteria met
+        if (shouldExit) {
+          try {
+            const closedPosition = await this.positionManager.closePosition(
+              position.id,
+              positionCurrentPrice,
+              exitReason
+            );
+            
+            const winLoss = closedPosition.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
+            this.log(`🎯 POSITION CLOSED: ${closedPosition.position.id} | ${exitReason.toUpperCase()} | P&L: $${closedPosition.pnl.toFixed(2)} | ${winLoss}`);
+            
+          } catch (exitError) {
+            this.log(`❌ Exit failed for ${position.id}: ${exitError.message}`);
+          }
+        }
+      }
+      
+    } catch (error) {
+      this.log(`⚠️ Exit evaluation error: ${error.message}`);
+    }
+  }
+
   async start(): Promise<void> {
     this.log('🚀 AI-FOCUSED QUANTUM FORGE™ TRADING ENGINE STARTING');
     this.log('🎯 PRIORITY: Maximum AI performance, minimal infrastructure overhead');
@@ -461,6 +540,10 @@ class AIFocusedTradingEngine {
         this.log(`\n🔄 AI TRADING CYCLE ${cycleCount}`);
         
         await this.executeAITradingCycle();
+        
+        // 🎯 CONTINUOUS EXIT MONITORING - Check all positions for exit opportunities
+        this.log(`🔍 Running exit evaluation for all open positions...`);
+        await this.evaluateExitOpportunities();
         
         // Aggressive cycle timing for maximum AI learning and profit extraction
         const { phase } = await this.getCurrentPhase();

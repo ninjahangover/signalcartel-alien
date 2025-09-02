@@ -949,6 +949,14 @@ class ProductionTradingEngine {
       
       if (marketData.length === 0) {
         log('⚠️  No valid trading pairs available (all price fetches failed)');
+        // 🚨 CRITICAL FIX: Still run exit evaluation even if no new trades possible
+        log('🔍 Running exit evaluation for all open positions (no new trades)...');
+        await this.evaluateExitOpportunities(
+          'BTCUSD',  // dummy symbol  
+          50000,     // dummy price
+          0.5,       // placeholder confidence
+          currentPhase
+        );
         return;
       }
       
