@@ -1175,7 +1175,9 @@ class ProductionTradingEngine {
           } else {
             // Enhanced fallback: Minimum viable position sizing for Phase 0
             const accountBalance = 10000; // $10K starting balance
-            const baseSize = Math.max(currentPhase.features.positionSizing, accountBalance * 0.0001); // At least 0.01% of balance ($1 minimum)
+            const phasePositionPercent = currentPhase.features.positionSizing; // This is a percentage (0.001 = 0.1%)
+            const phasePositionDollars = accountBalance * phasePositionPercent; // Convert to dollars
+            const baseSize = Math.max(phasePositionDollars, accountBalance * 0.01); // At least 1% of balance ($100 minimum)
             const aiSystemCount = aiAnalysis.aiSystems ? aiAnalysis.aiSystems.length : 1;
             const multiAIBonus = Math.min(aiSystemCount * 0.25, 1.0);
             const confidenceMultiplier = Math.min(aiAnalysis.confidence * 2.0, 3.0); // Increased multiplier
@@ -1190,7 +1192,7 @@ class ProductionTradingEngine {
             const minimumPosition = accountBalance * 0.0005; // 0.05% minimum ($5 minimum)
             quantity = Math.max(quantity, minimumPosition);
             
-            log(`🧠 ENHANCED FALLBACK SIZING: Base $${baseSize.toFixed(2)} × AI(${aiSystemCount}) × Conf(${(aiAnalysis.confidence * 100).toFixed(1)}%) × Balance = $${quantity.toFixed(2)}`);
+            log(`🧠 ENHANCED FALLBACK SIZING: Phase(${(phasePositionPercent*100).toFixed(1)}%=$${phasePositionDollars.toFixed(2)}) → Base $${baseSize.toFixed(2)} × AI(${aiSystemCount}) × Conf(${(aiAnalysis.confidence * 100).toFixed(1)}%) × Balance = $${quantity.toFixed(2)}`);
           }
           
           // 🎯 ENHANCED RISK MANAGEMENT

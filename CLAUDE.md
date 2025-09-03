@@ -85,6 +85,46 @@ const result = await this.positionManager.openPosition({
 
 **🚨 CRITICAL FOR DEV2**: This fix MUST be deployed immediately to prevent account destruction.
 
+### 💥 **SECONDARY POSITION SIZING BUG: Percentage/Dollar Mixing (September 3, 2025)**
+
+**🚨 ADDITIONAL CRITICAL BUG DISCOVERED: Position Sizing Calculation Mixed Percentages with Dollars**
+
+**Problem**: After fixing unit conversion, positions were still too small ($5 instead of $100-400).
+
+**Root Cause**: 
+- **Phase Configuration**: Phase 0 `positionSizing: 0.001` (0.1% percentage)
+- **Calculation Error**: `Math.max(currentPhase.features.positionSizing, accountBalance * 0.0001)`  
+- **Bug**: Mixed 0.001 (percentage) with $1 (dollars) → used 0.001 as dollar amount
+- **Result**: $5 minimum positions instead of proper scaling
+
+**Fix Applied** (production-trading-multi-pair.ts:1178-1180):
+```typescript
+// BEFORE (BROKEN):
+const baseSize = Math.max(currentPhase.features.positionSizing, accountBalance * 0.0001); // Mixed types!
+
+// AFTER (FIXED):
+const phasePositionPercent = currentPhase.features.positionSizing; // This is a percentage (0.001 = 0.1%)
+const phasePositionDollars = accountBalance * phasePositionPercent; // Convert to dollars
+const baseSize = Math.max(phasePositionDollars, accountBalance * 0.01); // At least 1% of balance ($100 minimum)
+```
+
+**✅ FIX VERIFICATION**:
+```
+🧠 ENHANCED FALLBACK SIZING: Phase(0.1%=$10.00) → Base $100.00 × AI(1) × Conf(88.3%) × Balance = $220.71
+💰 Position Sizing: $220.71 = 8.953702 AVAXUSD @ $24.65
+📈 OPENED LONG position: 8.953701825557808 AVAXUSD @ $24.65
+
+🧠 ENHANCED FALLBACK SIZING: Phase(0.1%=$10.00) → Base $100.00 × AI(1) × Conf(83.6%) × Balance = $418.21
+💰 Position Sizing: $418.21 = 1900.950000 WLFIUSD @ $0.22
+```
+
+**🎯 IMPACT**: 
+- **Before**: $5.00 positions (too small for meaningful profits)
+- **After**: $220-$418 positions (proper comeback sizing)
+- **Risk**: Maintained at 2-4% of account (controlled growth)
+
+**🚨 CRITICAL FOR DEV2**: Both position sizing fixes are essential for proper trading functionality.
+
 ---
 
 ## 📋 **COMPREHENSIVE FILE INVENTORY FOR DEV2 SYNCHRONIZATION** (September 3, 2025)
@@ -452,10 +492,12 @@ grep "Trade decision.*TRADE\|shouldTrade.*false" /tmp/signalcartel-logs/producti
 ### ✅ **SUCCESS CRITERIA CHECKLIST**
 
 **🚨 CRITICAL POSITION SIZING VERIFICATION (MUST CHECK FIRST):**
-- [ ] **Position sizing log shows dollar-to-unit conversion**: "💰 Position Sizing: $5.00 = 0.001164 ETHUSD @ $4296.21"  
-- [ ] **Positions are $5-100 range NOT $1000+ range**: Check position_value_usd in database
-- [ ] **Unit quantities are decimal (0.001) NOT whole numbers (100)**: Verify quantity column
-- [ ] **NO positions over $500 value**: Any position >$500 indicates bug still present
+- [ ] **Position sizing log shows proper calculation**: "🧠 ENHANCED FALLBACK SIZING: Phase(0.1%=$10.00) → Base $100.00 × AI(1) × Conf(88.3%) × Balance = $220.71"
+- [ ] **Position sizing shows dollar-to-unit conversion**: "💰 Position Sizing: $220.71 = 8.953702 AVAXUSD @ $24.65"  
+- [ ] **Positions are $100-500 range NOT $1000+ or $5 range**: Check position_value_usd in database
+- [ ] **Unit quantities are properly calculated (8.95 not 100 or 0.001)**: Verify quantity column
+- [ ] **NO positions over $1000 value**: Any position >$1000 indicates original bug still present
+- [ ] **NO positions under $50 value**: Any position <$50 indicates calculation bug still present
 
 **SYSTEM FUNCTIONALITY VERIFICATION:**
 - [ ] All 28 files synchronized from dev1 to dev2 (including position sizing fix)
@@ -484,8 +526,9 @@ FROM \"ManagedPosition\"
 ORDER BY \"createdAt\" DESC
 LIMIT 5;"
 
-# ✅ GOOD RESULT: position_value_usd shows $5-$100 range
-# ❌ BAD RESULT: position_value_usd shows $1000+ (bug still present - STOP IMMEDIATELY)
+# ✅ GOOD RESULT: position_value_usd shows $100-$500 range  
+# ⚠️ CONCERNING RESULT: position_value_usd shows $5-$50 range (calculation bug still present)
+# ❌ BAD RESULT: position_value_usd shows $1000+ (original bug still present - STOP IMMEDIATELY)
 ```
 
 **Final Test: 30-Minute Live Operation**
