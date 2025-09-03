@@ -1213,13 +1213,19 @@ class ProductionTradingEngine {
           stopLoss = data.price * (side === 'long' ? (1 - adjustedStopLoss) : (1 + adjustedStopLoss));
           takeProfit = data.price * (side === 'long' ? (1 + adjustedTakeProfit) : (1 - adjustedTakeProfit));
           
+          // CRITICAL FIX: Convert dollar amount to units based on asset price
+          const positionSizeInDollars = quantity;
+          const actualQuantity = positionSizeInDollars / data.price;
+          
+          log(`💰 Position Sizing: $${positionSizeInDollars.toFixed(2)} = ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price.toFixed(2)}`);
+          
           try {
             // Use production position management system with AI strategy name
             const strategyName = `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'basic'}`;
             const result = await this.positionManager.openPosition({
               symbol: data.symbol,
               side,
-              quantity,
+              quantity: actualQuantity,
               price: data.price,
               strategy: strategyName,
               timestamp: data.timestamp,
