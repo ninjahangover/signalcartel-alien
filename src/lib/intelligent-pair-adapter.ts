@@ -138,8 +138,8 @@ class IntelligentPairAdapter {
     const estimatedCommission = this.commissionProfile.taker * 2; // Assume taker fees both ways
     const commissionBreakeven = estimatedCommission * 100; // Convert to percentage
     
-    // Minimum profit target must exceed commission costs + small buffer
-    const minProfitTarget = commissionBreakeven * 1.5; // 50% buffer above commission
+    // Minimum profit target must exceed commission costs + small buffer  
+    const minProfitTarget = commissionBreakeven * 1.2; // 20% buffer above commission (was 50%)
     
     // Enhanced confidence calculation
     let enhancedConfidence = baseConfidence;
@@ -154,12 +154,13 @@ class IntelligentPairAdapter {
     const winRateBoost = characteristics.winRate > 0.6 ? 1.1 : characteristics.winRate > 0.4 ? 1.0 : 0.9;
     enhancedConfidence *= winRateBoost;
     
-    // Commission-aware confidence threshold
-    const commissionAwareThreshold = 45 + (commissionBreakeven * 2); // Higher threshold for high commission pairs
+    // Commission-aware confidence threshold  
+    const commissionAwareThreshold = 40 + (commissionBreakeven * 1.5); // Reduced threshold for better trading
     
     // Only trade if we expect to beat commission by significant margin
-    const shouldTrade = enhancedConfidence >= commissionAwareThreshold && 
-                       Math.abs(predictedMove) >= minProfitTarget;
+    // Allow trading if either condition is strong (high confidence OR good predicted move)
+    const shouldTrade = (enhancedConfidence >= commissionAwareThreshold && Math.abs(predictedMove) >= minProfitTarget * 0.5) ||
+                       (enhancedConfidence >= 65 && Math.abs(predictedMove) >= 0.1); // High confidence override
     
     // Dynamic position sizing based on confidence and expected profit
     let positionSize = 0;

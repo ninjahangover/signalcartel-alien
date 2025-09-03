@@ -252,7 +252,16 @@ export class EnhancedMathematicalIntuition {
       const baseMove = (signalConfidence / 100) * 3; // Up to 3% for 100% confidence (more aggressive)
       
       // Direction based on signal
-      const direction = signalAction === 'BUY' ? 1 : signalAction === 'SELL' ? -1 : 0;
+      let direction = signalAction === 'BUY' ? 1 : signalAction === 'SELL' ? -1 : 0;
+      
+      // Special handling for HOLD signals with decent confidence
+      // Convert HOLD to a small directional move based on confidence
+      if (direction === 0 && signalConfidence >= 35) {
+        // Use intuition to suggest direction for confident HOLD signals
+        direction = intuition >= 0.5 ? 1 : -1; // Bullish or bearish lean
+        console.log(`🔄 Converting HOLD with ${signalConfidence}% confidence to ${direction > 0 ? 'BUY' : 'SELL'} lean (intuition: ${(intuition*100).toFixed(1)}%)`);
+      }
+      
       predictedMove = baseMove * direction;
       
       console.log(`📈 ${symbol} predicted move calculation: confidence=${signalConfidence}%, action=${signalAction}, baseMove=${baseMove.toFixed(3)}%, predicted=${predictedMove.toFixed(3)}%`);
