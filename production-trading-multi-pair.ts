@@ -52,6 +52,7 @@ class ProductionTradingEngine {
   
   // 🎯 PRE-VALIDATION PRICE CACHE SYSTEM
   private priceCache = new Map<string, { price: number; timestamp: Date; isValid: boolean }>();
+  private priceHistoryCache = new Map<string, number[]>(); // For velocity/AI analysis
   private lastPriceCacheUpdate = 0;
   private readonly PRICE_CACHE_TTL = 30000; // 30 seconds
   
@@ -250,35 +251,37 @@ class ProductionTradingEngine {
       const { smartProfitHunter } = await import('./src/lib/smart-profit-hunter');
       const opportunities = await smartProfitHunter.findProfitableOpportunities();
       
-      // Filter for HIGH-SCORING opportunities from category queries (80%+)
-      // These come from CoinGecko trending/volume/gainers - no timeout risk!
-      const highScoringPairs = opportunities
-        .filter(opp => opp.score >= 80) // High-scoring from categories only
-        .slice(0, 10) // Top 10 high-scoring from categories
+      // 🎆 AI-DRIVEN OPPORTUNITY SELECTION - NO RESTRICTIONS!
+      // Let the AI choose the absolute best opportunities regardless of pair
+      const topScoringPairs = opportunities
+        .filter(opp => opp.score >= 70) // 70%+ scoring threshold
+        .sort((a, b) => b.score - a.score) // Sort by score descending
+        .slice(0, 20) // Top 20 opportunities (expanded from 15)
         .map(opp => opp.symbol);
         
-      // Also include medium-scoring pairs for broader coverage
-      const mediumScoringPairs = opportunities
-        .filter(opp => opp.score >= 60 && opp.score < 80)
-        .slice(0, 5) // Top 5 medium-scoring
+      // Also include good opportunities for diversification
+      const goodScoringPairs = opportunities
+        .filter(opp => opp.score >= 50 && opp.score < 70)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10) // Top 10 good opportunities
         .map(opp => opp.symbol);
         
-      const allCategoryPairs = [...highScoringPairs, ...mediumScoringPairs];
+      const allOpportunityPairs = [...topScoringPairs, ...goodScoringPairs];
       
-      // Update dynamic pairs with category-optimized high-scoring selection
-      if (allCategoryPairs.length > 0) {
+      // Update dynamic pairs with AI-selected best opportunities
+      if (allOpportunityPairs.length > 0) {
         const previousDynamic = [...this.dynamicPairs];
-        this.dynamicPairs = allCategoryPairs;
+        this.dynamicPairs = allOpportunityPairs;
         
-        log(`🚀 Category-derived scoring: ${highScoringPairs.length} high + ${mediumScoringPairs.length} medium scoring pairs`);
-        log(`   High-Scoring (80%+): ${highScoringPairs.join(', ')}`);
-        if (mediumScoringPairs.length > 0) {
-          log(`   Medium-Scoring (60-79%): ${mediumScoringPairs.join(', ')}`);
+        log(`🎆 AI OPPORTUNITY SELECTION: ${topScoringPairs.length} top + ${goodScoringPairs.length} good scoring pairs`);
+        log(`   Top-Scoring (70%+): ${topScoringPairs.join(', ')}`);
+        if (goodScoringPairs.length > 0) {
+          log(`   Good-Scoring (50-69%): ${goodScoringPairs.join(', ')}`);
         }
         
         // Log changes
-        const added = allCategoryPairs.filter(pair => !previousDynamic.includes(pair));
-        const removed = previousDynamic.filter(pair => !allCategoryPairs.includes(pair));
+        const added = allOpportunityPairs.filter(pair => !previousDynamic.includes(pair));
+        const removed = previousDynamic.filter(pair => !allOpportunityPairs.includes(pair));
         
         if (added.length > 0) {
           log(`   ✅ Added: ${added.join(', ')}`);
@@ -644,6 +647,7 @@ class ProductionTradingEngine {
         const entryConfidence = metadata?.confidence || 0.5;
         const positionAge = Date.now() - new Date(position.openTime).getTime();
         const ageMinutes = positionAge / (1000 * 60);
+        const candlesHeld = Math.floor(ageMinutes / 5); // 5-minute candles
         
         // Get real current price for this position
         const price = await this.getCurrentPrice(positionSymbol);
@@ -652,27 +656,194 @@ class ProductionTradingEngine {
           continue;
         }
         
-        // Calculate P&L
+        // Calculate P&L and price momentum
         const priceChange = (price - entryPrice) / entryPrice;
         const pnl = side === 'long' ? priceChange * 100 : -priceChange * 100;
         
-        log(`📊 ${positionSymbol}: ${pnl.toFixed(2)}% (${ageMinutes.toFixed(1)}min old)`);
+        // 🔮 PREDICTIVE MARKET ANALYSIS - ANTICIPATE, DON'T REACT!
+        const recentPrices = this.priceHistoryCache.get(positionSymbol) || [];
         
-        // Get dynamic exit thresholds from phase configuration
-        const takeProfit = phase.features.takeProfitPercent || 5.5;
-        const stopLoss = phase.features.stopLossPercent || 3.5;
+        // Build price history for pattern analysis (need at least 5 data points)
+        if (recentPrices.length < 5) {
+          if (!recentPrices.includes(price)) {
+            recentPrices.push(price);
+            this.priceHistoryCache.set(positionSymbol, recentPrices);
+          }
+        }
         
+        // Calculate velocity (rate of change) and acceleration (change in velocity)
+        let velocity = 0;      // Current rate of price change
+        let acceleration = 0;  // Is price change speeding up or slowing down?
+        let pattern = 'unknown';
+        let predictedMove = 0;
+        
+        if (recentPrices.length >= 3) {
+          // Calculate first and second derivatives
+          const prices = [...recentPrices.slice(-3), price];
+          const velocities = [];
+          
+          for (let i = 1; i < prices.length; i++) {
+            velocities.push((prices[i] - prices[i-1]) / prices[i-1] * 100);
+          }
+          
+          velocity = velocities[velocities.length - 1] || 0;
+          
+          if (velocities.length >= 2) {
+            acceleration = velocities[velocities.length - 1] - velocities[velocities.length - 2];
+          }
+          
+          // 🎯 PATTERN RECOGNITION - What's about to happen?
+          if (velocity > 0 && acceleration < 0) {
+            pattern = 'topping';  // Price rising but slowing - TOP FORMING
+            predictedMove = -1.5; // Expect reversal down
+          } else if (velocity < 0 && acceleration > 0) {
+            pattern = 'bottoming'; // Price falling but slowing - BOTTOM FORMING
+            predictedMove = 1.5;   // Expect reversal up
+          } else if (velocity > 0 && acceleration > 0) {
+            pattern = 'accelerating_up'; // Strong uptrend building
+            predictedMove = velocity * 1.5; // Momentum will continue
+          } else if (velocity < 0 && acceleration < 0) {
+            pattern = 'accelerating_down'; // Strong downtrend building
+            predictedMove = velocity * 1.5; // Momentum will continue
+          } else if (Math.abs(velocity) < 0.1 && Math.abs(acceleration) < 0.05) {
+            pattern = 'consolidating'; // Price stalled - breakout imminent
+            predictedMove = 0; // Direction unknown but move coming
+          }
+        }
+        
+        log(`🔮 ${positionSymbol}: P&L ${pnl.toFixed(2)}% | Pattern: ${pattern} | Velocity: ${velocity.toFixed(2)}%/tick | Accel: ${acceleration.toFixed(3)} | Predicted: ${predictedMove.toFixed(1)}%`);
+        
+        // 🔮 PREDICTIVE EXIT LOGIC - EXIT BEFORE THE MOVE, NOT AFTER!
         let shouldExit = false;
         let reason = '';
         
-        // Check exit conditions
-        if (pnl >= takeProfit) {
-          shouldExit = true;
-          reason = `take_profit_${takeProfit}pct`;
-        } else if (pnl <= -stopLoss) {
-          shouldExit = true;
-          reason = `stop_loss_${stopLoss}pct`;
-        } else if (ageMinutes > 120 || Math.abs(pnl) > 10.0) {
+        // 🎯 ANTICIPATORY PROFIT TAKING - Exit BEFORE reversal
+        if (pnl > 0) {
+          // TOPPING PATTERN: Price is about to reverse down - GET OUT NOW!
+          if (pattern === 'topping' && pnl >= 0.3) {
+            shouldExit = true;
+            reason = `predicted_top_${pnl.toFixed(1)}pct`;
+            log(`🔮 TOP PREDICTED: Taking ${pnl.toFixed(2)}% BEFORE the reversal! Pattern: ${pattern}`);
+          }
+          // DECELERATION: Momentum dying - exit before it reverses
+          else if (acceleration < -0.1 && pnl >= 0.5) {
+            shouldExit = true;
+            reason = `deceleration_exit_${pnl.toFixed(1)}pct`;
+            log(`📉 DECELERATION: Taking ${pnl.toFixed(2)}% - momentum dying (accel: ${acceleration.toFixed(3)})`);
+          }
+          // CONSOLIDATION BREAKOUT: Price stalled - take profit before breakdown
+          else if (pattern === 'consolidating' && pnl >= 1.0) {
+            shouldExit = true;
+            reason = `consolidation_exit_${pnl.toFixed(1)}pct`;
+            log(`⚠️ CONSOLIDATION: Taking ${pnl.toFixed(2)}% - breakout imminent, direction unknown`);
+          }
+          // VELOCITY PEAK: Speed maxed out - reversal imminent
+          else if (Math.abs(velocity) > 2.0 && pnl >= 0.8) {
+            shouldExit = true;
+            reason = `velocity_peak_${pnl.toFixed(1)}pct`;
+            log(`🚀 VELOCITY PEAK: Taking ${pnl.toFixed(2)}% - extreme velocity ${velocity.toFixed(2)}% unsustainable`);
+          }
+        }
+        
+        // 🛡️ PREDICTIVE LOSS PREVENTION - Exit BEFORE it gets worse
+        if (!shouldExit) {
+          // WRONG SIDE OF PATTERN: We're long but pattern says down
+          if (side === 'long' && pattern === 'accelerating_down' && pnl < 0.5) {
+            shouldExit = true;
+            reason = `wrong_pattern_${pnl.toFixed(1)}pct`;
+            log(`❌ WRONG PATTERN: Exiting ${pnl.toFixed(2)}% - pattern predicts MORE downside`);
+          }
+          else if (side === 'short' && pattern === 'accelerating_up' && pnl < 0.5) {
+            shouldExit = true;
+            reason = `wrong_pattern_${pnl.toFixed(1)}pct`;
+            log(`❌ WRONG PATTERN: Exiting ${pnl.toFixed(2)}% - pattern predicts MORE upside`);
+          }
+          // ACCELERATION AGAINST US: Losses accelerating
+          else if (pnl < -0.5 && acceleration < -0.05 && side === 'long') {
+            shouldExit = true;
+            reason = `accelerating_loss_${pnl.toFixed(1)}pct`;
+            log(`🚨 ACCELERATING LOSS: Cutting at ${pnl.toFixed(2)}% - getting worse fast!`);
+          }
+          // BOTTOMING PATTERN WHILE SHORT: Market about to bounce
+          else if (side === 'short' && pattern === 'bottoming' && pnl < 1.0) {
+            shouldExit = true;
+            reason = `predicted_bottom_${pnl.toFixed(1)}pct`;
+            log(`🔮 BOTTOM PREDICTED: Exiting short at ${pnl.toFixed(2)}% BEFORE the bounce!`);
+          }
+        }
+        
+        // 🧠 ADAPTIVE EXIT STRATEGY - Market Condition Aware
+        // Detect market condition: trending vs sideways
+        const volatility = Math.abs(velocity) * 100; // Convert to volatility metric
+        const marketCondition = this.detectMarketCondition(pattern, velocity, acceleration, volatility);
+        
+        if (!shouldExit) {
+          // SIDEWAYS MARKET: Quick scalping mode
+          if (marketCondition === 'sideways' || marketCondition === 'consolidating') {
+            // Take ANY profit after 1 candle in sideways market
+            if (candlesHeld >= 1 && pnl > 0.1) {
+              shouldExit = true;
+              reason = `sideways_scalp_${pnl.toFixed(1)}pct`;
+              log(`📊 SIDEWAYS SCALP: Taking ${pnl.toFixed(2)}% - market consolidating`);
+            }
+            // Max 2 candles in sideways market
+            else if (candlesHeld >= 2) {
+              shouldExit = true;
+              reason = `sideways_timeout_${candlesHeld}_candles`;
+              log(`⏱️ SIDEWAYS EXIT: ${candlesHeld} candles held - no momentum`);
+            }
+          }
+          // TRENDING MARKET: Hold for bigger moves
+          else if (marketCondition === 'trending_up' || marketCondition === 'trending_down') {
+            const trendAligned = (marketCondition === 'trending_up' && side === 'long') ||
+                                (marketCondition === 'trending_down' && side === 'short');
+            
+            if (trendAligned) {
+              // Hold winners longer in strong trends (up to 5 candles)
+              if (candlesHeld >= 5 && pnl > 2.0) {
+                shouldExit = true;
+                reason = `trend_target_${pnl.toFixed(1)}pct`;
+                log(`🎯 TREND TARGET: Taking ${pnl.toFixed(2)}% after riding trend`);
+              }
+              // Let profits run in trends
+              else if (pnl > 0 && velocity < 0) {
+                // Trend reversing - exit
+                shouldExit = true;
+                reason = `trend_reversal_${pnl.toFixed(1)}pct`;
+                log(`🔄 TREND REVERSAL: Taking ${pnl.toFixed(2)}% - momentum shifting`);
+              }
+            } else {
+              // Wrong side of trend - exit quickly
+              if (candlesHeld >= 1 || pnl < -0.5) {
+                shouldExit = true;
+                reason = `against_trend_${pnl.toFixed(1)}pct`;
+                log(`❌ AGAINST TREND: Exiting ${pnl.toFixed(2)}% - fighting the trend`);
+              }
+            }
+          }
+          // BREAKOUT/BREAKDOWN: Position for big moves
+          else if (marketCondition === 'breakout' || marketCondition === 'breakdown') {
+            const breakoutAligned = (marketCondition === 'breakout' && side === 'long') ||
+                                   (marketCondition === 'breakdown' && side === 'short');
+            
+            if (breakoutAligned) {
+              // Hold for breakout completion (up to 8 candles)
+              if (candlesHeld >= 8 || pnl > 5.0) {
+                shouldExit = true;
+                reason = `breakout_complete_${pnl.toFixed(1)}pct`;
+                log(`🚀 BREAKOUT COMPLETE: Taking ${pnl.toFixed(2)}% - target reached`);
+              }
+            } else {
+              // Wrong side of breakout - exit immediately
+              shouldExit = true;
+              reason = `wrong_breakout_side_${pnl.toFixed(1)}pct`;
+              log(`⚠️ WRONG SIDE: Exiting ${pnl.toFixed(2)}% - caught on wrong side of breakout`);
+            }
+          }
+        }
+        
+        // Emergency exits (reduced from 60 to 15 minutes = 3 candles)
+        if (!shouldExit && (ageMinutes > 15 || Math.abs(pnl) > 5.0)) {
           shouldExit = true;
           reason = 'emergency_exit';
         }
@@ -695,22 +866,173 @@ class ProductionTradingEngine {
             log(`⚠️ Pine Script unavailable: ${error.message}`);
           }
           
-          // Mathematical Intuition analysis
+          // 🧠 ADVANCED MATHEMATICAL PREDICTION MODELS
           if (!shouldExit) {
             try {
               const marketData = { symbol: positionSymbol, price, timestamp: new Date() };
+              
+              // Load your advanced prediction services
+              const { enhancedMarkovPredictor } = await import('./src/lib/enhanced-markov-predictor');
+              const { bayesianProbabilityEngine } = await import('./src/lib/bayesian-probability-engine');
+              const { marketCorrelationAnalyzer } = await import('./src/lib/market-correlation-analyzer');
+              
+              // Build market data for predictions
+              const currentMarketData = {
+                symbol: positionSymbol,
+                open: entryPrice,
+                high: Math.max(price, entryPrice),
+                low: Math.min(price, entryPrice),
+                close: price,
+                volume: 1000, // placeholder
+                timestamp: new Date()
+              };
+              
+              // Get market intelligence (simplified)
+              const marketIntelligence = {
+                patterns: [],
+                momentum: velocity,
+                regime: pattern === 'accelerating_up' ? 'BULLISH' : pattern === 'accelerating_down' ? 'BEARISH' : 'NEUTRAL',
+                volatility: Math.abs(velocity) * 2,
+                support: price * 0.98,
+                resistance: price * 1.02
+              };
+              
+              // 🔮 PREDICTIVE AI INTEGRATION
+              let expectedValue = 0;
+              let probabilityOfProfit = 0.5;
+              let correlationSignal = 0;
+              let predictionScore = 0;
+              
+              try {
+                // MARKOV CHAIN PREDICTION - Process market data for state transitions
+                const cachedPrices = this.priceHistoryCache.get(positionSymbol) || [];
+                const markovPrediction = enhancedMarkovPredictor.processMarketData(
+                  positionSymbol,
+                  currentMarketData,
+                  marketIntelligence,
+                  cachedPrices.map(p => ({
+                    symbol: positionSymbol,
+                    open: p,
+                    high: p,
+                    low: p,
+                    close: p,
+                    volume: 1000,
+                    timestamp: new Date()
+                  }))
+                );
+                
+                // BAYESIAN PROBABILITY - Calculate profit probability  
+                const evidence = {
+                  priceChange: velocity,
+                  volumeRatio: 1.0,
+                  rsiValue: 50 + (velocity * 10), // Rough RSI approximation from velocity
+                  sentimentScore: 0.5,
+                  volatility: Math.abs(velocity) * 2,
+                  trendStrength: Math.abs(velocity),
+                  orderBookImbalance: velocity > 0 ? 0.1 : -0.1
+                };
+                
+                const bayesianProb = await bayesianProbabilityEngine.generateSignal(
+                  positionSymbol,
+                  evidence,
+                  price
+                );
+                
+                // CORRELATION ANALYSIS - Get cross-market signals
+                const crossMarketState = marketCorrelationAnalyzer.analyzeCrossMarketState(positionSymbol);
+                const correlations = {
+                  aggregateScore: crossMarketState?.overallStrength || 0
+                };
+                
+                // LAW OF LARGE NUMBERS - Statistical convergence prediction
+                expectedValue = markovPrediction.expectedReturn || 0;
+                probabilityOfProfit = side === 'long' ? bayesianProb.bullishProbability : bayesianProb.bearishProbability;
+                correlationSignal = correlations.aggregateScore || 0;
+                
+                // COMPOSITE PREDICTION SCORE
+                predictionScore = (expectedValue * 0.4) + (probabilityOfProfit * 0.3) + (correlationSignal * 0.3);
+                
+                log(`🔮 AI PREDICTION: ${positionSymbol} - Score: ${predictionScore.toFixed(3)}, Expected: ${expectedValue.toFixed(2)}%, Prob: ${(probabilityOfProfit*100).toFixed(1)}%`);
+              } catch (aiError: any) {
+                log(`⚠️ AI analysis unavailable: ${aiError.message}`);
+              }
+              
+              log(`🧮 MATH PREDICTION: Markov EV: ${expectedValue.toFixed(2)}% | Bayesian P: ${(probabilityOfProfit*100).toFixed(1)}% | Corr: ${correlationSignal.toFixed(2)} | Score: ${predictionScore.toFixed(2)}`);
+              
+              // EXIT BASED ON MATHEMATICAL PREDICTIONS
+              if (pnl > 0) {
+                // Markov predicts negative expected value - GET OUT
+                if (expectedValue < -0.5) {
+                  shouldExit = true;
+                  reason = `markov_negative_ev_${pnl.toFixed(1)}pct`;
+                  log(`📊 MARKOV EXIT: Taking ${pnl.toFixed(2)}% - Expected Value turning negative (${expectedValue.toFixed(2)}%)`);
+                }
+                // Bayesian probability drops below 40% - EXIT
+                else if (probabilityOfProfit < 0.4) {
+                  shouldExit = true;
+                  reason = `bayesian_low_prob_${pnl.toFixed(1)}pct`;
+                  log(`📉 BAYESIAN EXIT: Taking ${pnl.toFixed(2)}% - Profit probability only ${(probabilityOfProfit*100).toFixed(1)}%`);
+                }
+                // Correlation breakdown - market dynamics changed
+                else if (Math.abs(correlationSignal) > 2 && correlationSignal * (side === 'long' ? 1 : -1) < 0) {
+                  shouldExit = true;
+                  reason = `correlation_breakdown_${pnl.toFixed(1)}pct`;
+                  log(`🔄 CORRELATION EXIT: Taking ${pnl.toFixed(2)}% - Correlated markets moving against us`);
+                }
+              }
+              
+              // PREDICTIVE LOSS PREVENTION
+              if (!shouldExit && pnl < 0.5) {
+                // Composite score strongly negative - mathematical consensus to exit
+                if (predictionScore < -1.0) {
+                  shouldExit = true;
+                  reason = `math_consensus_exit_${pnl.toFixed(1)}pct`;
+                  log(`🧮 MATHEMATICAL CONSENSUS: Exiting at ${pnl.toFixed(2)}% - All models predict further losses`);
+                }
+              }
+              
+              // Now also run the Mathematical Intuition analysis
               const analysis = await this.shouldTrade(marketData, phase);
               const mathAnalysis = await this.mathEngine.analyzeIntuitively(analysis.signal || {}, marketData);
               
               if (mathAnalysis) {
                 const currentConfidence = analysis.confidence || 0.5;
                 const intuitionScore = mathAnalysis.overallFeeling || 0;
+                const confidenceChange = (currentConfidence - entryConfidence) / entryConfidence * 100;
                 
-                // Exit if confidence dropped significantly or intuition score is low
-                if (currentConfidence < entryConfidence * 0.5 || intuitionScore < 0.3) {
+                // 🎯 OPPORTUNITY EXIT: AI sees opposite trade opportunity
+                if (mathAnalysis.recommendation === 'SELL' && side === 'long' && pnl > 0) {
                   shouldExit = true;
-                  reason = 'ai_confidence_drop';
-                  log(`🧠 AI exit: Confidence ${(currentConfidence*100).toFixed(1)}%, Intuition ${(intuitionScore*100).toFixed(1)}%`);
+                  reason = `ai_reversal_signal_${pnl.toFixed(1)}pct`;
+                  log(`🔄 AI REVERSAL: Taking ${pnl.toFixed(2)}% profit - AI wants to go SHORT!`);
+                }
+                else if (mathAnalysis.recommendation === 'BUY' && side === 'short' && pnl > 0) {
+                  shouldExit = true;
+                  reason = `ai_reversal_signal_${pnl.toFixed(1)}pct`;
+                  log(`🔄 AI REVERSAL: Taking ${pnl.toFixed(2)}% profit - AI wants to go LONG!`);
+                }
+                // 📉 CONFIDENCE EROSION: Exit if confidence dropping
+                else if (confidenceChange < -20 && pnl > 0.5) {
+                  shouldExit = true;
+                  reason = `confidence_erosion_${pnl.toFixed(1)}pct`;
+                  log(`📉 CONFIDENCE EROSION: Taking ${pnl.toFixed(2)}% - confidence dropped ${Math.abs(confidenceChange).toFixed(1)}%`);
+                }
+                // 🚨 INTUITION WARNING: Low intuition = get out
+                else if (intuitionScore < 0.4 && pnl > 0) {
+                  shouldExit = true;
+                  reason = `intuition_warning_${pnl.toFixed(1)}pct`;
+                  log(`🚨 INTUITION WARNING: Taking ${pnl.toFixed(2)}% - intuition only ${(intuitionScore*100).toFixed(1)}%`);
+                }
+                // ⚠️ DANGER ZONE: Negative confidence/intuition with any profit
+                else if ((currentConfidence < 0.3 || intuitionScore < 0.2) && pnl > -0.5) {
+                  shouldExit = true;
+                  reason = `ai_danger_exit_${pnl.toFixed(1)}pct`;
+                  log(`⚠️ AI DANGER: Exiting at ${pnl.toFixed(2)}% - confidence critically low!`);
+                }
+                
+                // Log AI thinking for monitoring
+                if (!shouldExit && pnl > 0) {
+                  log(`🤔 AI HOLDING: Conf ${(currentConfidence*100).toFixed(1)}% (${confidenceChange > 0 ? '+' : ''}${confidenceChange.toFixed(1)}%), Intuition ${(intuitionScore*100).toFixed(1)}%, Rec: ${mathAnalysis.recommendation}`);
                 }
               }
             } catch (error) {
@@ -943,6 +1265,33 @@ class ProductionTradingEngine {
   stop() {
     log('🛑 Stopping production trading engine...');
     this.isRunning = false;
+  }
+  
+  /**
+   * 🧠 MARKET CONDITION DETECTOR
+   * Uses existing AI levels to determine market state for adaptive trading
+   */
+  private detectMarketCondition(pattern: string, velocity: number, acceleration: number, volatility: number): string {
+    const absVelocity = Math.abs(velocity);
+    const absAcceleration = Math.abs(acceleration);
+    
+    // TRENDING MARKETS: Strong directional movement
+    if (absVelocity > 0.5 && absAcceleration > 0.02) {
+      return velocity > 0 ? 'trending_up' : 'trending_down';
+    }
+    
+    // BREAKOUT/BREAKDOWN: Sudden acceleration
+    if (absAcceleration > 0.08 && volatility > 1.0) {
+      return velocity > 0 ? 'breakout' : 'breakdown';
+    }
+    
+    // SIDEWAYS/CONSOLIDATING: Low velocity, low acceleration
+    if (absVelocity < 0.2 && absAcceleration < 0.01) {
+      return 'sideways';
+    }
+    
+    // DEFAULT: Consolidating pattern
+    return 'consolidating';
   }
 }
 

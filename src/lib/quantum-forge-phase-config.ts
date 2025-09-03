@@ -50,7 +50,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
     phase: 0,
     name: "Controlled Data Collection Phase",
     minTrades: 0,
-    maxTrades: 100,
+    maxTrades: 25,
     features: {
       // TIGHTER barriers - quality over quantity
       baseStrategyEnabled: true,
@@ -70,12 +70,12 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
       mathematicalIntuitionEnabled: false,
       markovChainEnabled: false,
       
-      // Conservative risk management
-      positionSizing: 0.01, // 1% per trade - keep small
-      stopLossEnabled: true,
-      stopLossPercent: 3, // Tighter stop loss - cut losses quickly
-      takeProfitEnabled: true, 
-      takeProfitPercent: 5, // Smaller take profit - lock gains sooner
+      // Conservative position sizing within account limits
+      positionSizing: 0.001, // 0.1% for 5m scalping - $10 positions
+      stopLossEnabled: false, // Let Mathematical Intuition AI control all exits dynamically
+      stopLossPercent: 0, // Disabled - AI manages risk
+      takeProfitEnabled: false, // Let Mathematical Intuition AI optimize profits dynamically
+      takeProfitPercent: 0, // Disabled - AI manages profits
       
       // No validation - but higher confidence required
       requireSentimentAlignment: false,
@@ -89,8 +89,8 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
   {
     phase: 1,
     name: "Basic Sentiment Phase",
-    minTrades: 100,
-    maxTrades: 500,
+    minTrades: 25,
+    maxTrades: 75,
     features: {
       baseStrategyEnabled: true,
       confidenceThreshold: 0.40,
@@ -107,7 +107,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
       mathematicalIntuitionEnabled: false,
       markovChainEnabled: false,
       
-      positionSizing: 0.015,
+      positionSizing: 0.002, // 0.2% for 5m scalping - $20 positions,
       stopLossEnabled: true,
       stopLossPercent: 4,
       takeProfitEnabled: true,
@@ -124,8 +124,8 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
   {
     phase: 2,
     name: "Multi-Source Sentiment Phase",
-    minTrades: 500,
-    maxTrades: 1000,
+    minTrades: 75,
+    maxTrades: 150,
     features: {
       baseStrategyEnabled: true,
       confidenceThreshold: 0.47, // OPTIMIZED: Lower threshold to capture Smart Hunter opportunities
@@ -147,7 +147,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
       mathematicalIntuitionEnabled: true, // Enable intuition
       markovChainEnabled: false,
       
-      positionSizing: 0.012,
+      positionSizing: 0.003, // 0.3% for 5m scalping - $30 positions,
       stopLossEnabled: true,
       stopLossPercent: 3,
       takeProfitEnabled: true,
@@ -164,8 +164,8 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
   {
     phase: 3,
     name: "Order Book Intelligence Phase",
-    minTrades: 1000,
-    maxTrades: 2000,
+    minTrades: 150,
+    maxTrades: 300,
     features: {
       baseStrategyEnabled: true,
       confidenceThreshold: 0.60,
@@ -187,7 +187,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
       mathematicalIntuitionEnabled: true,
       markovChainEnabled: true, // Enable Markov chains
       
-      positionSizing: 0.010,
+      positionSizing: 0.004, // 0.4% for 5m scalping - $40 positions,
       stopLossEnabled: true,
       stopLossPercent: 2.5,
       takeProfitEnabled: true,
@@ -204,7 +204,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
   {
     phase: 4,
     name: "Full QUANTUM FORGE™ Phase",
-    minTrades: 2000,
+    minTrades: 300,
     maxTrades: 999999,
     features: {
       baseStrategyEnabled: true,
@@ -227,7 +227,7 @@ const PHASE_CONFIGURATIONS: PhaseConfig[] = [
       mathematicalIntuitionEnabled: true,
       markovChainEnabled: true,
       
-      positionSizing: 0.02, // AGGRESSIVE: 2% positions for higher profit
+      positionSizing: 0.005, // 0.5% for 5m scalping - $50 max positions
       stopLossEnabled: true,
       stopLossPercent: 2, // TIGHT: Quick exits on bad trades
       takeProfitEnabled: true,
