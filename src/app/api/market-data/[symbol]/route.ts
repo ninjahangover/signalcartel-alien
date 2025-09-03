@@ -41,19 +41,15 @@ export async function GET(
       }
     }
     
-    // Fallback mock data if API fails
-    const mockPrice = 113879 + (Math.random() - 0.5) * 100; // Mock BTC price around $113,879
-    
-    return NextResponse.json({
-      symbol: symbol,
-      price: mockPrice,
-      change24h: (Math.random() - 0.5) * 10, // Random change ±5%
-      high24h: mockPrice + 500,
-      low24h: mockPrice - 500,
-      volume24h: Math.random() * 1000,
-      timestamp: new Date().toISOString(),
-      source: 'mock'
-    });
+    // NO MOCK DATA - Return error if API fails
+    console.error(`❌ No real market data available for ${symbol}`);
+    return NextResponse.json(
+      { 
+        error: 'Market data unavailable',
+        message: `No real data available for ${symbol} - mock data not allowed`
+      },
+      { status: 503 }
+    );
     
   } catch (error) {
     console.error('Error fetching market data:', error);

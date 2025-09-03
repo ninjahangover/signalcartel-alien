@@ -627,3 +627,6 @@ export class BayesianProbabilityEngine {
     console.log('🔄 Bayesian beliefs reset to default priors');
   }
 }
+
+// Export singleton instance for easy importing
+export const bayesianProbabilityEngine = BayesianProbabilityEngine.getInstance();

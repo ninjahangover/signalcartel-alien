@@ -346,24 +346,9 @@ export class UniversalSentimentEnhancer {
    * Create fallback signal when sentiment analysis fails
    */
   private createFallbackSignal(baseSignal: BaseStrategySignal, reason: string): SentimentEnhancedSignal {
-    return {
-      ...baseSignal,
-      originalAction: baseSignal.action,
-      originalConfidence: baseSignal.confidence,
-      originalReason: baseSignal.reason,
-      sentimentScore: 0,
-      sentimentConfidence: 0,
-      sentimentConflict: false,
-      orderBookValidation: undefined,
-      orderBookConflict: false,
-      marketStructureRisk: 'HIGH',
-      finalAction: baseSignal.action,
-      confidenceModifier: 0,
-      orderBookModifier: 0,
-      enhancedReason: `${baseSignal.reason} (${reason})`,
-      shouldExecute: baseSignal.action !== 'HOLD',
-      executionReason: reason
-    };
+    // NO FALLBACK SIGNALS - This method should not be used
+    console.error(`❌ CRITICAL: createFallbackSignal called - no fallbacks allowed! Reason: ${reason}`);
+    throw new Error(`No fallback signals allowed - need real sentiment data only`);
   }
 
   /**

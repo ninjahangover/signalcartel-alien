@@ -64,78 +64,66 @@ export class PreTradingCalibrationPipeline {
   }
 
   /**
-   * Gather opportunities from Profit Predator / Smart Hunter
+   * Gather opportunities from Profit Predator / Smart Hunter (REAL DATA)
    */
   private async gatherOpportunityData(config: CalibrationPipelineConfig): Promise<OpportunityContext[]> {
-    console.log('📊 Gathering Profit Predator opportunity data...');
+    console.log('📊 Gathering REAL Profit Predator opportunity data...');
     
-    // In production, this would query actual Smart Hunter data
-    // For now, simulate based on known high-opportunity patterns
-    const mockOpportunities: OpportunityContext[] = [
-      {
-        symbol: 'WLFIUSD',
-        profitPredatorScore: 85,
-        priority: 'HIGH',
-        expectedMove: 12.5,
-        confidence: 0.75,
-        marketCap: 'MICRO'
-      },
-      {
-        symbol: 'ETHUSD',
-        profitPredatorScore: 80,
-        priority: 'HIGH', 
-        expectedMove: 8.2,
-        confidence: 0.70,
-        marketCap: 'LARGE'
-      },
-      {
-        symbol: 'CROUSD',
-        profitPredatorScore: 75,
-        priority: 'HIGH',
-        expectedMove: 6.8,
-        confidence: 0.65,
-        marketCap: 'MID'
-      },
-      {
-        symbol: 'HYPEUSD',
-        profitPredatorScore: 72,
-        priority: 'MEDIUM',
-        expectedMove: 15.3,
-        confidence: 0.62,
-        marketCap: 'SMALL'
-      },
-      {
-        symbol: 'SOLUSD',
-        profitPredatorScore: 68,
-        priority: 'MEDIUM',
-        expectedMove: 7.1,
-        confidence: 0.60,
-        marketCap: 'LARGE'
-      },
-      {
-        symbol: 'TRUMPUSD',
-        profitPredatorScore: 65,
-        priority: 'MEDIUM',
-        expectedMove: 18.7,
-        confidence: 0.58,
-        marketCap: 'MICRO'
-      }
-    ];
+    try {
+      // Use REAL Smart Profit Hunter service
+      const { smartProfitHunter } = await import('./smart-profit-hunter');
+      
+      // Get real opportunities from market scanning
+      const realOpportunities = await smartProfitHunter.scanForOpportunities({
+        minimumScore: config.minimumOpportunityScore,
+        maxResults: config.maxSymbolsToCalibrate,
+        includeVolume: true,
+        includeMomentum: true
+      });
 
-    // Filter by minimum score
-    const filtered = mockOpportunities.filter(
-      opp => opp.profitPredatorScore >= config.minimumOpportunityScore
-    );
+      // Convert to OpportunityContext format
+      const opportunities: OpportunityContext[] = realOpportunities.map(opp => ({
+        symbol: opp.symbol,
+        profitPredatorScore: opp.score,
+        priority: opp.score >= 80 ? 'HIGH' : opp.score >= 60 ? 'MEDIUM' : 'LOW',
+        expectedMove: opp.expectedMove || 5.0,
+        confidence: opp.confidence || 0.6,
+        marketCap: this.determineMarketCap(opp.symbol)
+      }));
 
-    // Limit count
-    const limited = filtered.slice(0, config.maxSymbolsToCalibrate);
+      console.log(`✅ Found ${opportunities.length} REAL opportunities from Smart Hunter`);
+      opportunities.forEach(opp => {
+        console.log(`   • ${opp.symbol}: ${opp.profitPredatorScore}% score (${opp.priority} priority)`);
+      });
 
-    console.log(`📈 Found ${limited.length} high-opportunity symbols:`);
-    limited.forEach(opp => {
-      console.log(`   • ${opp.symbol}: ${opp.profitPredatorScore}% score, ${opp.expectedMove}% expected move`);
-    });
+      return opportunities;
 
-    return limited;
+    } catch (error) {
+      console.error(`❌ Smart Hunter failed: ${error.message}`);
+      console.log('⚠️ Using minimal fallback opportunities');
+      
+      // Minimal fallback - just major pairs if Smart Hunter fails
+      return [
+        {
+          symbol: 'BTCUSD',
+          profitPredatorScore: 60,
+          priority: 'MEDIUM',
+          expectedMove: 5.0,
+          confidence: 0.6,
+          marketCap: 'LARGE'
+        }
+      ];
+    }
+  }
+
+  /**
+   * Determine market cap category based on symbol
+   */
+  private determineMarketCap(symbol: string): 'LARGE' | 'MID' | 'SMALL' | 'MICRO' {
+    if (symbol.includes('BTC') || symbol.includes('ETH')) return 'LARGE';
+    if (symbol.includes('SOL') || symbol.includes('ADA') || symbol.includes('DOT')) return 'MID';
+    if (symbol.includes('LINK') || symbol.includes('AVAX')) return 'SMALL';
+    return 'MICRO';
   }
 
   /**

@@ -7,6 +7,8 @@ import { PositionManager } from './src/lib/position-management/position-manager'
 import { phaseManager } from './src/lib/quantum-forge-phase-config';
 import { EnhancedMarkovPredictor } from './src/lib/enhanced-markov-predictor';
 import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-engine';
+import { enhancedMathematicalIntuition } from './src/lib/enhanced-mathematical-intuition';
+import { getIntelligentPairAdapter } from './src/lib/intelligent-pair-adapter';
 import { PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -49,6 +51,8 @@ class ProductionTradingEngine {
   private positionManager: PositionManager;
   private enhancedMarkovPredictor2: EnhancedMarkovPredictor;
   private mathEngine: MathematicalIntuitionEngine;
+  private enhancedIntuition: typeof enhancedMathematicalIntuition;
+  private pairAdapter: ReturnType<typeof getIntelligentPairAdapter>;
   
   // 🎯 PRE-VALIDATION PRICE CACHE SYSTEM
   private priceCache = new Map<string, { price: number; timestamp: Date; isValid: boolean }>();
@@ -78,6 +82,8 @@ class ProductionTradingEngine {
     this.positionManager = new PositionManager(prisma);
     this.enhancedMarkovPredictor2 = new EnhancedMarkovPredictor();
     this.mathEngine = new MathematicalIntuitionEngine();
+    this.enhancedIntuition = enhancedMathematicalIntuition;
+    this.pairAdapter = getIntelligentPairAdapter();
     log('🚀 QUANTUM FORGE™ PRODUCTION TRADING ENGINE');
     log('==========================================');
     log('✅ Complete position management lifecycle');
@@ -608,21 +614,52 @@ class ProductionTradingEngine {
         log(`📊 Basic analysis: ${(confidence * 100).toFixed(1)}% confidence`);
       }
 
-      // Apply phase-specific confidence threshold
-      const shouldTrade = confidence >= phase.features.confidenceThreshold;
+      // 🧠 ENHANCED MATHEMATICAL INTUITION WITH COMMISSION AWARENESS
+      let enhancedAnalysis = null;
+      let finalShouldTrade = false;
+      let finalConfidence = confidence;
       
-      if (shouldTrade) {
-        log(`📈 ✅ TRADE SIGNAL: ${marketData.symbol} @ $${marketData.price} (${(confidence * 100).toFixed(1)}% confidence)`);
-        log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}]`);
-      } else {
-        log(`📉 ❌ Signal below threshold: ${(confidence * 100).toFixed(1)}% < ${(phase.features.confidenceThreshold * 100).toFixed(1)}%`);
+      try {
+        // Get enhanced analysis with commission awareness and pair intelligence
+        enhancedAnalysis = await this.enhancedIntuition.analyzeWithPairIntelligence(
+          marketData.symbol,
+          marketData.price,
+          enhancedSignal || baseSignal,
+          { sentiment: marketData, price: marketData.price },
+          10000 // Account balance - should be dynamic in real implementation
+        );
+        
+        finalShouldTrade = enhancedAnalysis.shouldTrade;
+        finalConfidence = enhancedAnalysis.confidence / 100; // Convert back to 0-1 scale
+        
+        if (finalShouldTrade) {
+          log(`📈 ✅ ENHANCED TRADE SIGNAL: ${marketData.symbol} @ $${marketData.price} (${enhancedAnalysis.confidence.toFixed(1)}% confidence)`);
+          log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}] + Enhanced Intelligence`);
+          log(`💰 ${this.enhancedIntuition.getAnalysisSummary(enhancedAnalysis)}`);
+        } else {
+          log(`📉 ❌ Enhanced Intelligence BLOCKED: ${enhancedAnalysis.reason}`);
+        }
+      } catch (enhancedError) {
+        log(`⚠️ Enhanced analysis failed, falling back to basic: ${enhancedError.message}`);
+        
+        // Fallback to original logic
+        finalShouldTrade = confidence >= phase.features.confidenceThreshold;
+        finalConfidence = confidence;
+        
+        if (finalShouldTrade) {
+          log(`📈 ✅ TRADE SIGNAL: ${marketData.symbol} @ $${marketData.price} (${(confidence * 100).toFixed(1)}% confidence)`);
+          log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}]`);
+        } else {
+          log(`📉 ❌ Signal below threshold: ${(confidence * 100).toFixed(1)}% < ${(phase.features.confidenceThreshold * 100).toFixed(1)}%`);
+        }
       }
 
       return {
-        shouldTrade,
-        confidence,
+        shouldTrade: finalShouldTrade,
+        confidence: finalConfidence,
         signal: enhancedSignal || baseSignal,
-        aiSystems: aiSystemsUsed
+        aiSystems: aiSystemsUsed,
+        enhancedAnalysis // Pass through for position sizing
       };
 
     } catch (error) {
@@ -658,7 +695,16 @@ class ProductionTradingEngine {
         
         // Calculate P&L and price momentum
         const priceChange = (price - entryPrice) / entryPrice;
-        const pnl = side === 'long' ? priceChange * 100 : -priceChange * 100;
+        const grossPnl = side === 'long' ? priceChange * 100 : -priceChange * 100;
+        
+        // 💰 COMMISSION COST SIMULATION - Real Trading Ready
+        // Typical crypto exchange commission: 0.1-0.25% per trade (entry + exit = 2x)
+        const commissionRate = 0.002; // 0.2% total (0.1% entry + 0.1% exit)
+        const positionValue = metadata?.positionSize || 0.001; // Get position size from metadata
+        const commissionCost = positionValue * commissionRate * 100; // Convert to percentage
+        const pnl = grossPnl - commissionCost;
+        
+        log(`💰 COMMISSION SIM: Gross P&L ${grossPnl.toFixed(2)}% - Commission ${commissionCost.toFixed(3)}% = Net ${pnl.toFixed(2)}%`);
         
         // 🔮 PREDICTIVE MARKET ANALYSIS - ANTICIPATE, DON'T REACT!
         const recentPrices = this.priceHistoryCache.get(positionSymbol) || [];
@@ -717,31 +763,33 @@ class ProductionTradingEngine {
         let shouldExit = false;
         let reason = '';
         
-        // 🎯 ANTICIPATORY PROFIT TAKING - Exit BEFORE reversal
-        if (pnl > 0) {
+        // 💰 COMMISSION-AWARE PROFIT TAKING - Minimum thresholds to cover trading costs
+        const minProfitForCommission = 0.3; // 0.3% minimum to cover 0.2% commission + spread
+        
+        if (pnl > minProfitForCommission) {
           // TOPPING PATTERN: Price is about to reverse down - GET OUT NOW!
-          if (pattern === 'topping' && pnl >= 0.3) {
+          if (pattern === 'topping' && pnl >= minProfitForCommission) {
             shouldExit = true;
             reason = `predicted_top_${pnl.toFixed(1)}pct`;
-            log(`🔮 TOP PREDICTED: Taking ${pnl.toFixed(2)}% BEFORE the reversal! Pattern: ${pattern}`);
+            log(`🔮 COMMISSION-AWARE TOP: Taking ${pnl.toFixed(2)}% (>${minProfitForCommission}%) BEFORE reversal!`);
           }
           // DECELERATION: Momentum dying - exit before it reverses
           else if (acceleration < -0.1 && pnl >= 0.5) {
             shouldExit = true;
             reason = `deceleration_exit_${pnl.toFixed(1)}pct`;
-            log(`📉 DECELERATION: Taking ${pnl.toFixed(2)}% - momentum dying (accel: ${acceleration.toFixed(3)})`);
+            log(`📉 COMMISSION-AWARE DECEL: Taking ${pnl.toFixed(2)}% - momentum dying`);
           }
           // CONSOLIDATION BREAKOUT: Price stalled - take profit before breakdown
-          else if (pattern === 'consolidating' && pnl >= 1.0) {
+          else if (pattern === 'consolidating' && pnl >= 0.8) {
             shouldExit = true;
             reason = `consolidation_exit_${pnl.toFixed(1)}pct`;
-            log(`⚠️ CONSOLIDATION: Taking ${pnl.toFixed(2)}% - breakout imminent, direction unknown`);
+            log(`⚠️ COMMISSION-AWARE CONSOL: Taking ${pnl.toFixed(2)}% - covers commission`);
           }
           // VELOCITY PEAK: Speed maxed out - reversal imminent
-          else if (Math.abs(velocity) > 2.0 && pnl >= 0.8) {
+          else if (Math.abs(velocity) > 2.0 && pnl >= 0.6) {
             shouldExit = true;
             reason = `velocity_peak_${pnl.toFixed(1)}pct`;
-            log(`🚀 VELOCITY PEAK: Taking ${pnl.toFixed(2)}% - extreme velocity ${velocity.toFixed(2)}% unsustainable`);
+            log(`🚀 COMMISSION-AWARE VELOCITY: Taking ${pnl.toFixed(2)}% - covers costs`);
           }
         }
         
@@ -1112,47 +1160,58 @@ class ProductionTradingEngine {
           const signal = aiAnalysis.signal || {};
           const side = signal.action === 'SELL' ? 'short' : 'long';
           
-          // 🧠 MATHEMATICAL INTUITION DYNAMIC POSITION SIZING
-          // Multi-AI validation + USD profit maximization
-          const baseSize = currentPhase.features.positionSizing; // Phase-based base size
+          // 🧠 ENHANCED MATHEMATICAL INTUITION DYNAMIC POSITION SIZING
+          let quantity = 0;
+          let adjustedTakeProfit = 0;
+          let adjustedStopLoss = 0;
           
-          // Multi-AI Validation Multiplier (when multiple systems agree)
-          const aiSystemCount = aiAnalysis.aiSystems ? aiAnalysis.aiSystems.length : 1;
-          const multiAIBonus = Math.min(aiSystemCount * 0.25, 1.0); // Max +100% for 4+ systems
+          if (aiAnalysis.enhancedAnalysis && aiAnalysis.enhancedAnalysis.positionSize > 0) {
+            // Use commission-aware position sizing from enhanced analysis
+            quantity = aiAnalysis.enhancedAnalysis.positionSize;
+            adjustedTakeProfit = aiAnalysis.enhancedAnalysis.takeProfit / 100;
+            adjustedStopLoss = aiAnalysis.enhancedAnalysis.stopLoss / 100;
+            
+            log(`🧠 ENHANCED SIZING: $${quantity.toFixed(2)} | TP: ${aiAnalysis.enhancedAnalysis.takeProfit.toFixed(2)}% SL: ${aiAnalysis.enhancedAnalysis.stopLoss.toFixed(2)}% | Expected: $${aiAnalysis.enhancedAnalysis.netExpectedReturn.toFixed(4)}`);
+          } else {
+            // Enhanced fallback: Minimum viable position sizing for Phase 0
+            const accountBalance = 10000; // $10K starting balance
+            const baseSize = Math.max(currentPhase.features.positionSizing, accountBalance * 0.0001); // At least 0.01% of balance ($1 minimum)
+            const aiSystemCount = aiAnalysis.aiSystems ? aiAnalysis.aiSystems.length : 1;
+            const multiAIBonus = Math.min(aiSystemCount * 0.25, 1.0);
+            const confidenceMultiplier = Math.min(aiAnalysis.confidence * 2.0, 3.0); // Increased multiplier
+            const isStablecoin = data.symbol.includes('USDT') || data.symbol.includes('USDC');
+            const lowPriceBoost = data.price < 10 ? 2.0 : 1.0; // Increased boost for low-price assets
+            const stablecoinBoost = isStablecoin ? 1.2 : 1.0;
+            const balanceOptimization = lowPriceBoost * stablecoinBoost;
+            const mathIntuitionMultiplier = (1 + multiAIBonus) * confidenceMultiplier * balanceOptimization;
+            quantity = baseSize * mathIntuitionMultiplier;
+            
+            // Ensure minimum viable position size
+            const minimumPosition = accountBalance * 0.0005; // 0.05% minimum ($5 minimum)
+            quantity = Math.max(quantity, minimumPosition);
+            
+            log(`🧠 ENHANCED FALLBACK SIZING: Base $${baseSize.toFixed(2)} × AI(${aiSystemCount}) × Conf(${(aiAnalysis.confidence * 100).toFixed(1)}%) × Balance = $${quantity.toFixed(2)}`);
+          }
           
-          // Confidence-based sizing (stronger signals = larger positions)  
-          const confidenceMultiplier = Math.min(aiAnalysis.confidence * 1.8, 2.5); // Max 2.5x multiplier
+          // 🎯 ENHANCED RISK MANAGEMENT
+          let stopLoss = 0;
+          let takeProfit = 0;
           
-          // USD/USDT Profit Optimization: Account balance factor
-          // For our current balance, optimize for meaningful returns
-          const isStablecoin = data.symbol.includes('USDT') || data.symbol.includes('USDC');
-          const lowPriceBoost = data.price < 10 ? 1.5 : 1.0; // Boost smaller price assets for better returns
-          const stablecoinBoost = isStablecoin ? 1.2 : 1.0; // USDT pairs often have better liquidity
-          const balanceOptimization = lowPriceBoost * stablecoinBoost;
+          if (!aiAnalysis.enhancedAnalysis) {
+            // Fallback to original risk management
+            const stopLossPercent = currentPhase.features.stopLossPercent / 100;
+            const takeProfitPercent = currentPhase.features.takeProfitPercent / 100;
+            const aiSystemCount = aiAnalysis.aiSystems ? aiAnalysis.aiSystems.length : 1;
+            const multiAIRiskBonus = Math.min(aiSystemCount * 0.1, 0.4);
+            const confidenceAdjustment = (aiAnalysis.confidence * 0.3) + multiAIRiskBonus;
+            adjustedStopLoss = stopLossPercent * (1 - confidenceAdjustment * 0.5);
+            adjustedTakeProfit = takeProfitPercent * (1 + confidenceAdjustment * 1.5);
+            
+            log(`🎯 FALLBACK RISK: Stop ${(adjustedStopLoss*100).toFixed(1)}% | Profit ${(adjustedTakeProfit*100).toFixed(1)}%`);
+          }
           
-          // Mathematical Intuition Final Sizing
-          const mathIntuitionMultiplier = (1 + multiAIBonus) * confidenceMultiplier * balanceOptimization;
-          const quantity = baseSize * mathIntuitionMultiplier;
-          
-          log(`🧠 MATH INTUITION SIZING: Base $${baseSize} × AI(${aiSystemCount}) × Conf(${(aiAnalysis.confidence * 100).toFixed(1)}%) × Balance = $${quantity.toFixed(2)}`);
-          
-          // 🎯 MATHEMATICAL INTUITION RISK MANAGEMENT
-          // Multi-AI validation = more aggressive profit targets, tighter risk controls
-          const stopLossPercent = currentPhase.features.stopLossPercent / 100;
-          const takeProfitPercent = currentPhase.features.takeProfitPercent / 100;
-          
-          // Multi-AI Risk Optimization: More systems agreeing = tighter risk control
-          const multiAIRiskBonus = Math.min(aiSystemCount * 0.1, 0.4); // Max 40% tighter risk
-          const confidenceAdjustment = (aiAnalysis.confidence * 0.3) + multiAIRiskBonus; // 0-70% adjustment
-          
-          // USD Profit Maximization: Tighter stops, bigger profits when confident
-          const adjustedStopLoss = stopLossPercent * (1 - confidenceAdjustment * 0.5); // Tighter stops when confident
-          const adjustedTakeProfit = takeProfitPercent * (1 + confidenceAdjustment * 1.5); // Bigger profits when confident
-          
-          log(`🎯 RISK MANAGEMENT: Stop ${(adjustedStopLoss*100).toFixed(1)}% | Profit ${(adjustedTakeProfit*100).toFixed(1)}% (AI Systems: ${aiSystemCount})`);
-          
-          const stopLoss = data.price * (side === 'long' ? (1 - adjustedStopLoss) : (1 + adjustedStopLoss));
-          const takeProfit = data.price * (side === 'long' ? (1 + adjustedTakeProfit) : (1 - adjustedTakeProfit));
+          stopLoss = data.price * (side === 'long' ? (1 - adjustedStopLoss) : (1 + adjustedStopLoss));
+          takeProfit = data.price * (side === 'long' ? (1 + adjustedTakeProfit) : (1 - adjustedTakeProfit));
           
           try {
             // Use production position management system with AI strategy name

@@ -383,9 +383,26 @@ export class PositionManager {
    * Calculate position size based on signal and risk management
    */
   private calculatePositionSize(signal: TradingSignal): number {
-    // Simple position sizing - can be made more sophisticated
-    const maxRiskAmount = 1000; // Max $1000 per trade
-    return Math.min(10, maxRiskAmount / signal.price); // Max 10 units or $1000 worth
+    // 🔥 MATHEMATICAL POSITION SIZING - MATCH AI-FOCUSED ENGINE
+    // Use 8% of $10K account with confidence scaling
+    const ACCOUNT_BALANCE = 10000; // $10K account balance
+    const baseSize = 0.08 * ACCOUNT_BALANCE; // 8% = $800 base - need size to win big!
+    
+    // AI Confidence Multiplier (higher confidence = larger position)
+    const confidenceMultiplier = 0.5 + (signal.confidence * 1.5); // 0.5x to 2.0x based on confidence
+    
+    // Price-based adjustments for better returns
+    const lowPriceBoost = signal.price < 10 ? 1.3 : 1.0; // Boost smaller price assets
+    const stablecoinBoost = signal.symbol.includes('USDT') || signal.symbol.includes('USDC') ? 1.2 : 1.0;
+    const balanceOptimization = lowPriceBoost * stablecoinBoost;
+    
+    // Final USD amount
+    const usdAmount = baseSize * confidenceMultiplier * balanceOptimization;
+    const quantity = usdAmount / signal.price; // Convert USD to actual quantity
+    
+    console.log(`💰 FALLBACK POSITION SIZING: Base $${baseSize.toFixed(0)} × Conf(${(signal.confidence * 100).toFixed(1)}%) = $${usdAmount.toFixed(2)} / $${signal.price} = ${quantity.toFixed(4)} units`);
+    
+    return quantity;
   }
   
   /**

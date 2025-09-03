@@ -53,9 +53,13 @@ class QuantumForgeSignalGenerator {
   /**
    * Generate technical signal using Pine Script strategies
    */
-  async generateTechnicalSignal(symbol: string, price: number): Promise<TechnicalSignal> {
+  async generateTechnicalSignal(symbol: string, price: number, isExitEvaluation: boolean = false): Promise<TechnicalSignal> {
     try {
-      console.log(`⚡ GPU PINE SCRIPT: Parallel execution for ${symbol}`);
+      console.log(`⚡ GPU PINE SCRIPT: Parallel execution for ${symbol} ${isExitEvaluation ? '(EXIT)' : '(ENTRY)'}`);
+      
+      // Set GPU context for prioritized market data access
+      gpuService.setExitEvaluationMode(isExitEvaluation);
+      
       const startTime = Date.now();
       
       // Get available Pine strategies

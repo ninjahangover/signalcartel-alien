@@ -127,12 +127,31 @@ sleep 3
 
 # Check for any remaining TypeScript/Node processes
 log "🔍 Checking for remaining processes..."
-TSX_PROCESSES=$(pgrep -f "tsx.*trading\|tsx.*hunter\|tsx.*master" 2>/dev/null || true)
+TSX_PROCESSES=$(pgrep -f "tsx.*trading\|tsx.*hunter\|tsx.*master\|tsx.*production" 2>/dev/null || true)
 if [ -n "$TSX_PROCESSES" ]; then
-    log "⚠️ Found lingering processes, cleaning up..."
+    log "⚠️ Found lingering processes, cleaning up with process groups..."
     echo "$TSX_PROCESSES" | xargs -r kill -TERM 2>/dev/null || true
     sleep 3
     echo "$TSX_PROCESSES" | xargs -r kill -KILL 2>/dev/null || true
+    
+    # Also kill process groups to catch any child processes
+    log "🔥 Cleaning up process groups..."
+    ps -eo pid,pgid,cmd | grep -E "(tsx|node).*(trading|hunter|master)" | grep -v grep | while read pid pgid cmd; do
+        kill -KILL -$pgid 2>/dev/null || true
+    done
+fi
+
+# Final zombie process cleanup
+log "🧹 Final zombie process cleanup..."
+# Wait for any zombie processes to be reaped
+sleep 2
+# Check for zombie processes and clean them up
+ZOMBIES=$(ps aux | awk '$8 ~ /^Z/ { print $2 }' || true)
+if [ -n "$ZOMBIES" ]; then
+    log "⚠️ Found zombie processes, attempting cleanup..."
+    echo "$ZOMBIES" | xargs -r kill -KILL 2>/dev/null || true
+else
+    log "✅ No zombie processes found"
 fi
 
 log "✅ Database connections cleaned up"

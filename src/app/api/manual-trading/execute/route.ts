@@ -12,32 +12,16 @@ export async function POST(request: Request) {
       );
     }
 
-    // Mock trade execution - we'll connect to real Alpaca API later
-    const mockPrice = symbol.toLowerCase().includes('btc') ? 113750 : 
-                     symbol.toLowerCase().includes('eth') ? 4300 : 
-                     symbol.toLowerCase().includes('sol') ? 184 : 25;
-
-    const mockTradeResult = {
-      success: true,
-      orderId: `MOCK_${Date.now()}`,
-      status: 'filled',
-      price: mockPrice,
-      quantity: parseFloat(quantity),
-      symbol: symbol.toUpperCase(),
-      side: side.toLowerCase(),
-      strategy,
-      orderType,
-      timestamp: new Date().toISOString(),
-      type: 'manual'
-    };
-
-    console.log('🎯 Manual Trade Executed:', mockTradeResult);
-
-    return NextResponse.json({
-      success: true,
-      trade: mockTradeResult,
-      message: 'Mock trade executed successfully - ready for real integration!'
-    });
+    // NO MOCK TRADES - This endpoint needs real trade execution
+    console.error('❌ Manual trading API called but no real execution backend configured');
+    
+    return NextResponse.json(
+      { 
+        error: 'Trading backend not configured',
+        message: 'Manual trading requires real trade execution - mock trades not allowed'
+      },
+      { status: 501 } // Not Implemented
+    );
 
   } catch (error) {
     console.error('Error executing manual trade:', error);

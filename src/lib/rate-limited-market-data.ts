@@ -138,7 +138,9 @@ class RateLimitedMarketDataService {
         case 'coingecko':
           return await this.fetchFromCoinGecko(symbol);
         case 'fallback':
-          return await this.generateFallbackData(symbol);
+          // NO FALLBACK - return null if we reached this point
+          console.error(`❌ No real data available for ${symbol} - NOT using fallback`);
+          return null;
         default:
           return null;
       }
@@ -286,52 +288,14 @@ class RateLimitedMarketDataService {
   }
   
   /**
-   * Generate realistic fallback data when APIs fail
+   * NO FALLBACK DATA - Real data only
    */
   private async generateFallbackData(symbol: string): Promise<MarketDataPoint | null> {
-    console.log(`📊 Generating fallback data for ${symbol}...`);
+    console.error(`❌ CRITICAL: Fallback data requested for ${symbol} - NO MOCK DATA ALLOWED!`);
     
-    // Base prices for common symbols
-    // Updated base prices to current market levels (January 2025)
-    const basePrices = {
-      'BTCUSD': 121000, 'BTCUSDT': 121000, // Current BTC price ~$121k
-      'ETHUSD': 3900, 'ETHUSDT': 3900,     // Current ETH price ~$3.9k
-      'ADAUSD': 1.20, 'ADAUSDT': 1.20,     // Current ADA price ~$1.20
-      'SOLUSD': 220, 'SOLUSDT': 220,       // Current SOL price ~$220
-      'LINKUSD': 25, 'LINKUSDT': 25,       // Current LINK price ~$25
-      'AVAXUSD': 45, 'AVAXUSDT': 45,       // Current AVAX price ~$45
-      'MATICUSD': 0.65, 'MATICUSDT': 0.65, // Current MATIC price ~$0.65
-      'DOTUSD': 8.5, 'DOTUSDT': 8.5,       // Current DOT price ~$8.5
-      'DOGEUSD': 0.42, 'DOGEUSDT': 0.42,   // Current DOGE price ~$0.42
-      'BNBUSD': 720, 'BNBUSDT': 720,       // Current BNB price ~$720
-      'XRPUSD': 3.2, 'XRPUSDT': 3.2,       // Current XRP price ~$3.2
-      'LTCUSD': 130, 'LTCUSDT': 130,       // Current LTC price ~$130
-      'BCHUSD': 520, 'BCHUSDT': 520,       // Current BCH price ~$520
-      'NEARUSD': 8.5, 'NEARUSDT': 8.5,     // Current NEAR price ~$8.5
-      'ICPUSD': 12, 'ICPUSDT': 12,         // Current ICP price ~$12
-      'UNIUSD': 18, 'UNIUSDT': 18,         // Current UNI price ~$18
-      'APTUSD': 15, 'APTUSDT': 15,         // Current APT price ~$15
-      'ATOMUSD': 9.5, 'ATOMUSDT': 9.5,     // Current ATOM price ~$9.5
-      'FILUSD': 6.8, 'FILUSDT': 6.8        // Current FIL price ~$6.8
-    };
-    
-    const basePrice = basePrices[symbol] || 100;
-    
-    // Add some realistic variation
-    const variation = (Math.random() - 0.5) * 0.1; // ±5%
-    const price = basePrice * (1 + variation);
-    
-    return {
-      symbol,
-      price,
-      volume: Math.floor(Math.random() * 1000000) + 500000,
-      timestamp: new Date(),
-      source: 'fallback',
-      high: price * 1.02,
-      low: price * 0.98,
-      open: price * 0.999,
-      close: price
-    };
+    // DO NOT GENERATE FAKE DATA
+    // If we don't have real market data, we should not trade
+    return null;
   }
   
   /**

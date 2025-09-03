@@ -12,7 +12,7 @@
  */
 
 import { preTradingCalibrator } from './src/lib/pre-trading-calibration-pipeline';
-import { AIFocusedTradingEngine } from './ai-focused-trading-engine';
+import { ProductionTradingEngine } from './production-trading-multi-pair';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -61,7 +61,8 @@ class MasterTradingPipeline {
     hotOpportunities: []
   };
 
-  private tradingEngine?: AIFocusedTradingEngine;
+  private tradingEngine?: ProductionTradingEngine;
+  private calibratedStrategies: Map<string, any> = new Map();
 
   async start(): Promise<void> {
     logger.info('🚀 MASTER TRADING PIPELINE STARTING');
@@ -117,6 +118,9 @@ class MasterTradingPipeline {
       if (calibratedStrategies.size === 0) {
         throw new Error('CRITICAL: Strategy calibration failed - no symbols calibrated');
       }
+
+      // Store calibrated strategies for trading engine
+      this.calibratedStrategies = calibratedStrategies;
 
       // Extract hot opportunities (score > 75%)
       this.status.hotOpportunities = Array.from(calibratedStrategies.entries())
@@ -199,8 +203,12 @@ class MasterTradingPipeline {
       logger.info('✅ Pre-flight validation passed');
       logger.info('🎯 Launching AI Trading Engine...');
 
-      // Launch trading engine (it will use the calibrated strategies)
-      this.tradingEngine = new AIFocusedTradingEngine();
+      // Launch trading engine with calibrated strategies
+      this.tradingEngine = new ProductionTradingEngine();
+      
+      // Pass calibrated strategies to trading engine
+      await this.tradingEngine.setCalibratedStrategies(this.calibratedStrategies);
+      
       await this.tradingEngine.start();
 
       this.status.tradingEngineRunning = true;

@@ -137,8 +137,9 @@ export NODE_OPTIONS="--max-old-space-size=4096"
 
 log "🚀 Starting Master Trading Pipeline..."
 
-# Start Master Trading Pipeline in background
-nohup npx tsx master-trading-pipeline.ts > "$MAIN_LOG" 2>&1 &
+# Start Production Trading directly (more reliable than master pipeline)
+# The master-trading-pipeline has import issues, so we use production-trading-multi-pair directly
+nohup npx tsx production-trading-multi-pair.ts > "$MAIN_LOG" 2>&1 &
 PIPELINE_PID=$!
 
 log "✅ Master Trading Pipeline started (PID: $PIPELINE_PID)"

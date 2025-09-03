@@ -512,31 +512,9 @@ export class QuantumForgeOrderBookAI {
   }
   
   private createFallbackAnalysis(signal: BaseStrategySignal): OrderBookAISignal {
-    return {
-      originalConfidence: signal.confidence,
-      enhancedConfidence: signal.confidence,
-      aiConfidenceBoost: 0,
-      microstructureScore: 50,
-      liquidityQuality: 'FAIR',
-      marketRegime: 'RANGING',
-      priceDirection: 'NEUTRAL',
-      directionConfidence: 25,
-      volatilityForecast: 'MEDIUM',
-      executionRisk: 'MEDIUM',
-      slippageRisk: 0.1,
-      liquidityRisk: 50,
-      optimalOrderSize: 1.0,
-      preferredTimeframe: '5MIN',
-      entryStrategy: 'LIMIT_TIGHT',
-      whaleActivityThreat: 25,
-      institutionalFlow: 'NEUTRAL',
-      aiVersion: this.AI_VERSION,
-      analysisQuality: 'LOW',
-      dataConfidence: 25,
-      decisionFactors: ['Order book analysis unavailable - using fallback values'],
-      warnings: ['Order book data could not be analyzed - trading risk may be higher'],
-      opportunities: []
-    };
+    // NO FALLBACK ANALYSIS - This method should not be used
+    console.error(`❌ CRITICAL: createFallbackAnalysis called - no fallbacks allowed!`);
+    throw new Error(`No fallback analysis allowed - need real order book data only`);
   }
   
   // Data fetching and conversion methods

@@ -97,10 +97,90 @@ class RealTimePriceFetcher {
   private static instance: RealTimePriceFetcher | null = null;
   private cache: Map<string, { price: number; timestamp: Date }> = new Map();
   private readonly CACHE_DURATION = 300000; // 5 minutes cache (much longer for trading stability)
+  
+  // Circuit breaker for API failures
+  private circuitBreakers: Map<string, {
+    failures: number;
+    lastFailure: number;
+    state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    nextAttempt: number;
+  }> = new Map();
+  
+  // Rate limiting
   private lastCoinGeckoRequest: number = 0;
-  private readonly COINGECKO_RATE_LIMIT_MS = 20000; // 20 seconds between requests to avoid rate limits
+  private lastBinanceRequest: number = 0;
+  private lastCryptoCompareRequest: number = 0;
+  private readonly COINGECKO_RATE_LIMIT_MS = 20000; // 20 seconds between requests
+  private readonly BINANCE_RATE_LIMIT_MS = 3000; // 3 seconds between requests
+  private readonly CRYPTOCOMPARE_RATE_LIMIT_MS = 2000; // 2 seconds between requests
+  
+  // Circuit breaker thresholds
+  private readonly CIRCUIT_BREAKER_THRESHOLD = 3; // Failures before opening circuit
+  private readonly CIRCUIT_BREAKER_TIMEOUT = 300000; // 5 minutes before trying again
+  private readonly MAX_BACKOFF = 60000; // Maximum backoff time (1 minute)
 
-  private constructor() {}
+  private constructor() {
+    this.initializeCircuitBreakers();
+  }
+
+  private initializeCircuitBreakers(): void {
+    const apis = ['coingecko', 'binance', 'cryptocompare', 'coinbase'];
+    apis.forEach(api => {
+      this.circuitBreakers.set(api, {
+        failures: 0,
+        lastFailure: 0,
+        state: 'CLOSED',
+        nextAttempt: 0
+      });
+    });
+  }
+
+  private getCircuitBreakerState(api: string): 'CLOSED' | 'OPEN' | 'HALF_OPEN' {
+    const breaker = this.circuitBreakers.get(api);
+    if (!breaker) return 'CLOSED';
+
+    const now = Date.now();
+    
+    if (breaker.state === 'OPEN') {
+      if (now >= breaker.nextAttempt) {
+        breaker.state = 'HALF_OPEN';
+        console.log(`🔓 Circuit breaker HALF_OPEN for ${api} - testing recovery`);
+      }
+    }
+    
+    return breaker.state;
+  }
+
+  private recordSuccess(api: string): void {
+    const breaker = this.circuitBreakers.get(api);
+    if (!breaker) return;
+    
+    breaker.failures = 0;
+    breaker.state = 'CLOSED';
+    console.log(`✅ Circuit breaker CLOSED for ${api} - API recovered`);
+  }
+
+  private recordFailure(api: string): void {
+    const breaker = this.circuitBreakers.get(api);
+    if (!breaker) return;
+    
+    const now = Date.now();
+    breaker.failures += 1;
+    breaker.lastFailure = now;
+    
+    if (breaker.failures >= this.CIRCUIT_BREAKER_THRESHOLD) {
+      breaker.state = 'OPEN';
+      breaker.nextAttempt = now + this.CIRCUIT_BREAKER_TIMEOUT;
+      console.warn(`🚨 Circuit breaker OPEN for ${api} - too many failures (${breaker.failures}), blocked for ${this.CIRCUIT_BREAKER_TIMEOUT / 1000}s`);
+    }
+  }
+
+  private calculateExponentialBackoff(attempts: number): number {
+    const baseDelay = 1000; // 1 second base
+    const backoff = Math.min(baseDelay * Math.pow(2, attempts), this.MAX_BACKOFF);
+    const jitter = Math.random() * 0.1 * backoff; // Add 10% jitter
+    return backoff + jitter;
+  }
 
   /**
    * Validate price against expected ranges to prevent data corruption
@@ -157,68 +237,99 @@ class RealTimePriceFetcher {
       }
     }
 
-    console.log(`📊 Fetching REAL price data for ${symbol} (no fallbacks)...`);
+    console.log(`📊 Fetching REAL price data for ${symbol} with circuit breaker protection...`);
     
-    // Try CoinGecko first (most reliable, no geo-restrictions)
-    const coinGeckoResult = await this.fetchFromCoinGecko(symbol);
-    if (coinGeckoResult.success) {
-      this.cache.set(symbol, { price: coinGeckoResult.price, timestamp: new Date() });
-      return coinGeckoResult;
-    }
-    console.log(`⚠️ CoinGecko failed for ${symbol}: ${coinGeckoResult.error}`);
+    // Try APIs with circuit breaker protection
+    const apis = [
+      { name: 'coingecko', fetch: () => this.fetchFromCoinGecko(symbol) },
+      { name: 'binance', fetch: () => this.fetchFromBinance(symbol) },
+      { name: 'cryptocompare', fetch: () => this.fetchFromCryptoCompare(symbol) }
+    ];
 
-    // Try Binance as backup (may be geo-restricted)
-    const binanceResult = await this.fetchFromBinance(symbol);
-    if (binanceResult.success) {
-      this.cache.set(symbol, { price: binanceResult.price, timestamp: new Date() });
-      return binanceResult;
-    }
-    console.log(`⚠️ Binance failed for ${symbol}: ${binanceResult.error}`);
-
-    // Try CryptoCompare as third option
-    const cryptoCompareResult = await this.fetchFromCryptoCompare(symbol);
-    if (cryptoCompareResult.success) {
-      this.cache.set(symbol, { price: cryptoCompareResult.price, timestamp: new Date() });
-      return cryptoCompareResult;
-    }
-    console.log(`⚠️ CryptoCompare failed for ${symbol}: ${cryptoCompareResult.error}`);
-
-    // ALL APIS FAILED - TRY ONE MORE WITH DIFFERENT APPROACH
-    console.warn(`⚠️ All primary APIs failed for ${symbol}. Trying emergency fallback...`);
-    
-    // Try a direct approach with Coinbase API as emergency fallback
-    try {
-      const response = await fetch(`https://api.coinbase.com/v2/exchange-rates?currency=${symbol.replace('USD', '')}`, {
-        timeout: 5000
-      });
+    for (const api of apis) {
+      const state = this.getCircuitBreakerState(api.name);
       
-      if (response.ok) {
-        const data = await response.json();
-        const price = parseFloat(data?.data?.rates?.USD);
-        
-        if (price && price > 0) {
-          // CRITICAL: Validate emergency price too
-          if (!this.validatePrice(symbol, price, 'coinbase-emergency')) {
-            console.error(`Emergency price validation failed for ${symbol}: $${price}`);
-          } else {
-            console.log(`🆘 Emergency price from Coinbase: ${symbol} = $${price.toLocaleString()}`);
-            this.cache.set(symbol, { price, timestamp: new Date() });
-            return {
-              symbol,
-              price,
-              timestamp: new Date(),
-              source: 'coinbase-emergency',
-              success: true
-            };
-          }
-        }
+      if (state === 'OPEN') {
+        console.log(`🚫 Skipping ${api.name} for ${symbol} - circuit breaker OPEN`);
+        continue;
       }
-    } catch (error) {
-      console.error(`Emergency fallback also failed for ${symbol}:`, error);
+      
+      try {
+        const result = await api.fetch();
+        if (result.success) {
+          this.recordSuccess(api.name);
+          this.cache.set(symbol, { price: result.price, timestamp: new Date() });
+          return result;
+        } else {
+          this.recordFailure(api.name);
+          console.log(`⚠️ ${api.name} failed for ${symbol}: ${result.error}`);
+        }
+      } catch (error) {
+        this.recordFailure(api.name);
+        console.error(`💥 ${api.name} threw error for ${symbol}:`, error);
+      }
     }
 
-    // TRULY ALL APIS FAILED - RETURN ERROR, NO FAKE DATA
-    const errorMsg = `All API sources failed for ${symbol} (CoinGecko, Binance, CryptoCompare, Coinbase) - no real data available`;
+    // ALL PRIMARY APIS FAILED - Try emergency fallback if circuit allows
+    const coinbaseState = this.getCircuitBreakerState('coinbase');
+    if (coinbaseState !== 'OPEN') {
+      console.warn(`⚠️ All primary APIs failed for ${symbol}. Trying emergency Coinbase fallback...`);
+      
+      try {
+        const response = await fetch(`https://api.coinbase.com/v2/exchange-rates?currency=${symbol.replace('USD', '')}`, {
+          timeout: 5000
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const price = parseFloat(data?.data?.rates?.USD);
+          
+          if (price && price > 0) {
+            if (!this.validatePrice(symbol, price, 'coinbase-emergency')) {
+              console.error(`Emergency price validation failed for ${symbol}: $${price}`);
+              this.recordFailure('coinbase');
+            } else {
+              console.log(`🆘 Emergency price from Coinbase: ${symbol} = $${price.toLocaleString()}`);
+              this.recordSuccess('coinbase');
+              this.cache.set(symbol, { price, timestamp: new Date() });
+              return {
+                symbol,
+                price,
+                timestamp: new Date(),
+                source: 'coinbase-emergency',
+                success: true
+              };
+            }
+          }
+        } else {
+          this.recordFailure('coinbase');
+        }
+      } catch (error) {
+        this.recordFailure('coinbase');
+        console.error(`Emergency fallback also failed for ${symbol}:`, error);
+      }
+    } else {
+      console.log(`🚫 Emergency Coinbase blocked by circuit breaker for ${symbol}`);
+    }
+
+    // Check if we can return stale cache data as absolute last resort
+    const staleCache = this.cache.get(symbol);
+    if (staleCache) {
+      const ageMinutes = (Date.now() - staleCache.timestamp.getTime()) / (1000 * 60);
+      if (ageMinutes < 60) { // Accept up to 1 hour old data in emergencies
+        console.warn(`⚠️ All APIs failed for ${symbol}, returning stale cache data (${ageMinutes.toFixed(1)} min old)`);
+        return {
+          symbol,
+          price: staleCache.price,
+          timestamp: staleCache.timestamp,
+          source: 'stale-cache',
+          success: true
+        };
+      }
+    }
+
+    // TRULY ALL OPTIONS EXHAUSTED
+    const errorMsg = `All API sources failed for ${symbol} and no usable cache - system degraded`;
     console.error(`❌ ${errorMsg}`);
     
     return {
@@ -236,12 +347,25 @@ class RealTimePriceFetcher {
    */
   private async fetchFromBinance(symbol: string): Promise<RealPriceData> {
     try {
+      // Rate limiting for Binance
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastBinanceRequest;
+      
+      if (timeSinceLastRequest < this.BINANCE_RATE_LIMIT_MS) {
+        const waitTime = this.BINANCE_RATE_LIMIT_MS - timeSinceLastRequest;
+        console.log(`⏳ Binance rate limit: waiting ${waitTime}ms before request for ${symbol}`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+      
+      this.lastBinanceRequest = Date.now();
+      
       const binanceSymbol = this.convertToBinanceSymbol(symbol);
       const response = await fetch(
         `https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`,
         { 
           method: 'GET',
-          headers: { 'Accept': 'application/json' }
+          headers: { 'Accept': 'application/json' },
+          timeout: 10000
         }
       );
 
@@ -363,6 +487,18 @@ class RealTimePriceFetcher {
    */
   private async fetchFromCryptoCompare(symbol: string): Promise<RealPriceData> {
     try {
+      // Rate limiting for CryptoCompare
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastCryptoCompareRequest;
+      
+      if (timeSinceLastRequest < this.CRYPTOCOMPARE_RATE_LIMIT_MS) {
+        const waitTime = this.CRYPTOCOMPARE_RATE_LIMIT_MS - timeSinceLastRequest;
+        console.log(`⏳ CryptoCompare rate limit: waiting ${waitTime}ms before request for ${symbol}`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+      
+      this.lastCryptoCompareRequest = Date.now();
+      
       const cryptoSymbol = this.convertToCryptoCompareSymbol(symbol);
       if (!cryptoSymbol) {
         throw new Error(`Unknown symbol mapping for CryptoCompare: ${symbol}`);

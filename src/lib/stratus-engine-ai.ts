@@ -155,7 +155,8 @@ class StratusEngineAI {
     const crossSiteEnhancement = await this.enhanceWithUnifiedStrategyPerformance(symbol, intelligence);
 
     if (!intelligence || !aiModel) {
-      return this.generateFallbackDecision(symbol, currentPrice);
+      console.error(`❌ Insufficient data for Stratus AI analysis of ${symbol} - cannot make decision`);
+      throw new Error(`No intelligence data available for ${symbol} - cannot proceed with AI analysis`);
     }
 
     // Get Markov chain prediction
@@ -600,20 +601,9 @@ class StratusEngineAI {
   }
 
   private generateFallbackDecision(symbol: string, currentPrice: number): AITradingDecision {
-    return {
-      decision: 'HOLD',
-      confidence: 0.3,
-      reasoning: ['⚠️ Insufficient market data for AI analysis'],
-      optimalEntry: currentPrice,
-      stopLoss: currentPrice * 0.98,
-      takeProfit: [currentPrice * 1.02],
-      positionSize: 0.5,
-      timeframe: '1h',
-      aiScore: 50,
-      riskLevel: 'MEDIUM',
-      expectedWinRate: 50,
-      expectedProfitMargin: 1.5
-    };
+    // NO FALLBACK DECISIONS - This method should not be used
+    console.error(`❌ CRITICAL: generateFallbackDecision called for ${symbol} - no fallbacks allowed!`);
+    throw new Error(`No fallback decisions allowed for ${symbol} - need real data only`);
   }
 
   private getPatternWeight(patternName: string): number {

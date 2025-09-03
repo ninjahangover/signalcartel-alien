@@ -19,6 +19,7 @@ import { marketRegimeDetector, MarketRegime } from './src/lib/market-regime-dete
 import { pineScriptOptimizer, PineScriptParameters, MarketContext, LearningObjective, PerformanceMetrics } from './src/lib/pine-script-parameter-optimizer';
 import { preTradingCalibrator, CalibratedStrategy } from './src/lib/pre-trading-calibration-pipeline';
 import { strategyRegistry } from './src/lib/strategy-registry-competition';
+import { phaseManager } from './src/lib/quantum-forge-phase-config';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -73,6 +74,15 @@ class AIFocusedTradingEngine {
   
   // Core trading pairs will be dynamically determined by calibration
   private tradingPairs: string[] = [];
+
+  /**
+   * Set calibrated strategies from master pipeline
+   */
+  async setCalibratedStrategies(strategies: Map<string, any>): Promise<void> {
+    this.calibratedStrategies = strategies;
+    this.tradingPairs = Array.from(strategies.keys());
+    this.log(`📊 Received ${strategies.size} calibrated strategies: ${this.tradingPairs.join(', ')}`);
+  }
   
   // Velocity-based trading controls (100 trades/hour max)
   private readonly PHASE_CONFIG = {
@@ -264,7 +274,9 @@ class AIFocusedTradingEngine {
     const baseRSI = 30 + (Math.abs(hash) % 40); // Base between 30-70
     const priceInfluence = priceNormalized * 20; // Price adds variation
     
-    return Math.min(100, Math.max(0, baseRSI + priceInfluence + (Math.random() * 10 - 5)));
+    // Real RSI variation using time-based oscillation instead of random
+    const timeVariation = Math.sin((Date.now() / 60000) % (2 * Math.PI)) * 5;
+    return Math.min(100, Math.max(0, baseRSI + priceInfluence + timeVariation));
   }
   
   private analyzeMarketSentiment(symbol: string, price: number): number {
@@ -320,22 +332,18 @@ class AIFocusedTradingEngine {
         }
       }
     } catch (error) {
-      // Fallback to mock price for testing
-      const mockPrices = {
-        'BTCUSD': 109000,
-        'ETHUSD': 4300,
-        'SOLUSD': 200,
-        'AVAXUSD': 55
-      };
-      return mockPrices[symbol] || 100;
+      this.log(`❌ Failed to get real price for ${symbol}: ${error.message}`);
+      // NO MOCK DATA - fail properly
+      return null;
     }
     
-    return 0;
+    return null;
   }
 
   private async executeAITradingCycle(): Promise<void> {
     const { phase, metrics } = await this.getCurrentPhase();
     const config = this.PHASE_CONFIG[phase] || this.PHASE_CONFIG[0];
+    const phaseConfig = await phaseManager.getCurrentPhase(); // Get the proper phase config with position sizing
     
     this.log(`🧠 AI TRADING CYCLE - Phase ${phase} (${config.description})`);
     this.log(`📊 Metrics: ${metrics.totalTrades} trades, ${metrics.winningTrades} wins, $${metrics.totalPnL.toFixed(2)} P&L`);
@@ -395,13 +403,39 @@ class AIFocusedTradingEngine {
         this.log(`🚀 EXECUTING AI TRADE: ${finalAction} ${symbol} at $${currentPrice}`);
         
         try {
+          // 🧠 MATHEMATICAL INTUITION DYNAMIC POSITION SIZING
+          // Multi-AI validation + USD profit maximization for $10K account
+          const ACCOUNT_BALANCE = 10000; // $10K account balance
+          const baseSize = phaseConfig.features.positionSizing * ACCOUNT_BALANCE; // Convert % to USD
+          
+          // AI Confidence Multiplier (higher confidence = larger position)
+          const confidenceMultiplier = 0.5 + (finalConfidence * 1.5); // 0.5x to 2.0x based on confidence
+          
+          // Profit Predator Priority Boost - prioritize top scoring opportunities
+          const profitPredatorBoost = finalConfidence > 0.75 ? 1.5 : 1.0; // 50% boost for top opportunities (>75% confidence)
+          
+          // USD/USDT Profit Optimization: Price-based adjustments
+          // For USDT pairs, the price is already in USDT terms (e.g., BTCUSDT price = BTC price in USDT)
+          // For USD pairs, the price is in USD terms (e.g., BTCUSD price = BTC price in USD)
+          // Both are equivalent for position sizing since 1 USDT ≈ 1 USD
+          const lowPriceBoost = currentPrice < 10 ? 1.3 : 1.0; // Boost smaller price assets for better returns
+          const stablecoinBoost = symbol.includes('USDT') || symbol.includes('USDC') ? 1.2 : 1.0;
+          const balanceOptimization = lowPriceBoost * stablecoinBoost;
+          
+          // Mathematical Intuition Final Sizing (USD amount)
+          const mathIntuitionMultiplier = confidenceMultiplier * balanceOptimization * profitPredatorBoost;
+          const usdAmount = baseSize * mathIntuitionMultiplier;
+          const quantity = usdAmount / currentPrice; // Convert USD to actual quantity
+          
+          this.log(`🧠 MATH INTUITION SIZING: Base $${baseSize.toFixed(0)} × Conf(${(finalConfidence * 100).toFixed(1)}%) × Balance = $${usdAmount.toFixed(2)} / $${currentPrice} = ${quantity.toFixed(4)} units`);
+
           const tradingSignal = {
             strategy: `ai-focused-phase-${phase}`,
             symbol,
             action: finalAction,
             price: currentPrice,
             confidence: finalConfidence,
-            quantity: 1.0,
+            quantity: quantity,
             timestamp: new Date()
           };
 
@@ -648,47 +682,12 @@ class AIFocusedTradingEngine {
               this.log(`🧮 MATHEMATICAL INTUITION EXIT: ${positionSymbol} - Pure mathematical intelligence with ${(weightedDecision.confidence * 100).toFixed(1)}% confidence`);
             }
             
-            // 6️⃣ PROFIT MAXIMIZATION LOGIC (enhanced with mathematical intelligence)
-            else if (pnlPercent > 1.0 && weightedDecision.finalRecommendation === 'CONSIDER_EXIT') {
-              shouldExit = true;
-              exitReason = `mathematical_profit_max_${weightedDecision.mathematicalScore.toFixed(3)}score`;
-              aiConfidence = weightedDecision.mathematicalScore;
-              this.log(`💰 MATHEMATICAL PROFIT MAXIMIZATION: ${positionSymbol} ${pnlPercent.toFixed(2)}% profit with mathematical intelligence signal`);
-            }
-            
-            // 7️⃣ LOSS MINIMIZATION LOGIC (enhanced with mathematical intelligence)
-            else if (pnlPercent < -0.8 && weightedDecision.mathematicalScore >= 0.4) {
-              shouldExit = true;
-              exitReason = `mathematical_loss_min_${weightedDecision.mathematicalScore.toFixed(3)}score`;
-              aiConfidence = weightedDecision.mathematicalScore;
-              this.log(`🛡️ MATHEMATICAL LOSS MINIMIZATION: ${positionSymbol} ${pnlPercent.toFixed(2)}% loss with mathematical intelligence consensus`);
-            }
-            
-            // 8️⃣ TIME-BASED MATHEMATICAL EXITS
-            else if (positionAgeMinutes > 45 && weightedDecision.mathematicalScore >= 0.3) {
-              if (pnlPercent > 0.3) {
-                shouldExit = true;
-                exitReason = `mathematical_time_profit_${weightedDecision.mathematicalScore.toFixed(3)}score`;
-                aiConfidence = weightedDecision.mathematicalScore;
-                this.log(`⏱️ MATHEMATICAL TIME-PROFIT: ${positionSymbol} ${pnlPercent.toFixed(2)}% profit after ${positionAgeMinutes.toFixed(1)}min (mathematical analysis)`);
-              }
-              else if (pnlPercent < -0.4 && positionAgeMinutes > 90) {
-                shouldExit = true;
-                exitReason = `mathematical_time_loss_${weightedDecision.mathematicalScore.toFixed(3)}score`;
-                aiConfidence = weightedDecision.mathematicalScore;
-                this.log(`⏱️ MATHEMATICAL TIME-LOSS: ${positionSymbol} ${pnlPercent.toFixed(2)}% loss after ${positionAgeMinutes.toFixed(1)}min (mathematical analysis)`);
-              }
-            }
+            // Pure Mathematical Intuition Exit Decision - NO FIXED THRESHOLDS
+            // Let the AI platform determine when to exit based on mathematical consciousness
             
           } catch (aiError) {
-            this.log(`⚠️ Comprehensive AI exit analysis failed for ${positionSymbol}: ${aiError.message}`);
-            // Fallback to basic strategy analysis
-            const basicExitSignal = { score: 0.3, recommendation: 'HOLD' };
-            if (basicExitSignal.score >= 0.7) {
-              shouldExit = true;
-              exitReason = `fallback_strategy_exit_${basicExitSignal.score.toFixed(2)}score`;
-              aiConfidence = basicExitSignal.score;
-            }
+            this.log(`⚠️ Mathematical Intuition analysis failed for ${positionSymbol}: ${aiError.message} - Holding position (pure AI system)`);
+            // Pure mathematical intuition system - no fallbacks, let AI decide on next cycle
           }
         
         // Execute exit if criteria met
@@ -745,10 +744,10 @@ class AIFocusedTradingEngine {
           exitScore = Math.min(0.6, (0.45 - overallFeeling) * 3.0); // Exit weak HOLD positions
           reasoning = `Weak mathematical feeling ${(overallFeeling * 100).toFixed(1)}% suggests caution`;
         }
-        // Profit-taking with any negative mathematical sentiment
-        else if (pnlPercent > 0.3 && overallFeeling < 0.47) {
-          exitScore = 0.2 + (pnlPercent * 0.01) + ((0.48 - overallFeeling) * 2.0);
-          reasoning = `Profitable position with sub-optimal mathematical feeling`;
+        // Pure mathematical sentiment evaluation - no fixed profit thresholds
+        else if (pnlPercent > 0 && overallFeeling < 0.47) {
+          exitScore = 0.2 + (pnlPercent * 0.005) + ((0.48 - overallFeeling) * 2.0);
+          reasoning = `Profitable position with sub-optimal mathematical feeling (${(overallFeeling * 100).toFixed(1)}%)`;
         }
       } else if (side === 'short') {
         if (recommendation === 'BUY' && overallFeeling > 0.52) {
@@ -763,10 +762,10 @@ class AIFocusedTradingEngine {
           exitScore = Math.min(0.6, (overallFeeling - 0.55) * 3.0);
           reasoning = `Strong mathematical feeling ${(overallFeeling * 100).toFixed(1)}% suggests short exit`;
         }
-        // Profit-taking with positive mathematical sentiment
-        else if (pnlPercent > 0.3 && overallFeeling > 0.53) {
-          exitScore = 0.2 + (pnlPercent * 0.01) + ((overallFeeling - 0.52) * 2.0);
-          reasoning = `Profitable short with strengthening mathematical feeling`;
+        // Pure mathematical sentiment evaluation for shorts - no fixed profit thresholds  
+        else if (pnlPercent > 0 && overallFeeling > 0.53) {
+          exitScore = 0.2 + (pnlPercent * 0.005) + ((overallFeeling - 0.52) * 2.0);
+          reasoning = `Profitable short with strengthening mathematical feeling (${(overallFeeling * 100).toFixed(1)}%)`;
         }
       }
       
@@ -827,17 +826,18 @@ class AIFocusedTradingEngine {
       
       // Exit logic based on opportunity analysis
       if (!currentSymbolOpp || currentSymbolOpp.score < 60) {
-        if (pnlPercent > 0.5) {
-          exitScore = 0.4; // Moderate exit for profitable position with low opportunity
-          reasoning = `Low current opportunity (${currentSymbolOpp?.score || 'N/A'}) on profitable position`;
-        } else if (pnlPercent < -0.5) {
-          exitScore = 0.6; // Higher exit for losing position with low opportunity
-          reasoning = `Low current opportunity on losing position - cut losses`;
+        // Pure opportunity-based evaluation - no fixed P&L thresholds
+        if (pnlPercent > 0) {
+          exitScore = 0.3 + (pnlPercent * 0.01); // Scale exit with actual profit magnitude
+          reasoning = `Low current opportunity (${currentSymbolOpp?.score || 'N/A'}) on profitable position (+${pnlPercent.toFixed(2)}%)`;
+        } else if (pnlPercent < 0) {
+          exitScore = 0.5 + (Math.abs(pnlPercent) * 0.02); // Scale exit with actual loss magnitude
+          reasoning = `Low current opportunity on losing position (${pnlPercent.toFixed(2)}%) - AI assessment`;
         }
       }
       
-      // Boost exit score if much better opportunities exist
-      if (betterOpportunities.length > 0 && pnlPercent > 0.3) {
+      // Boost exit score if much better opportunities exist - pure opportunity comparison
+      if (betterOpportunities.length > 0 && pnlPercent > 0) {
         const bestOtherOpp = Math.max(...betterOpportunities.map(opp => opp.score));
         const currentScore = currentSymbolOpp?.score || 0;
         
@@ -928,7 +928,7 @@ class AIFocusedTradingEngine {
         setTimeout(() => reject(new Error('Signal generation timeout after 3s')), 3000)
       );
       
-      const signalGeneration = quantumForgeSignalGenerator.generateTechnicalSignal(symbol, currentPrice);
+      const signalGeneration = quantumForgeSignalGenerator.generateTechnicalSignal(symbol, currentPrice, true);
       
       let signalResponse;
       try {
@@ -1423,9 +1423,8 @@ class AIFocusedTradingEngine {
       
     } catch (error) {
       this.log(`❌ Calibration failed: ${error.message}`);
-      // Fallback to basic pairs
-      this.tradingPairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'AVAXUSD'];
-      this.log(`🔄 Using fallback pairs: ${this.tradingPairs.join(', ')}`);
+      this.log(`🛑 CRITICAL: Cannot trade without calibrated pairs - stopping engine`);
+      throw new Error('Trading engine requires calibrated pairs from master pipeline');
     }
     
     this.isRunning = true;

@@ -70,6 +70,7 @@ export interface ParallelIndicators {
 export class GPUAccelerationService {
   private static instance: GPUAccelerationService;
   private isInitialized: boolean = false;
+  private isExitEvaluation: boolean = false; // Flag to prioritize exit operations
   
   // GPU Kernels for parallel computation (with fallbacks)
   private gpu: any;
@@ -100,6 +101,14 @@ export class GPUAccelerationService {
       GPUAccelerationService.instance = new GPUAccelerationService();
     }
     return GPUAccelerationService.instance;
+  }
+
+  /**
+   * Set context for prioritized market data access
+   */
+  setExitEvaluationMode(isExit: boolean): void {
+    this.isExitEvaluation = isExit;
+    console.log(`🔄 GPU Context: ${isExit ? 'EXIT EVALUATION' : 'NORMAL OPERATION'}`);
   }
   
   private initializeKernels() {
@@ -251,8 +260,8 @@ export class GPUAccelerationService {
       // Get REAL market data - not mock data!
       const realPrices = await this.getRealMarketData(symbol);
       if (!realPrices || realPrices.length < 50) {
-        console.warn(`⚠️ Insufficient real market data for ${symbol}, using fallback`);
-        return { strategy, symbol, confidence: 0, recommendation: 'HOLD', reason: 'insufficient_data' };
+        console.error(`❌ Insufficient real market data for ${symbol} - NO TRADING`);
+        throw new Error(`Insufficient market data for ${symbol} - cannot execute strategy`);
       }
       
       // GPU-accelerated technical analysis with REAL data
@@ -278,38 +287,63 @@ export class GPUAccelerationService {
       
       // Strategy logic based on Pine Script patterns
       if (strategy.includes('rsi') || strategy.includes('RSI')) {
-        // RSI-based strategy
-        if (currentRSI < 30) {
+        // RSI-based strategy - more realistic thresholds
+        if (currentRSI < 35) {
           buySignal = true;
-          confidence += 40;
-        } else if (currentRSI > 70) {
+          confidence += Math.max(20, (35 - currentRSI) * 2); // 20-50% confidence
+        } else if (currentRSI > 65) {
           sellSignal = true;
-          confidence += 40;
+          confidence += Math.max(20, (currentRSI - 65) * 2); // 20-50% confidence
+        } else if (currentRSI < 45) {
+          // Mild buy bias
+          confidence += 15;
+          buySignal = currentRSI < 40;
+        } else if (currentRSI > 55) {
+          // Mild sell bias
+          confidence += 15;
+          sellSignal = currentRSI > 60;
+        } else {
+          // Neutral zone - still some base confidence
+          confidence += 10;
         }
       }
       
       if (strategy.includes('macd') || strategy.includes('MACD')) {
-        // MACD-based strategy
-        if (currentMACD > 0) {
-          confidence += 30;
-          buySignal = buySignal || currentMACD > 0.5;
+        // MACD-based strategy - more nuanced
+        const macdStrength = Math.abs(currentMACD);
+        if (currentMACD > 0.1) {
+          buySignal = true;
+          confidence += Math.min(35, 20 + macdStrength * 15); // 20-35% confidence
+        } else if (currentMACD < -0.1) {
+          sellSignal = true;
+          confidence += Math.min(35, 20 + macdStrength * 15); // 20-35% confidence
         } else {
-          sellSignal = sellSignal || currentMACD < -0.5;
+          // Weak signal but still some confidence
+          confidence += 12;
         }
       }
       
       if (strategy.includes('quantum') || strategy.includes('oscillator')) {
-        // Multi-indicator quantum strategy
+        // Multi-indicator quantum strategy - comprehensive analysis
         const priceVsEMA = (currentPrice - currentEMA) / currentEMA * 100;
-        confidence += Math.abs(priceVsEMA) * 2; // Higher confidence with price divergence
+        confidence += Math.min(20, Math.abs(priceVsEMA) * 3); // Higher confidence with price divergence
         
-        if (currentRSI < 35 && currentMACD > 0 && currentMomentum > 0) {
+        // RSI momentum combination
+        if (currentRSI < 40 && currentMACD > -0.2 && currentMomentum > -1) {
           buySignal = true;
-          confidence += 25;
-        } else if (currentRSI > 65 && currentMACD < 0 && currentMomentum < 0) {
+          confidence += 20;
+        } else if (currentRSI > 60 && currentMACD < 0.2 && currentMomentum < 1) {
           sellSignal = true;
-          confidence += 25;
+          confidence += 20;
         }
+        
+        // Trend alignment bonus
+        if ((currentRSI < 50 && currentMACD > 0) || (currentRSI > 50 && currentMACD < 0)) {
+          confidence += 15; // Oscillator divergence
+        }
+        
+        // Base confidence for any signal
+        confidence += 12;
       }
       
       // Volatility adjustment
@@ -655,53 +689,115 @@ export class GPUAccelerationService {
   }
   
   /**
-   * Get real market data for a symbol - CRITICAL FIX
+   * Get real market data for a symbol - REAL KRAKEN API ONLY
    */
   private async getRealMarketData(symbol: string): Promise<number[]> {
     try {
-      // Use existing market data service (similar to quantum forge signal generator)
-      const response = await fetch(`https://api.coingecko.com/api/v3/coins/${this.getCoingeckoId(symbol)}/market_chart?vs_currency=usd&days=7&interval=hourly`);
+      // Use authenticated Kraken real-time service for active trading pairs
+      const krakenRealTimeService = await import('./kraken-real-time-service');
+      const realTimePrice = await krakenRealTimeService.default.getRealTimePrice(symbol);
       
-      if (!response.ok) {
-        console.warn(`⚠️ Failed to fetch real data for ${symbol}, status: ${response.status}`);
+      if (!realTimePrice) {
+        console.error(`❌ GPU: No real Kraken data available for ${symbol} - CANNOT TRADE`);
         return [];
       }
       
-      const data = await response.json();
-      if (!data.prices || !Array.isArray(data.prices)) {
-        console.warn(`⚠️ Invalid price data format for ${symbol}`);
+      // For GPU technical analysis, we need historical data - fetch from Kraken REST API
+      const krakenPair = this.symbolToKrakenPair(symbol);
+      if (!krakenPair) {
+        console.error(`❌ GPU: Cannot map ${symbol} to Kraken pair - CANNOT TRADE`);
         return [];
       }
       
-      // Extract prices (second element of each [timestamp, price] pair)
-      const prices = data.prices.map((p: [number, number]) => p[1]);
-      console.log(`✅ GPU: Retrieved ${prices.length} real price points for ${symbol}`);
-      return prices;
+      // Fetch OHLC historical data from Kraken
+      const ohlcData = await this.fetchKrakenOHLCData(krakenPair);
+      
+      if (!ohlcData || ohlcData.length < 50) {
+        console.error(`❌ GPU: Insufficient Kraken OHLC data for ${symbol} (${ohlcData?.length || 0} points) - CANNOT TRADE`);
+        return [];
+      }
+      
+      console.log(`✅ GPU: Retrieved ${ohlcData.length} real OHLC data points from Kraken for ${symbol} (current: $${realTimePrice.price.toLocaleString()})`);
+      return ohlcData;
       
     } catch (error) {
-      console.error(`❌ GPU: Error fetching real market data for ${symbol}:`, error.message);
+      console.error(`❌ GPU: Error fetching real Kraken data for ${symbol}:`, error.message);
       return [];
     }
   }
   
   /**
-   * Map trading symbols to CoinGecko IDs
+   * Fetch real OHLC historical data from Kraken
    */
-  private getCoingeckoId(symbol: string): string {
-    const symbolMap: { [key: string]: string } = {
-      'BTCUSD': 'bitcoin',
-      'ETHUSD': 'ethereum', 
-      'SOLUSD': 'solana',
-      'AVAXUSD': 'avalanche-2',
-      'WLFIUSD': 'wrapped-wolfcoin',
-      'CROUSD': 'crypto-com-coin',
-      'TRUMPUSD': 'trumpcoin',
-      'HYPEUSD': 'hypercycle'
-    };
-    
-    const baseSymbol = symbol.replace('USD', '');
-    return symbolMap[symbol] || symbolMap[baseSymbol + 'USD'] || symbol.toLowerCase();
+  private async fetchKrakenOHLCData(krakenPair: string): Promise<number[]> {
+    try {
+      console.log(`📊 GPU: Fetching OHLC data from Kraken for ${krakenPair}...`);
+      
+      const response = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=5`, {
+        headers: {
+          'User-Agent': 'SignalCartel-GPU-Service/1.0'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Kraken OHLC API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.error && data.error.length > 0) {
+        throw new Error(`Kraken OHLC API error: ${data.error[0]}`);
+      }
+
+      const ohlcKey = Object.keys(data.result || {})[0];
+      if (!ohlcKey) {
+        throw new Error('No OHLC data returned from Kraken');
+      }
+
+      // Extract close prices from OHLC data
+      const ohlcArray = data.result[ohlcKey];
+      const closePrices = ohlcArray.map((candle: any[]) => parseFloat(candle[4])); // Close price is index 4
+      
+      console.log(`✅ GPU: Retrieved ${closePrices.length} real close prices from Kraken OHLC`);
+      return closePrices;
+      
+    } catch (error) {
+      console.error(`❌ GPU: Kraken OHLC fetch error:`, error.message);
+      return [];
+    }
   }
+  
+  /**
+   * Convert our symbol format to Kraken pair format
+   */
+  private symbolToKrakenPair(symbol: string): string | null {
+    const mapping: Record<string, string> = {
+      'BTCUSD': 'XXBTZUSD',
+      'ETHUSD': 'XETHZUSD',
+      'SOLUSD': 'SOLUSD',
+      'AVAXUSD': 'AVAXUSD',
+      'XRPUSD': 'XXRPZUSD',
+      'ADAUSD': 'ADAUSD',
+      'DOTUSD': 'DOTUSD',
+      'LINKUSD': 'LINKUSD',
+      'UNIUSD': 'UNIUSD',
+      'LTCUSD': 'XLTCZUSD',
+      'BCHUSD': 'BCHZUSD',
+      // Hot opportunity pairs from Smart Hunter
+      'NOTUSD': 'NOTUSD',
+      'DOGSUSD': 'DOGSUSD',
+      'WLFIUSD': 'WLFIUSD',
+      'SOMIUSD': 'SOMIUSD',
+      'HYPEUSD': 'HYPEUSD',
+      'PENGUUSD': 'PENGUUSD',
+      // USDT pairs if needed
+      'BTCUSDT': 'XBTUSDT',
+      'ETHUSDT': 'ETHUSDT'
+    };
+
+    return mapping[symbol] || null;
+  }
+  
 
   /**
    * Cleanup GPU resources

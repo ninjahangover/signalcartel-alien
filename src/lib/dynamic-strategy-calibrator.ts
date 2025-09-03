@@ -146,8 +146,9 @@ export class DynamicStrategyCalibrator {
       optimalTimeframes: ['15m', '1h']
     };
 
-    // Simulate price analysis
-    const mockPrice = this.getMockPrice(symbol);
+    // Get real price from market data
+    // If we don't have real price data, we can't analyze properly
+    console.log(`📊 Analyzing market profile for ${symbol}...`);
     
     return {
       symbol,
@@ -155,9 +156,9 @@ export class DynamicStrategyCalibrator {
       trendStrength: baseProfile.trendStrength!,
       volumePattern: baseProfile.volumePattern!,
       priceRange: {
-        typical: mockPrice,
-        high: mockPrice * 1.2,
-        low: mockPrice * 0.8
+        typical: 0, // Will be filled with real data
+        high: 0,    // Will be filled with real data
+        low: 0      // Will be filled with real data
       },
       dominantPattern: baseProfile.dominantPattern!,
       optimalTimeframes: baseProfile.optimalTimeframes!
@@ -392,19 +393,9 @@ export class DynamicStrategyCalibrator {
   }
 
   private getMockPrice(symbol: string): number {
-    const mockPrices: Record<string, number> = {
-      'BTCUSD': 107500,
-      'ETHUSD': 4250,
-      'SOLUSD': 195,
-      'AVAXUSD': 23,
-      'XRPUSD': 2.7,
-      'WLFIUSD': 0.23,
-      'DOGEUSD': 0.097,
-      'CROUSD': 0.158,
-      'HYPEUSD': 8.45,
-      'TRUMPUSD': 2.34
-    };
-    return mockPrices[symbol] || 100;
+    // NO MOCK DATA - this method should not be used
+    console.error(`❌ CRITICAL: getMockPrice called for ${symbol} - mock data not allowed!`);
+    throw new Error(`No mock data allowed - real prices only for ${symbol}`);
   }
 }
 
