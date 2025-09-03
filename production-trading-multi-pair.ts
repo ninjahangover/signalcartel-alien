@@ -9,6 +9,7 @@ import { EnhancedMarkovPredictor } from './src/lib/enhanced-markov-predictor';
 import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-engine';
 import { enhancedMathematicalIntuition } from './src/lib/enhanced-mathematical-intuition';
 import { getIntelligentPairAdapter } from './src/lib/intelligent-pair-adapter';
+import { adaptiveSignalLearning } from './src/lib/adaptive-signal-learning';
 import { PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -332,9 +333,11 @@ class ProductionTradingEngine {
         log(`📊 Pine Strategy: ${pineSignal.strategy} | Reason: ${pineSignal.reason}`);
         
         // Pine Script provides the BASE confidence
+        // CRITICAL FIX: Always assign enhancedSignal, even for HOLD signals
+        enhancedSignal = pineSignal; // All signals need to be passed to Enhanced Intelligence
+        
         if (pineSignal.action !== 'HOLD') {
           confidence = pineSignal.confidence; // Start with Pine Script confidence
-          enhancedSignal = pineSignal;
           aiSystemsUsed.push(pineSignal.strategy);
           log(`🎯 PINE SCRIPT BASE: ${(confidence * 100).toFixed(1)}% confidence from ${pineSignal.strategy}`);
         } else {
@@ -448,7 +451,8 @@ class ProductionTradingEngine {
         confidence += Math.max(0, Math.min(0.4, mathConfidence)); // Max 40% from Math Intuition
         aiSystemsUsed.push('mathematical-intuition');
         
-        enhancedSignal = baseSignal;
+        // Don't overwrite Pine Script signal - preserve it for Enhanced Intelligence
+        // enhancedSignal = baseSignal; // REMOVED - would overwrite Pine Script confidence
       } catch (error) {
         log(`⚠️ Mathematical Intuition analysis failed: ${error.message}`);
       }
@@ -478,7 +482,8 @@ class ProductionTradingEngine {
           });
           
           confidence = sentimentResult.confidence;
-          enhancedSignal = sentimentResult;
+          // Don't overwrite Pine Script signal for Enhanced Intelligence
+          // enhancedSignal = sentimentResult; // REMOVED - preserve Pine Script confidence
           aiSystemsUsed = ['basic-technical', 'fear-greed-sentiment', 'reddit-sentiment'];
           log(`💭 Phase 1: Sentiment-enhanced confidence ${(confidence * 100).toFixed(1)}%`);
         } catch (error) {
@@ -494,7 +499,7 @@ class ProductionTradingEngine {
           // Multi-source sentiment enhancement
           if (phase.features.sentimentEnabled) {
             const { universalSentimentEnhancer } = await import('./src/lib/sentiment/universal-sentiment-enhancer');
-            enhancedSignal = await universalSentimentEnhancer.enhanceSignal(baseSignal, {
+            const sentimentEnhancedSignal = await universalSentimentEnhancer.enhanceSignal(baseSignal, {
               conflictThreshold: phase.features.sentimentThreshold,
               minSentimentConfidence: phase.features.sentimentThreshold,
               skipOnConflict: false // Allow more aggressive trading in Phase 2
@@ -575,7 +580,8 @@ class ProductionTradingEngine {
             confidence = workingSignal.confidence;
           }
           
-          enhancedSignal = workingSignal;
+          // Don't overwrite Pine Script signal for Enhanced Intelligence
+          // enhancedSignal = workingSignal; // REMOVED - preserve Pine Script confidence
           log(`🎯 Phase 3: Order book + intuition confidence ${(confidence * 100).toFixed(1)}%`);
         } catch (error) {
           log(`⚠️ Phase 3 AI analysis failed: ${error.message}`);
@@ -597,7 +603,8 @@ class ProductionTradingEngine {
           });
           
           confidence = multiLayerResult.finalDecision?.confidence || baseSignal.confidence;
-          enhancedSignal = multiLayerResult;
+          // Don't overwrite Pine Script signal for Enhanced Intelligence
+          // enhancedSignal = multiLayerResult; // REMOVED - preserve Pine Script confidence
           aiSystemsUsed = ['quantum-forge-multi-layer-ai', 'consensus-validation'];
           log(`🚀 Phase 4: QUANTUM FORGE™ consensus confidence ${(confidence * 100).toFixed(1)}%`);
         } catch (error) {
@@ -621,10 +628,13 @@ class ProductionTradingEngine {
       
       try {
         // Get enhanced analysis with commission awareness and pair intelligence
+        const signalToUse = enhancedSignal || baseSignal;
+        // Production deployment - debug logging removed
+        
         enhancedAnalysis = await this.enhancedIntuition.analyzeWithPairIntelligence(
           marketData.symbol,
           marketData.price,
-          enhancedSignal || baseSignal,
+          signalToUse,
           { sentiment: marketData, price: marketData.price },
           10000 // Account balance - should be dynamic in real implementation
         );
@@ -1095,6 +1105,36 @@ class ProductionTradingEngine {
             const result = await this.positionManager.closePosition(position.id, price, reason);
             const winLoss = result.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
             log(`🎯 EXIT: ${result.position.id} | ${reason} | $${result.pnl.toFixed(2)} | ${winLoss}`);
+            
+            // 🧠 ADAPTIVE LEARNING FEEDBACK - Record signal outcome for learning
+            try {
+              const entryPrice = position.entryPrice;
+              const exitPrice = price;
+              const priceMovement = (exitPrice - entryPrice) / entryPrice * 100;
+              
+              // Determine what we predicted vs actual market movement
+              const originalDirection = side.toUpperCase() as 'LONG' | 'SHORT';
+              const predictedMove = originalDirection === 'LONG' ? 'UP' : 'DOWN';
+              const actualMove = priceMovement > 0 ? 'UP' : 'DOWN';
+              
+              // Calculate volatility for risk assessment
+              const volatility = Math.abs(priceMovement);
+              
+              // Record the learning data
+              adaptiveSignalLearning.recordSignalOutcome(
+                position.symbol,
+                originalDirection,
+                predictedMove,
+                actualMove,
+                result.pnl,
+                volatility,
+                100000 // Default volume - could be enhanced with real volume data
+              );
+              
+              log(`📊 ADAPTIVE FEEDBACK: ${position.symbol} ${originalDirection} - Predicted: ${predictedMove}, Actual: ${actualMove}, P&L: $${result.pnl.toFixed(2)}, Volatility: ${volatility.toFixed(2)}%`);
+            } catch (learningError) {
+              log(`⚠️ Adaptive learning error: ${learningError.message}`);
+            }
           } catch (exitError) {
             log(`❌ Exit failed for ${position.id}: ${exitError.message}`);
           }
@@ -1156,9 +1196,32 @@ class ProductionTradingEngine {
         const aiAnalysis = await this.shouldTrade(data, currentPhase);
         
         if (aiAnalysis.shouldTrade) {
-          // Use AI-enhanced signal for trade parameters
+          // 🧠 ADAPTIVE LEARNING SYSTEM - Check signal recommendation before proceeding
           const signal = aiAnalysis.signal || {};
-          const side = signal.action === 'SELL' ? 'short' : 'long';
+          const adaptiveRecommendation = adaptiveSignalLearning.getSignalRecommendation(
+            data.symbol, 
+            signal.action || 'BUY'
+          );
+          
+          if (!adaptiveRecommendation.shouldTrade) {
+            log(`🚫 ADAPTIVE LEARNING BLOCKED: ${data.symbol} - ${adaptiveRecommendation.reason}`);
+            continue; // Skip this pair and move to next
+          }
+          
+          // Log adaptive learning insights
+          if (adaptiveRecommendation.recommendedDirection && 
+              adaptiveRecommendation.recommendedDirection !== (signal.action === 'BUY' ? 'LONG' : 'SHORT')) {
+            log(`🔄 ADAPTIVE PIVOT: ${data.symbol} - Switching from ${signal.action} to ${adaptiveRecommendation.recommendedDirection} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
+            // Override the signal action based on adaptive learning
+            signal.action = adaptiveRecommendation.recommendedDirection === 'LONG' ? 'BUY' : 'SELL';
+          } else {
+            log(`✅ ADAPTIVE APPROVED: ${data.symbol} ${signal.action} - ${adaptiveRecommendation.reason} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
+          }
+          
+          // CRITICAL FIX: Correct directional trading based on AI market analysis
+          // BUY signal = Market going UP = Open LONG position (profit when price rises)
+          // SELL signal = Market going DOWN = Open SHORT position (profit when price falls)
+          const side = signal.action === 'BUY' ? 'long' : 'short';
           
           // 🧠 ENHANCED MATHEMATICAL INTUITION DYNAMIC POSITION SIZING
           let quantity = 0;
@@ -1276,6 +1339,12 @@ class ProductionTradingEngine {
           const progress = await phaseManager.getProgressToNextPhase();
           
           log(`📊 Total Managed Trades: ${progress.currentTrades}`);
+          
+          // 🧠 ADAPTIVE LEARNING PERFORMANCE SUMMARY (every 10 cycles)
+          const learningReport = adaptiveSignalLearning.getPerformanceSummary();
+          if (learningReport.includes('Priority Pairs') && learningReport.length > 100) {
+            log('\n' + learningReport);
+          }
           
           // Show phase transition if occurred
           if (newPhase.phase > currentPhase.phase) {

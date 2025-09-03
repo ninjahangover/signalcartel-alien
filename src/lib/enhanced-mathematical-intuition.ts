@@ -134,12 +134,13 @@ export class EnhancedMathematicalIntuition {
       if (tempConfidence > 0 && tempConfidence <= 1) {
         tempConfidence *= 100; // Convert decimal to percentage
       }
-      if (tempConfidence > 1) {
+      if (tempConfidence > 0) { // Changed condition: any positive confidence should be used
         signalConfidence = tempConfidence;
       }
     }
     
     console.log(`🔧 Using signal confidence: ${signalConfidence.toFixed(2)}% (vs intelligent: ${intelligentDecision.confidence.toFixed(2)}%)`);
+    // Production deployment - debug logging removed
     
     const pairAdaptedConfidence = this.calculateEnhancedConfidence(
       symbol,

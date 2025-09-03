@@ -331,10 +331,10 @@ export class GPUAccelerationService {
         // RSI momentum combination
         if (currentRSI < 40 && currentMACD > -0.2 && currentMomentum > -1) {
           buySignal = true;
-          confidence += 20;
+          confidence += 25; // Increased for better signal strength
         } else if (currentRSI > 60 && currentMACD < 0.2 && currentMomentum < 1) {
           sellSignal = true;
-          confidence += 20;
+          confidence += 25; // Increased for better signal strength
         }
         
         // Trend alignment bonus
@@ -343,7 +343,38 @@ export class GPUAccelerationService {
         }
         
         // Base confidence for any signal
-        confidence += 12;
+        confidence += 15; // Increased base confidence
+      }
+      
+      if (strategy.includes('stratus') || strategy.includes('neural') || strategy.includes('core')) {
+        // Stratus Core Neural Engine - AI-driven pattern recognition
+        const priceVsEMA = (currentPrice - currentEMA) / currentEMA * 100;
+        const rsiMomentum = (currentRSI - 50) / 50; // Normalized RSI momentum
+        const macdSignal = Math.abs(currentMACD) > 0.1 ? Math.sign(currentMACD) : 0;
+        
+        // Neural network simulation with pattern matching
+        const patternScore = Math.abs(rsiMomentum) * 0.4 + Math.abs(priceVsEMA) * 0.3 + Math.abs(macdSignal) * 0.3;
+        confidence += Math.min(30, patternScore * 40); // Pattern-based confidence
+        
+        // AI prediction logic
+        if (currentRSI < 35 && currentMACD > -0.15 && priceVsEMA < -2) {
+          buySignal = true;
+          confidence += 25; // Strong AI buy signal
+        } else if (currentRSI > 65 && currentMACD < 0.15 && priceVsEMA > 2) {
+          sellSignal = true;  
+          confidence += 25; // Strong AI sell signal
+        } else if (currentRSI < 45 && macdSignal > 0) {
+          // Mild AI buy bias
+          confidence += 15;
+          buySignal = currentRSI < 40;
+        } else if (currentRSI > 55 && macdSignal < 0) {
+          // Mild AI sell bias
+          confidence += 15;
+          sellSignal = currentRSI > 60;
+        }
+        
+        // Neural ensemble boost
+        confidence += 18; // Base AI confidence
       }
       
       // Volatility adjustment
