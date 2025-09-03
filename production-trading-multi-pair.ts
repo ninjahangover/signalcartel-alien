@@ -3,6 +3,14 @@
  * Uses the full position management system with QUANTUM FORGE™ phase integration
  */
 
+// Initialize telemetry first
+import { initProductionTelemetry, getTelemetry } from './src/lib/telemetry/production-telemetry';
+const telemetry = initProductionTelemetry({
+  serviceName: 'quantum-forge-production-trading',
+  environment: 'production',
+  externalMonitoringServer: 'http://174.72.187.118:3301'
+});
+
 import { PositionManager } from './src/lib/position-management/position-manager';
 import { phaseManager } from './src/lib/quantum-forge-phase-config';
 import { EnhancedMarkovPredictor } from './src/lib/enhanced-markov-predictor';
@@ -646,8 +654,26 @@ class ProductionTradingEngine {
           log(`📈 ✅ ENHANCED TRADE SIGNAL: ${marketData.symbol} @ $${marketData.price} (${enhancedAnalysis.confidence.toFixed(1)}% confidence)`);
           log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}] + Enhanced Intelligence`);
           log(`💰 ${this.enhancedIntuition.getAnalysisSummary(enhancedAnalysis)}`);
+          
+          // Track AI system performance in telemetry
+          telemetry.trackAI({
+            system: 'enhanced-mathematical-intuition',
+            responseTime: enhancedAnalysis.processingTime || 0,
+            confidence: finalConfidence,
+            prediction: 'TRADE',
+            success: true
+          });
         } else {
           log(`📉 ❌ Enhanced Intelligence BLOCKED: ${enhancedAnalysis.reason}`);
+          
+          // Track blocked signals too
+          telemetry.trackAI({
+            system: 'enhanced-mathematical-intuition',
+            responseTime: enhancedAnalysis.processingTime || 0,
+            confidence: finalConfidence,
+            prediction: 'HOLD',
+            success: true
+          });
         }
       } catch (enhancedError) {
         log(`⚠️ Enhanced analysis failed, falling back to basic: ${enhancedError.message}`);
@@ -1106,6 +1132,17 @@ class ProductionTradingEngine {
             const winLoss = result.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
             log(`🎯 EXIT: ${result.position.id} | ${reason} | $${result.pnl.toFixed(2)} | ${winLoss}`);
             
+            // Track position closure in telemetry
+            telemetry.trackTrade({
+              strategy: position.strategy || 'unknown',
+              symbol: position.symbol,
+              side: side === 'long' ? 'SELL' : 'BUY', // Opposite of entry
+              amount: Math.abs(position.quantity),
+              price: price,
+              success: true,
+              pnl: result.pnl
+            });
+            
             // 🧠 ADAPTIVE LEARNING FEEDBACK - Record signal outcome for learning
             try {
               const entryPrice = position.entryPrice;
@@ -1228,6 +1265,10 @@ class ProductionTradingEngine {
           let adjustedTakeProfit = 0;
           let adjustedStopLoss = 0;
           
+          if (aiAnalysis.enhancedAnalysis) {
+            log(`📊 Enhanced analysis received: positionSize=$${aiAnalysis.enhancedAnalysis.positionSize?.toFixed(2) || 'undefined'}, shouldTrade=${aiAnalysis.enhancedAnalysis.shouldTrade}`);
+          }
+          
           if (aiAnalysis.enhancedAnalysis && aiAnalysis.enhancedAnalysis.positionSize > 0) {
             // Use commission-aware position sizing from enhanced analysis
             quantity = aiAnalysis.enhancedAnalysis.positionSize;
@@ -1287,6 +1328,8 @@ class ProductionTradingEngine {
           try {
             // Use production position management system with AI strategy name
             const strategyName = `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'basic'}`;
+            log(`📝 Attempting to save position: ${data.symbol} ${side} ${actualQuantity.toFixed(6)} @ $${data.price}`);
+            
             const result = await this.positionManager.openPosition({
               symbol: data.symbol,
               side,
@@ -1301,7 +1344,18 @@ class ProductionTradingEngine {
               }
             });
             
-            log(`✅ POSITION OPENED: ${result.position.id} | ${side.toUpperCase()} ${quantity.toFixed(6)} ${data.symbol} @ $${data.price} | Confidence: ${(aiAnalysis.confidence * 100).toFixed(1)}%`);
+            log(`✅ POSITION OPENED: ${result.position.id} | ${side.toUpperCase()} ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price} | Confidence: ${(aiAnalysis.confidence * 100).toFixed(1)}%`);
+            
+            // Track trade in telemetry
+            telemetry.trackTrade({
+              strategy: strategyName,
+              symbol: data.symbol,
+              side: side.toUpperCase() as 'BUY' | 'SELL',
+              amount: actualQuantity,
+              price: data.price,
+              success: true,
+              confidence: aiAnalysis.confidence
+            });
             
             // 🎯 SMART EXIT TIMING STRATEGY
             // Check existing positions for smart exit opportunities
@@ -1357,6 +1411,20 @@ class ProductionTradingEngine {
         }
       } else {
         log(`📊 Trading cycle ${this.cycleCount} complete`);
+      }
+      
+      // Track system performance every 10 cycles
+      if (this.cycleCount % 10 === 0) {
+        const openPositions = await this.positionManager.getOpenPositions();
+        const memUsage = process.memoryUsage();
+        const memPercent = (memUsage.rss / 1024 / 1024 / 1024) * 100; // Convert to GB percentage
+        
+        telemetry.trackSystem({
+          memory: memPercent,
+          cpu: 0, // CPU tracking would require additional package
+          activeStrategies: phase.features.sentiment ? 3 : 2, // Estimate based on phase
+          openPositions: openPositions.length
+        });
       }
       
     } catch (error) {

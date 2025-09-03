@@ -8,22 +8,21 @@ import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 
 // Environment configuration
-const OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';
+// For external monitoring server: http://174.72.187.118:4318
+const OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://174.72.187.118:4318';
 const SERVICE_NAME = 'quantum-forge-trading';
 const SERVICE_VERSION = '4.0.0';
 const DEPLOYMENT_ENVIRONMENT = process.env.NODE_ENV || 'production';
 
 // Custom resource attributes for QUANTUM FORGE™
-const resource = Resource.default().merge(
-  new Resource({
-    [SemanticResourceAttributes.SERVICE_NAME]: SERVICE_NAME,
-    [SemanticResourceAttributes.SERVICE_VERSION]: SERVICE_VERSION,
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: DEPLOYMENT_ENVIRONMENT,
-    'quantum_forge.phase': 'dynamic',
-    'quantum_forge.ai_systems': 'multi_layer',
-    'quantum_forge.site': process.env.SITE_ID || 'main',
-  })
-);
+const resource = new Resource({
+  [SemanticResourceAttributes.SERVICE_NAME]: SERVICE_NAME,
+  [SemanticResourceAttributes.SERVICE_VERSION]: SERVICE_VERSION,
+  [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: DEPLOYMENT_ENVIRONMENT,
+  'quantum_forge.phase': 'dynamic',
+  'quantum_forge.ai_systems': 'multi_layer',
+  'quantum_forge.site': process.env.SITE_ID || 'main',
+});
 
 // Configure trace exporter
 const traceExporter = process.env.NODE_ENV === 'development' 

@@ -160,6 +160,27 @@ export class EnhancedMathematicalIntuition {
     
     console.log(`🔧 Trade decision: ${correctedShouldTrade ? 'TRADE' : 'SKIP'} - ${correctedReason}`);
     
+    // Calculate our own position size when we override the intelligent decision
+    let finalPositionSize = intelligentDecision.positionSize;
+    if (correctedShouldTrade && finalPositionSize === 0) {
+      // Calculate position size based on our enhanced confidence
+      // Phase 2 targets $300-400 positions, which is 3-4% of $10k account
+      const baseSize = accountBalance * 0.035; // 3.5% base size for Phase 2 (was 0.3%)
+      const confidenceMultiplier = Math.min(pairAdaptedConfidence / 50, 1.5); // Scale from 50% to 100%
+      const moveMultiplier = Math.min(Math.abs(predictedMove) / 1.5, 1.2); // Reduced multiplier for more stable sizing
+      
+      finalPositionSize = baseSize * confidenceMultiplier * moveMultiplier;
+      finalPositionSize = Math.min(finalPositionSize, accountBalance * 0.05); // Cap at 5% of account
+      finalPositionSize = Math.max(finalPositionSize, accountBalance * 0.03); // At least 3% for Phase 2 ($300 min)
+      
+      console.log(`💰 Calculated override position size: $${finalPositionSize.toFixed(2)} (base: $${baseSize.toFixed(2)}, conf mult: ${confidenceMultiplier.toFixed(2)}x, move mult: ${moveMultiplier.toFixed(2)}x)`);
+    }
+    
+    // Recalculate commission costs with the final position size
+    const finalCommissionCost = finalPositionSize * 0.0026 * 2; // Round-trip taker fee
+    const finalExpectedProfit = finalPositionSize * (Math.abs(predictedMove) / 100);
+    const finalNetExpectedReturn = finalExpectedProfit - finalCommissionCost;
+    
     const analysis: EnhancedIntuitiveAnalysis = {
       originalIntuition,
       flowField,
@@ -169,13 +190,13 @@ export class EnhancedMathematicalIntuition {
       intelligentDecision,
       shouldTrade: correctedShouldTrade,
       confidence: pairAdaptedConfidence,
-      positionSize: intelligentDecision.positionSize,
+      positionSize: finalPositionSize,
       reason: correctedReason,
       takeProfit: exitThresholds.takeProfit,
       stopLoss: exitThresholds.stopLoss,
-      expectedProfit,
-      commissionCost,
-      netExpectedReturn
+      expectedProfit: finalExpectedProfit,
+      commissionCost: finalCommissionCost,
+      netExpectedReturn: finalNetExpectedReturn
     };
     
     console.log(`🎯 ${symbol} Enhanced Analysis: ${analysis.shouldTrade ? '✅ TRADE' : '❌ SKIP'} - Confidence: ${pairAdaptedConfidence.toFixed(1)}%, Net Expected: ${netExpectedReturn > 0 ? '+' : ''}$${netExpectedReturn.toFixed(4)}`);

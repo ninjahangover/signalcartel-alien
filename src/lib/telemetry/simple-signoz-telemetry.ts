@@ -6,8 +6,9 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 
-// Configuration
-const OTEL_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4317';
+// Configuration  
+// External monitoring server: http://174.72.187.118:4317
+const OTEL_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://174.72.187.118:4317';
 const SERVICE_NAME = process.env.SERVICE_NAME || 'signalcartel-trading';
 const ENVIRONMENT = process.env.NODE_ENV || 'production';
 
