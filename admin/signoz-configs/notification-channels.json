@@ -1,0 +1,9 @@
+{
+  "name": "signalcartel-email-alerts",
+  "type": "email",
+  "settings": {
+    "addresses": ["test@example.com"],
+    "subject": "SignalCartel Alert: {{ .GroupLabels.alertname }}",
+    "body": "{{ range .Alerts }}{{ .Annotations.title }}\n\n{{ .Annotations.description }}\n\nAction: {{ .Annotations.action }}\n\nTime: {{ .StartsAt }}{{ end }}"
+  }
+}

@@ -127,19 +127,44 @@ class ProductionTradingEngine {
   }
 
   /**
-   * Get current price for a symbol (FIXED: uses emergency cache)
+   * Get current price for a symbol using REAL KRAKEN DATA ONLY
    */
   private async getCurrentPrice(symbol: string): Promise<number | null> {
     try {
-      const { fixedPriceFetcher } = await import('./src/lib/fixed-price-fetcher');
-      const priceData = await fixedPriceFetcher.getCurrentPrice(symbol);
-      if (priceData) {
-        log(`💰 ${symbol}: $${priceData.price} (${priceData.source})`);
-        return priceData.price;
+      // For open positions, use Kraken API for maximum accuracy
+      const openPositions = await this.positionManager.getOpenPositions();
+      const hasOpenPosition = openPositions.some(pos => pos.symbol === symbol);
+      
+      if (hasOpenPosition) {
+        // Use Kraken for open position symbols (most accurate)
+        try {
+          const { krakenPositionPriceFetcher } = await import('./src/lib/kraken-position-price-fetcher');
+          const krakenResult = await krakenPositionPriceFetcher.getPositionPrice(symbol);
+          
+          if (krakenResult.success && krakenResult.price > 0) {
+            log(`🔵 KRAKEN REAL: ${symbol}: $${krakenResult.price.toLocaleString()}`);
+            return krakenResult.price;
+          } else {
+            log(`❌ Kraken failed for open position ${symbol}: ${krakenResult.error}`);
+          }
+        } catch (krakenError) {
+          log(`⚠️ Kraken API error for ${symbol}: ${krakenError.message}`);
+        }
       }
-      return null;
+      
+      // Fallback to real-time price fetcher (still real data, multiple sources)
+      const { realTimePriceFetcher } = await import('./src/lib/real-time-price-fetcher');
+      const priceData = await realTimePriceFetcher.getCurrentPrice(symbol);
+      
+      if (priceData.success && priceData.price > 0) {
+        log(`🔄 REAL-TIME: ${symbol}: $${priceData.price.toLocaleString()} (${priceData.source})`);
+        return priceData.price;
+      } else {
+        log(`❌ Real-time price fetch failed for ${symbol}: ${priceData.error || 'Unknown error'}`);
+        return null;
+      }
     } catch (error) {
-      log(`⚠️ Fixed price fetch failed for ${symbol}: ${error.message}`);
+      log(`❌ Get current price failed for ${symbol}: ${error.message}`);
       return null;
     }
   }

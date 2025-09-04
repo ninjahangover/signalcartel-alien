@@ -1,0 +1,54 @@
+{
+  "groups": [
+    {
+      "name": "signalcartel-alerts",
+      "rules": [
+        {
+          "alert": "SignalCartel_Service_Down",
+          "expr": "count_over_time({service_name=\"signalcartel-heartbeat\"} |~ \"HEALTH\" [2m]) == 0",
+          "for": "1m",
+          "labels": {
+            "severity": "critical",
+            "service": "signalcartel",
+            "type": "service_disruption"
+          },
+          "annotations": {
+            "title": "🚨 SignalCartel Heartbeat Service is DOWN",
+            "description": "No heartbeat health logs received in 2+ minutes. Service may have crashed.",
+            "action": "Check heartbeat service immediately - restart if needed"
+          }
+        },
+        {
+          "alert": "SignalCartel_Trading_System_Down",
+          "expr": "count_over_time({service_name=\"quantum-forge-production-trading\"} |~ \"TRADE|POSITION\" [5m]) == 0",
+          "for": "1m", 
+          "labels": {
+            "severity": "critical",
+            "service": "signalcartel",
+            "type": "trading_system"
+          },
+          "annotations": {
+            "title": "🚨 SignalCartel Trading System Not Active", 
+            "description": "No trading activity logs in 5+ minutes. Trading system may be down.",
+            "action": "Check production trading system - restart if needed"
+          }
+        },
+        {
+          "alert": "SignalCartel_System_Warning",
+          "expr": "count_over_time({service_name=\"signalcartel-heartbeat\"} |~ \"WARNING\" [10m]) >= 3",
+          "for": "2m",
+          "labels": {
+            "severity": "warning", 
+            "service": "signalcartel",
+            "type": "system_health"
+          },
+          "annotations": {
+            "title": "⚠️ SignalCartel System Health Warnings",
+            "description": "Multiple system health warnings detected. System may need attention.",
+            "action": "Monitor system - check for trading activity issues"
+          }
+        }
+      ]
+    }
+  ]
+}
