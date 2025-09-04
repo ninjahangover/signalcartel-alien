@@ -1422,7 +1422,7 @@ class ProductionTradingEngine {
         telemetry.trackSystem({
           memory: memPercent,
           cpu: 0, // CPU tracking would require additional package
-          activeStrategies: phase.features.sentiment ? 3 : 2, // Estimate based on phase
+          activeStrategies: currentPhase.features.sentiment ? 3 : 2, // Estimate based on phase
           openPositions: openPositions.length
         });
       }
