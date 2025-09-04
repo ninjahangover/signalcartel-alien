@@ -1237,6 +1237,34 @@ class ProductionTradingEngine {
       
       log(`✅ Trading with ${marketData.length} validated pairs: ${marketData.map(d => d.symbol).join(', ')}`);
       
+      // 🎯 ADAPTIVE PAIR FILTERING - Focus on high performers, avoid consistent losers
+      try {
+        const { AdaptivePairFilter } = await import('./src/lib/adaptive-pair-filter');
+        const pairFilter = new AdaptivePairFilter(this.prisma);
+        
+        const filteredPairs = [];
+        for (const data of marketData) {
+          const isAllowed = await pairFilter.shouldAllowPair(data.symbol);
+          if (isAllowed) {
+            filteredPairs.push(data);
+          } else {
+            log(`🚫 BLOCKED: ${data.symbol} - Poor historical performance`);
+          }
+        }
+        
+        marketData = filteredPairs;
+        log(`🎯 FILTERED: ${marketData.length} high-performing pairs selected: ${marketData.map(d => d.symbol).join(', ')}`);
+        
+        // Prioritize profit predator opportunities (sort by profit potential)
+        marketData.sort((a, b) => {
+          // Prioritize pairs found by profit predator (if available)
+          return (b.predatorScore || 0) - (a.predatorScore || 0);
+        });
+        
+      } catch (error) {
+        log(`⚠️ Adaptive pair filtering failed: ${error.message}`);
+      }
+      
       // 🚀 OPPORTUNITY CAPTURE - maximize profitable trading
       const openPositions = await this.positionManager.getOpenPositions();
       const maxPositions = currentPhase.phase === 0 ? 5 : 10; // Conservative limits for better closure rates
@@ -1302,26 +1330,50 @@ class ProductionTradingEngine {
             
             log(`🧠 ENHANCED SIZING: $${quantity.toFixed(2)} | TP: ${aiAnalysis.enhancedAnalysis.takeProfit.toFixed(2)}% SL: ${aiAnalysis.enhancedAnalysis.stopLoss.toFixed(2)}% | Expected: $${aiAnalysis.enhancedAnalysis.netExpectedReturn.toFixed(4)}`);
           } else {
-            // Enhanced fallback: Minimum viable position sizing for Phase 0
-            const accountBalance = 10000; // $10K starting balance
-            const phasePositionPercent = currentPhase.features.positionSizing; // This is a percentage (0.001 = 0.1%)
-            const phasePositionDollars = accountBalance * phasePositionPercent; // Convert to dollars
-            const baseSize = Math.max(phasePositionDollars, accountBalance * 0.01); // At least 1% of balance ($100 minimum)
-            const aiSystemCount = aiAnalysis.aiSystems ? aiAnalysis.aiSystems.length : 1;
-            const multiAIBonus = Math.min(aiSystemCount * 0.25, 1.0);
-            const confidenceMultiplier = Math.min(aiAnalysis.confidence * 2.0, 3.0); // Increased multiplier
-            const isStablecoin = data.symbol.includes('USDT') || data.symbol.includes('USDC');
-            const lowPriceBoost = data.price < 10 ? 2.0 : 1.0; // Increased boost for low-price assets
-            const stablecoinBoost = isStablecoin ? 1.2 : 1.0;
-            const balanceOptimization = lowPriceBoost * stablecoinBoost;
-            const mathIntuitionMultiplier = (1 + multiAIBonus) * confidenceMultiplier * balanceOptimization;
-            quantity = baseSize * mathIntuitionMultiplier;
-            
-            // Ensure minimum viable position size
-            const minimumPosition = accountBalance * 0.0005; // 0.05% minimum ($5 minimum)
-            quantity = Math.max(quantity, minimumPosition);
-            
-            log(`🧠 ENHANCED FALLBACK SIZING: Phase(${(phasePositionPercent*100).toFixed(1)}%=$${phasePositionDollars.toFixed(2)}) → Base $${baseSize.toFixed(2)} × AI(${aiSystemCount}) × Conf(${(aiAnalysis.confidence * 100).toFixed(1)}%) × Balance = $${quantity.toFixed(2)}`);
+            // 🚀 ENHANCED POSITION SIZING SYSTEM - 67-333x improvement target
+            try {
+              const { EnhancedPositionSizing } = await import('./src/lib/enhanced-position-sizing');
+              const positionSizer = new EnhancedPositionSizing(this.prisma);
+              
+              const sizingResult = await positionSizer.calculateOptimalSize({
+                symbol: data.symbol,
+                confidence: aiAnalysis.confidence,
+                currentPrice: data.price,
+                action: data.action,
+                accountBalance: 10000 // $10K starting balance
+              });
+              
+              quantity = sizingResult.finalPositionSize;
+              
+              log(`🚀 ENHANCED SIZING: $${quantity.toFixed(2)} (${sizingResult.confidenceMultiplier.toFixed(1)}x conf × ${sizingResult.pairPerformanceMultiplier.toFixed(1)}x pair × ${sizingResult.winStreakMultiplier.toFixed(1)}x streak)`);
+              log(`💡 Reasoning: ${sizingResult.reasoning.join(', ')}`);
+              log(`🎯 Expected: $${sizingResult.expectedProfit.toFixed(4)} | Risk: ${sizingResult.riskLevel}`);
+              
+            } catch (error) {
+              log(`⚠️ Enhanced sizing failed, using fallback: ${error.message}`);
+              
+              // Fallback with improved multipliers based on your requirements
+              const accountBalance = 10000;
+              const baseSize = accountBalance * 0.01; // $100 base
+              
+              // Enhanced confidence multipliers (Priority #1)
+              let confidenceMultiplier = 1;
+              if (aiAnalysis.confidence >= 0.88) {
+                confidenceMultiplier = 10;  // 88%+ → 10x size
+              } else if (aiAnalysis.confidence >= 0.70) {
+                confidenceMultiplier = 5;   // 70-87% → 5x size
+              } else if (aiAnalysis.confidence >= 0.50) {
+                confidenceMultiplier = 2;   // 50-69% → 2x size
+              }
+              
+              quantity = baseSize * confidenceMultiplier;
+              
+              // Ensure minimum viable position
+              const minimumPosition = accountBalance * 0.001; // 0.1% minimum ($10)
+              quantity = Math.max(quantity, minimumPosition);
+              
+              log(`🎯 FALLBACK SIZING: Base $${baseSize} × ${confidenceMultiplier}x (${(aiAnalysis.confidence * 100).toFixed(1)}% conf) = $${quantity.toFixed(2)}`);
+            }
           }
           
           // 🎯 ENHANCED RISK MANAGEMENT
