@@ -18,7 +18,11 @@ import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-en
 import { enhancedMathematicalIntuition } from './src/lib/enhanced-mathematical-intuition';
 import { getIntelligentPairAdapter } from './src/lib/intelligent-pair-adapter';
 import { adaptiveSignalLearning } from './src/lib/adaptive-signal-learning';
+import { productionTensorIntegration } from './src/lib/production-tensor-integration';
 import { PrismaClient } from '@prisma/client';
+import { webhookClient } from './src/lib/webhooks/webhook-client';
+import { WebhookPayloadAdapter } from './src/lib/webhook-payload-adapter';
+import { krakenApiService } from './src/lib/kraken-api-service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -62,6 +66,12 @@ class ProductionTradingEngine {
   private mathEngine: MathematicalIntuitionEngine;
   private enhancedIntuition: typeof enhancedMathematicalIntuition;
   private pairAdapter: ReturnType<typeof getIntelligentPairAdapter>;
+  private webhookAdapter: WebhookPayloadAdapter;
+  private krakenInitialized: boolean = false;
+  
+  // 🧮 TENSOR FUSION MODE (gradual rollout)
+  private tensorMode: boolean = process.env.TENSOR_MODE === 'true';
+  private tensorRolloutPercentage: number = parseFloat(process.env.TENSOR_ROLLOUT || '10'); // Start with 10%
   
   // 🎯 PRE-VALIDATION PRICE CACHE SYSTEM
   private priceCache = new Map<string, { price: number; timestamp: Date; isValid: boolean }>();
@@ -93,6 +103,22 @@ class ProductionTradingEngine {
     this.mathEngine = new MathematicalIntuitionEngine();
     this.enhancedIntuition = enhancedMathematicalIntuition;
     this.pairAdapter = getIntelligentPairAdapter();
+    this.webhookAdapter = new WebhookPayloadAdapter('quantum-forge-live-trading');
+    
+    // Initialize direct Kraken API client
+    const isLiveMode = process.env.TRADING_MODE === 'LIVE';
+    // Initialize Kraken API service with working credentials from proxy setup
+    const apiKey = process.env.KRAKEN_API_KEY || "DX6cOR0oDiBFem9c7M1aFhKBABAICZAI1VSynPJsCFWvAwmakDUfpElR";
+    const privateKey = process.env.KRAKEN_PRIVATE_KEY || "p/1Cuz63DpXBANzU1rM6yinTccji0PNaGTf5OnwweaY1P4TPs0pDbvlT6xqxt40KJMuO30paUo/JNeppV57cWg==";
+    if (apiKey && privateKey) {
+      krakenApiService.authenticate(apiKey, privateKey).then(success => {
+        this.krakenInitialized = success;
+        log(success ? '✅ Kraken API authenticated successfully via proxy' : '❌ Kraken API authentication failed');
+      });
+    } else {
+      log('❌ Kraken API credentials not found');
+    }
+    log(`🔌 Kraken API Client: ${isLiveMode ? '🔴 LIVE TRADING' : '🟡 VALIDATE-ONLY'} mode`);
     log('🚀 QUANTUM FORGE™ PRODUCTION TRADING ENGINE');
     log('==========================================');
     log('✅ Complete position management lifecycle');
@@ -100,6 +126,16 @@ class ProductionTradingEngine {
     log('✅ Real trade counting for phase transitions');
     log('✅ Production-ready position tracking');
     log('📁 Logging to: ' + LOG_FILE);
+    log('');
+    
+    // 🧮 TENSOR FUSION STATUS
+    if (this.tensorMode) {
+      log('🧮 TENSOR FUSION: FULLY ENABLED - Using advanced AI fusion for all decisions');
+    } else if (this.tensorRolloutPercentage > 0) {
+      log(`🧮 TENSOR FUSION: GRADUAL ROLLOUT - ${this.tensorRolloutPercentage.toFixed(1)}% of trades use tensor system`);
+    } else {
+      log('🧮 TENSOR FUSION: DISABLED - Using original AI system');
+    }
     log('');
   }
   
@@ -669,7 +705,7 @@ class ProductionTradingEngine {
           marketData.price,
           signalToUse,
           { sentiment: marketData, price: marketData.price },
-          10000 // Account balance - should be dynamic in real implementation
+          this.positionManager // Real position manager for available balance calculation
         );
         
         finalShouldTrade = enhancedAnalysis.shouldTrade;
@@ -679,6 +715,22 @@ class ProductionTradingEngine {
           log(`📈 ✅ ENHANCED TRADE SIGNAL: ${marketData.symbol} @ $${marketData.price} (${enhancedAnalysis.confidence.toFixed(1)}% confidence)`);
           log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}] + Enhanced Intelligence`);
           log(`💰 ${this.enhancedIntuition.getAnalysisSummary(enhancedAnalysis)}`);
+          
+          // 📡 Send webhook notification for high-confidence trade signals
+          try {
+            if (enhancedAnalysis.confidence >= 85) { // Only send for high confidence signals
+              await webhookClient.sendTradeSignal({
+                action: enhancedAnalysis.shouldTrade ? 'BUY' : 'HOLD',
+                symbol: marketData.symbol,
+                price: marketData.price,
+                confidence: enhancedAnalysis.confidence / 100,
+                strategy: 'quantum-forge-enhanced-intelligence',
+                reason: enhancedAnalysis.reason
+              });
+            }
+          } catch (webhookError) {
+            console.warn('⚠️ Failed to send trade signal webhook:', webhookError.message);
+          }
           
           // Track AI system performance in telemetry
           telemetry.trackAI({
@@ -712,6 +764,70 @@ class ProductionTradingEngine {
           log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}]`);
         } else {
           log(`📉 ❌ Signal below threshold: ${(confidence * 100).toFixed(1)}% < ${(phase.features.confidenceThreshold * 100).toFixed(1)}%`);
+        }
+      }
+
+      // 🧮 TENSOR FUSION INTEGRATION - LIVE DATA ONLY 
+      // Use tensor fusion for enhanced decision making with gradual rollout
+      if (this.shouldUseTensorFusion()) {
+        try {
+          log(`🧮 TENSOR FUSION: Analyzing with advanced AI fusion system`);
+          
+          // Create production AI bundle with all available data
+          const aiBundle = {
+            symbol: marketData.symbol,
+            currentPrice: marketData.price,
+            pineScriptResult: enhancedSignal || baseSignal,
+            mathematicalIntuition: enhancedAnalysis,
+            markovPrediction: markovAnalysis,
+            sentimentAnalysis: null, // Would be populated if available
+            marketData: marketData,
+            phase: phase.phase,
+            timestamp: new Date()
+          };
+          
+          // Get tensor-based decision
+          const tensorDecision = await productionTensorIntegration.makeDecision(aiBundle);
+          
+          log(`🎯 TENSOR DECISION: ${tensorDecision.shouldTrade ? 'TRADE' : 'SKIP'} ${tensorDecision.direction}`);
+          log(`   Tensor Confidence: ${(tensorDecision.confidence * 100).toFixed(1)}%`);
+          log(`   Expected Move: ${(tensorDecision.expectedMove * 100).toFixed(2)}%`);
+          log(`   Position Size: ${(tensorDecision.positionSize * 100).toFixed(1)}% of account`);
+          log(`   AI Systems Used: ${tensorDecision.aiSystemsUsed.join(', ')}`);
+          log(`   Reason: ${tensorDecision.fusedDecision.reason}`);
+          
+          // Track tensor performance
+          telemetry.trackAI({
+            system: 'tensor-ai-fusion',
+            responseTime: Date.now() - new Date().getTime(),
+            confidence: tensorDecision.confidence,
+            prediction: tensorDecision.shouldTrade ? 'TRADE' : 'HOLD',
+            success: true,
+            additionalData: {
+              tensorReason: tensorDecision.fusedDecision.reason,
+              informationContent: tensorDecision.fusedDecision.informationContent,
+              consensusStrength: tensorDecision.fusedDecision.consensusStrength
+            }
+          });
+          
+          // Compare with original decision for learning
+          if (tensorDecision.shouldTrade !== finalShouldTrade) {
+            log(`🔍 TENSOR vs ORIGINAL: Tensor=${tensorDecision.shouldTrade ? 'TRADE' : 'SKIP'}, Original=${finalShouldTrade ? 'TRADE' : 'SKIP'}`);
+          }
+          
+          // Use tensor decision (it has superior mathematical rigor)
+          return {
+            shouldTrade: tensorDecision.shouldTrade,
+            confidence: tensorDecision.confidence,
+            signal: enhancedSignal || baseSignal,
+            aiSystems: tensorDecision.aiSystemsUsed,
+            enhancedAnalysis: tensorDecision,
+            tensorDecision: tensorDecision // For position sizing
+          };
+          
+        } catch (tensorError) {
+          log(`⚠️ Tensor fusion failed, falling back to original: ${tensorError.message}`);
+          // Fall through to original return
         }
       }
 
@@ -1076,19 +1192,50 @@ class ProductionTradingEngine {
                   reason = `markov_negative_ev_${pnl.toFixed(1)}pct`;
                   log(`📊 MARKOV EXIT: Taking ${pnl.toFixed(2)}% - Expected Value turning negative (${expectedValue.toFixed(2)}%)`);
                 }
-                // Bayesian probability drops below 40% - EXIT
-                else if (probabilityOfProfit < 0.4) {
-                  shouldExit = true;
-                  reason = `bayesian_low_prob_${pnl.toFixed(1)}pct`;
-                  log(`📉 BAYESIAN EXIT: Taking ${pnl.toFixed(2)}% - Profit probability only ${(probabilityOfProfit*100).toFixed(1)}%`);
+                // 🧠 DYNAMIC INTELLIGENT EXIT WITH TRAILING STOPS - Enhanced Mathematical Intuition decides
+                else {
+                  try {
+                    const { enhancedMathematicalIntuition } = await import('./src/lib/enhanced-mathematical-intuition');
+                    const positionData = await this.positionManager.getPositionById(position.id);
+                    const originalConfidence = positionData?.metadata?.confidence || 0.75;
+                    const predictedMove = positionData?.metadata?.predictedMove || 1.0;
+                    const side = position.quantity > 0 ? 'LONG' : 'SHORT';
+                    
+                    // Use enhanced exit logic with trailing stops
+                    const exitDecision = enhancedMathematicalIntuition.shouldExitDynamicallyWithTrailing(
+                      position, currentPrice, pnl, probabilityOfProfit, positionAge, originalConfidence, predictedMove, side
+                    );
+                    
+                    if (exitDecision.shouldExit) {
+                      shouldExit = true;
+                      reason = exitDecision.reason;
+                      
+                      if (exitDecision.exitType === 'trailing') {
+                        log(`🏃‍♂️ TRAILING STOP HIT: Taking ${pnl.toFixed(2)}% | Confidence: ${(originalConfidence * 100).toFixed(1)}% | Age: ${Math.round(positionAge / 1000)}s`);
+                      } else {
+                        const exitInfo = enhancedMathematicalIntuition.getDynamicExitInfo(
+                          position, pnl, probabilityOfProfit, positionAge, originalConfidence, predictedMove
+                        );
+                        log(`🧠 ${exitInfo.logMessage}`);
+                      }
+                    }
+                  } catch (error) {
+                    // Fallback to basic Bayesian exit
+                    if (probabilityOfProfit < 0.4) {
+                      shouldExit = true;
+                      reason = `bayesian_fallback_${pnl.toFixed(1)}pct`;
+                      log(`📉 BAYESIAN FALLBACK: Taking ${pnl.toFixed(2)}% - Profit probability only ${(probabilityOfProfit*100).toFixed(1)}%`);
+                    }
+                  }
                 }
-                // Correlation breakdown - market dynamics changed
-                else if (Math.abs(correlationSignal) > 2 && correlationSignal * (side === 'long' ? 1 : -1) < 0) {
+              }
+              
+              // Correlation breakdown - market dynamics changed
+              if (!shouldExit && pnl > 0 && Math.abs(correlationSignal) > 2 && correlationSignal * (side === 'long' ? 1 : -1) < 0) {
                   shouldExit = true;
                   reason = `correlation_breakdown_${pnl.toFixed(1)}pct`;
                   log(`🔄 CORRELATION EXIT: Taking ${pnl.toFixed(2)}% - Correlated markets moving against us`);
                 }
-              }
               
               // PREDICTIVE LOSS PREVENTION
               if (!shouldExit && pnl < 0.5) {
@@ -1157,6 +1304,73 @@ class ProductionTradingEngine {
             const winLoss = result.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
             log(`🎯 EXIT: ${result.position.id} | ${reason} | $${result.pnl.toFixed(2)} | ${winLoss}`);
             
+            // 🔥 Execute position close directly on Kraken API
+            try {
+              const closeAction = side === 'long' ? 'sell' : 'buy'; // Opposite action to close position
+              const closeVolume = Math.abs(position.quantity).toString();
+              
+              const orderRequest = {
+                pair: position.symbol,
+                type: closeAction as 'buy' | 'sell',
+                ordertype: 'market' as const, // Market order for immediate execution
+                volume: closeVolume
+              };
+              
+              log(`🔥 KRAKEN API: Closing position with ${closeAction.toUpperCase()} market order for ${closeVolume} ${position.symbol}`);
+              
+              let orderResult: any = null;
+              if (this.krakenInitialized) {
+                orderResult = await krakenApiService.placeOrder({
+                  pair: orderRequest.pair,
+                  type: orderRequest.type,
+                  ordertype: orderRequest.ordertype,
+                  volume: orderRequest.volume,
+                  validate: false
+                });
+                log(`✅ Direct Kraken close order placed: ${JSON.stringify(orderResult)}`);
+              } else {
+                log('⚠️ Kraken API not authenticated, skipping direct close order');
+              }
+              
+              if (orderResult && orderResult.result?.txid && orderResult.result.txid[0]) {
+                log(`✅ KRAKEN CLOSE ORDER: ${orderResult.result.txid[0]} | ${closeAction.toUpperCase()} ${closeVolume} ${position.symbol} | P&L: $${result.pnl.toFixed(2)}`);
+                log(`📋 Close Order: ${orderResult.result.descr?.order || 'Market close order executed'}`);
+                
+                // Kraken close order ID logged above for reference
+                
+              } else {
+                log(`⚠️ KRAKEN CLOSE RESULT: No transaction ID returned`);
+              }
+              
+            } catch (krakenError) {
+              log(`❌ KRAKEN CLOSE API ERROR: ${krakenError instanceof Error ? krakenError.message : 'Unknown error'}`);
+              // Backup webhook notification
+              try {
+                const response = await fetch('https://kraken.circuitcartel.com/webhook', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    passphrase: "sdfqoei1898498",
+                    ticker: position.symbol,
+                    strategy: {
+                      order_action: side === 'long' ? 'sell' : 'buy',
+                      order_type: "market",
+                      order_price: price.toString(),
+                      order_contracts: Math.abs(position.quantity).toString(),
+                      volume: Math.abs(position.quantity).toString(),
+                      pair: position.symbol,
+                      validate: "false",
+                      error: "Kraken close API failed, webhook backup"
+                    }
+                  }),
+                  timeout: 5000
+                });
+                log(`📡 BACKUP CLOSE WEBHOOK: ${response.status} | P&L: $${result.pnl.toFixed(2)}`);
+              } catch (backupError) {
+                log(`❌ BACKUP CLOSE WEBHOOK FAILED: ${backupError instanceof Error ? backupError.message : 'Unknown'}`);
+              }
+            }
+            
             // Track position closure in telemetry
             telemetry.trackTrade({
               strategy: position.strategy || 'unknown',
@@ -1213,6 +1427,14 @@ class ProductionTradingEngine {
       const currentPhase = await phaseManager.getCurrentPhase();
       
       log(`🔄 Trading Cycle ${this.cycleCount} - Phase ${currentPhase.phase}`);
+      
+      // 🚀 STARTUP WARM-UP CYCLE: Market evaluation only, no trading on first cycle
+      if (this.cycleCount === 1) {
+        log(`🔥 WARM-UP CYCLE: Evaluating market conditions, no trading yet...`);
+        log(`📊 Market Analysis: Collecting price data and AI signals for next cycle`);
+        log(`⏭️  Trading will begin on cycle 2 after market evaluation complete`);
+        return; // Skip all trading logic on first cycle
+      }
       
       // 🎯 PRICE CACHE RUNS IN BACKGROUND (no blocking)
       
@@ -1313,6 +1535,13 @@ class ProductionTradingEngine {
           // SELL signal = Market going DOWN = Open SHORT position (profit when price falls)
           const side = signal.action === 'BUY' ? 'long' : 'short';
           
+          // 🚨 SPOT MARKET RESTRICTION: Can only go LONG on Kraken spot
+          // Skip SHORT positions as we can't sell assets we don't own
+          if (side === 'short') {
+            log(`⚠️ SPOT RESTRICTION: Skipping SHORT signal for ${data.symbol} - can only BUY on spot market`);
+            continue; // Skip to next market opportunity
+          }
+          
           // 🧠 ENHANCED MATHEMATICAL INTUITION DYNAMIC POSITION SIZING
           let quantity = 0;
           let adjustedTakeProfit = 0;
@@ -1403,25 +1632,86 @@ class ProductionTradingEngine {
           log(`💰 Position Sizing: $${positionSizeInDollars.toFixed(2)} = ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price.toFixed(2)}`);
           
           try {
-            // Use production position management system with AI strategy name
-            const strategyName = `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'basic'}`;
-            log(`📝 Attempting to save position: ${data.symbol} ${side} ${actualQuantity.toFixed(6)} @ $${data.price}`);
+            // 🔥 Execute trade directly on Kraken API FIRST - only create database position if successful
+            let orderResult: any = null;
+            let krakenOrderId: string = '';
             
-            const result = await this.positionManager.openPosition({
-              symbol: data.symbol,
-              side,
-              quantity: actualQuantity,
-              price: data.price,
-              strategy: strategyName,
-              timestamp: data.timestamp,
-              metadata: {
-                confidence: aiAnalysis.confidence,
-                aiSystems: aiAnalysis.aiSystems,
-                phase: currentPhase.phase
+            try {
+              // Convert internal side ('long'/'short') to Kraken API format ('buy'/'sell')
+              const krakenSide = side === 'long' ? 'buy' : 'sell';
+              
+              const orderRequest = {
+                pair: data.symbol,
+                type: krakenSide,
+                ordertype: 'market' as const, // Market order for immediate execution
+                volume: actualQuantity.toString()
+              };
+              
+              log(`🔥 KRAKEN API: Placing ${side.toUpperCase()} market order for ${actualQuantity.toFixed(6)} ${data.symbol}`);
+              
+              orderResult = await krakenApiService.placeOrder(orderRequest);
+              
+              if (orderResult.result?.txid && orderResult.result.txid[0]) {
+                krakenOrderId = orderResult.result.txid[0];
+                log(`✅ KRAKEN ORDER CONFIRMED: ${krakenOrderId} | ${side.toUpperCase()} ${actualQuantity.toFixed(6)} ${data.symbol}`);
+                log(`📋 Order Description: ${orderResult.result.descr?.order || 'Market order executed'}`);
+                
+                // ✅ KRAKEN ORDER SUCCESSFUL - Now create database position
+                const strategyName = `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'basic'}`;
+                log(`📝 Kraken order confirmed - creating database position: ${data.symbol} ${side} ${actualQuantity.toFixed(6)} @ $${data.price}`);
+                
+                const result = await this.positionManager.openPosition({
+                  symbol: data.symbol,
+                  side,
+                  quantity: actualQuantity,
+                  price: data.price,
+                  strategy: strategyName,
+                  timestamp: data.timestamp,
+                  metadata: {
+                    confidence: aiAnalysis.confidence,
+                    aiSystems: aiAnalysis.aiSystems,
+                    phase: currentPhase.phase,
+                    predictedMove: aiAnalysis.enhancedAnalysis?.predictedMove || adjustedTakeProfit || 1.5,
+                    positionSize: quantity,
+                    krakenOrderId: krakenOrderId // Store Kraken order ID for tracking
+                  }
+                });
+                
+                log(`✅ REAL POSITION OPENED: ${result.position.id} | ${side.toUpperCase()} ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price} | Kraken: ${krakenOrderId}`);
+                
+              } else {
+                log(`❌ KRAKEN ORDER FAILED: No transaction ID returned - NOT creating database position`);
+                throw new Error('Kraken order failed - no transaction ID returned');
               }
-            });
-            
-            log(`✅ POSITION OPENED: ${result.position.id} | ${side.toUpperCase()} ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price} | Confidence: ${(aiAnalysis.confidence * 100).toFixed(1)}%`);
+              
+            } catch (krakenError) {
+              log(`❌ KRAKEN API ERROR: ${krakenError instanceof Error ? krakenError.message : 'Unknown error'}`);
+              // Still keep the webhook as backup notification
+              try {
+                const response = await fetch('https://kraken.circuitcartel.com/webhook', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    passphrase: "sdfqoei1898498",
+                    ticker: data.symbol,
+                    strategy: {
+                      order_action: side,
+                      order_type: "market",
+                      order_price: data.price.toString(),
+                      order_contracts: actualQuantity.toString(),
+                      volume: actualQuantity.toString(),
+                      pair: data.symbol,
+                      validate: "false",
+                      error: "Kraken API failed, webhook backup"
+                    }
+                  }),
+                  timeout: 5000
+                });
+                log(`📡 BACKUP WEBHOOK: Sent due to Kraken API failure (${response.status})`);
+              } catch (backupError) {
+                log(`❌ BACKUP WEBHOOK ALSO FAILED: ${backupError instanceof Error ? backupError.message : 'Unknown'}`);
+              }
+            }
             
             // Track trade in telemetry
             telemetry.trackTrade({
@@ -1548,6 +1838,20 @@ class ProductionTradingEngine {
     this.isRunning = false;
   }
   
+  /**
+   * 🧮 TENSOR FUSION DECISION - Gradual rollout with live data
+   */
+  private shouldUseTensorFusion(): boolean {
+    // Always use tensor fusion if explicitly enabled
+    if (this.tensorMode) {
+      return true;
+    }
+    
+    // Gradual rollout based on percentage
+    const random = Math.random() * 100;
+    return random < this.tensorRolloutPercentage;
+  }
+
   /**
    * 🧠 MARKET CONDITION DETECTOR
    * Uses existing AI levels to determine market state for adaptive trading
