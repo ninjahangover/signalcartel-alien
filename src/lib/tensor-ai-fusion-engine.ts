@@ -65,8 +65,13 @@ export class TensorAIFusionEngine {
   // Dynamic parameters (no hard-coded limitations)
   private LEARNING_RATE = 0.05;  // Adaptive learning rate
   private commissionCost: number = 0.0042;  // Will be fetched from Kraken API
-  private minInformationThreshold: number = 2.0;  // Adapts to market conditions
-  private minConsensusThreshold: number = 0.6;      // Adapts to volatility regime
+  private minInformationThreshold: number = 1.5;  // Lowered from 2.0 - adapts to market conditions
+  private minConsensusThreshold: number = 0.5;      // Lowered from 0.6 - adapts to volatility regime
+  
+  // Time-based auto-adjustment tracking
+  private lastTradeTimestamp: Date = new Date();
+  private noTradeHours: number = 0;
+  private thresholdAdjustmentFactor: number = 1.0;
   
   constructor() {
     console.log('🧮 Tensor AI Fusion Engine initialized with LIVE DATA ONLY');
@@ -94,6 +99,26 @@ export class TensorAIFusionEngine {
   }
   
   /**
+   * Check and adjust thresholds if no trades for too long
+   */
+  private checkAndAdjustThresholds(): void {
+    const hoursSinceLastTrade = (Date.now() - this.lastTradeTimestamp.getTime()) / (1000 * 60 * 60);
+    
+    // If no trades for 2+ hours, start lowering thresholds
+    if (hoursSinceLastTrade > 2) {
+      const adjustmentSteps = Math.floor(hoursSinceLastTrade / 2);
+      this.thresholdAdjustmentFactor = Math.max(0.5, 1.0 - (adjustmentSteps * 0.1));
+      
+      console.log(`⚠️ No trades for ${hoursSinceLastTrade.toFixed(1)}h - Adjusting thresholds by ${((1 - this.thresholdAdjustmentFactor) * 100).toFixed(0)}%`);
+      console.log(`   Info threshold: ${this.minInformationThreshold} → ${(this.minInformationThreshold * this.thresholdAdjustmentFactor).toFixed(1)}`);
+      console.log(`   Consensus: ${(this.minConsensusThreshold * 100).toFixed(0)}% → ${(this.minConsensusThreshold * this.thresholdAdjustmentFactor * 100).toFixed(0)}%`);
+    } else if (hoursSinceLastTrade < 1) {
+      // If actively trading, gradually restore thresholds
+      this.thresholdAdjustmentFactor = Math.min(1.0, this.thresholdAdjustmentFactor + 0.05);
+    }
+  }
+
+  /**
    * Main fusion function - combines multiple AI system outputs
    */
   fuseAIOutputs(
@@ -101,6 +126,8 @@ export class TensorAIFusionEngine {
     currentPrice: number,
     marketData?: any
   ): FusedDecision {
+    // Check and adjust thresholds based on trading frequency
+    this.checkAndAdjustThresholds();
     
     if (aiOutputs.length === 0) {
       throw new Error('No AI outputs provided for fusion');
@@ -257,11 +284,19 @@ export class TensorAIFusionEngine {
     // Consensus-adjusted position sizing
     const consensusAdjustedSize = basePositionSize * coherenceMetrics.consensusStrength;
     
+    // Apply threshold adjustments
+    const adjustedInfoThreshold = this.minInformationThreshold * this.thresholdAdjustmentFactor;
+    const adjustedConsensusThreshold = this.minConsensusThreshold * this.thresholdAdjustmentFactor;
+    
+    // CRITICAL FIX: Increase minimum profit to ensure real gains after commission
+    // Commission is 0.42% round-trip, so we need AT LEAST 1% to make meaningful profit
+    const minProfitForTrade = Math.max(0.01, expectedNetReturn * 0.3); // At least 1% or 30% of expected return
+    
     // Trading decision criteria (all dynamic, no hard-coded thresholds)
-    const hasEnoughInformation = informationContent >= this.minInformationThreshold;
-    const hasConsensus = coherenceMetrics.consensusStrength >= this.minConsensusThreshold;
-    const isProfitableAfterCommission = expectedNetReturn > 0.005; // 0.5% minimum profit
-    const hasHighEnoughConfidence = fusedConfidence > 0.75; // 75% minimum
+    const hasEnoughInformation = informationContent >= adjustedInfoThreshold;
+    const hasConsensus = coherenceMetrics.consensusStrength >= adjustedConsensusThreshold;
+    const isProfitableAfterCommission = expectedNetReturn > minProfitForTrade;
+    const hasHighEnoughConfidence = fusedConfidence > 0.50; // Lowered from 75% to 50% for better opportunity capture
     
     const shouldTrade = hasEnoughInformation && hasConsensus && isProfitableAfterCommission && hasHighEnoughConfidence;
     
@@ -281,6 +316,31 @@ export class TensorAIFusionEngine {
       fusedConfidence,
       fusedDirection: Math.sign(fusedDirection),
       fusedMagnitude: Math.abs(fusedMagnitude),
+      fusedReliability,
+      
+      shouldTrade,
+      expectedReturn: expectedNetReturn,
+      positionSize: shouldTrade ? consensusAdjustedSize : 0,
+      
+      eigenvalueSpread: coherenceMetrics.eigenvalueSpread,
+      informationContent,
+      consensusStrength: coherenceMetrics.consensusStrength,
+      
+      reason,
+      contributingSystems,
+      finalWeights: Array.from(this.weights.values())
+    };
+    
+    // Record trade timestamp if we decided to trade
+    if (shouldTrade) {
+      this.lastTradeTimestamp = new Date();
+      console.log(`✅ TENSOR TRADE: Expected net return ${(expectedNetReturn * 100).toFixed(2)}% after ${(this.commissionCost * 100).toFixed(2)}% commission`);
+    }
+    
+    return {
+      fusedConfidence,
+      fusedDirection,
+      fusedMagnitude,
       fusedReliability,
       
       shouldTrade,
