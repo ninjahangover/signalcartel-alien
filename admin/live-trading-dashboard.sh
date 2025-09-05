@@ -91,7 +91,7 @@ get_recent_trades() {
         COALESCE(ROUND(\"realizedPnL\"::numeric, 4), 0.00) as pnl,
         \"createdAt\"::timestamp::time as time
     FROM \"ManagedPosition\" 
-    WHERE \"createdAt\" > NOW() - INTERVAL '2 hours'
+    WHERE \"createdAt\" > NOW() - INTERVAL '5 minutes'
     ORDER BY \"createdAt\" DESC 
     LIMIT $limit;" 2>/dev/null
 }
@@ -109,37 +109,55 @@ get_open_positions() {
     ORDER BY \"createdAt\" DESC;" 2>/dev/null
 }
 
-# Function to get real Kraken balance with better error handling
+# Function to get USD balance (account balance)
 get_kraken_balance() {
-    # Try to get balance from recent database records first (faster and more reliable)
-    local recent_balance=$(PGPASSWORD=quantum_forge_warehouse_2024 docker exec signalcartel-warehouse psql -U warehouse_user -d signalcartel -t -c "
-    SELECT DISTINCT CASE 
-        WHEN \"currentBalance\" > 0 THEN \"currentBalance\"
-        WHEN \"initialBalance\" > 0 THEN \"initialBalance\"
-        ELSE 0 
-    END as balance
-    FROM \"ManagedPosition\" 
-    WHERE \"createdAt\" > NOW() - INTERVAL '1 hour' 
-    AND \"currentBalance\" IS NOT NULL
-    ORDER BY \"createdAt\" DESC 
-    LIMIT 1;" 2>/dev/null | tr -d ' ')
-    
-    if [[ "$recent_balance" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ $(echo "$recent_balance > 100" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
-        echo "$recent_balance"
+    # First check if proxy server is running
+    if ! curl -s http://127.0.0.1:3002/health >/dev/null 2>&1; then
+        echo "Proxy Offline"
         return 0
     fi
     
-    # Fallback to API call (with timeout to avoid hanging)
-    export KRAKEN_API_KEY="${KRAKEN_API_KEY:-1xig1YVot9C0mPSeTGetbGfke54dYKUHA/T3PV6Hmj0ZjYgiX3F0/Ukh}"
-    export KRAKEN_PRIVATE_KEY="${KRAKEN_PRIVATE_KEY:-ZiDhuw0oa6PYAIfkklbjd5qQVYrtQuy41xxcoBpYNM6Mx6iJcMRoLaesYpkFoMOUdvKbpjGmAfSWmrbL80Shfg==}"
+    # Try the simple balance script for USD balance only
+    local balance=$(timeout 5s npx tsx get-balance-simple.ts 2>/dev/null | head -1)
     
-    local balance_output=$(timeout 5s npx tsx admin/test-kraken-balance.ts 2>/dev/null | grep "USD Balance:" | tail -1)
-    
-    if [[ $balance_output == *"USD Balance:"* ]]; then
-        echo "$balance_output" | sed 's/.*USD Balance: //' | sed 's/\$//g'
-    else
-        echo "361.56"  # Known real balance as fallback
+    if [[ "$balance" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ $(echo "$balance > 0" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
+        echo "$balance"
+        return 0
     fi
+    
+    # Fallback to production logs parsing
+    local log_balance=""
+    if [[ -f "/tmp/signalcartel-logs/production-trading.log" ]]; then
+        log_balance=$(tail -200 /tmp/signalcartel-logs/production-trading.log | grep -E "REAL AVAILABLE BALANCE|Kraken Balance:|Final Balance:|Balance:|USD:" | tail -1 | grep -o '\$[0-9]*\.[0-9]*' | sed 's/\$//')
+    fi
+    
+    if [[ "$log_balance" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ $(echo "$log_balance > 0" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
+        echo "$log_balance"
+        return 0
+    fi
+    
+    # Final fallback
+    echo "Balance Unknown"
+}
+
+# Function to get complete portfolio value (USD + crypto holdings) - fast estimate
+get_complete_portfolio_value() {
+    # First check if proxy server is running
+    if ! curl -s http://127.0.0.1:3002/health >/dev/null 2>&1; then
+        echo "Proxy Offline"
+        return 0
+    fi
+    
+    # Try the fast portfolio summary script
+    local portfolio_value=$(timeout 15s npx tsx get-portfolio-summary.ts 2>/dev/null | grep "Portfolio Estimate:" | sed 's/.*\$\([0-9]*\.[0-9]*\).*/\1/')
+    
+    if [[ "$portfolio_value" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ $(echo "$portfolio_value > 0" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
+        echo "$portfolio_value"
+        return 0
+    fi
+    
+    # Fallback to just USD balance if portfolio estimate fails
+    echo "$(get_kraken_balance)"
 }
 
 # Function to display comprehensive live trading dashboard
@@ -149,17 +167,20 @@ display_dashboard() {
     # Get current data
     local live_status=$(check_live_trading_active)
     local kraken_balance=$(get_kraken_balance)
+    local portfolio_value=$(get_complete_portfolio_value)
     local current_time=$(date '+%Y-%m-%d %H:%M:%S %Z')
     
-    # Get comprehensive trading statistics from database
-    local total_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"createdAt\" > NOW() - INTERVAL '24 hours';")
+    # Get comprehensive trading statistics from database (only recent session data)
+    # Use 5 minutes to capture only fresh trades after restart
+    local session_cutoff="NOW() - INTERVAL '5 minutes'"
+    local total_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"createdAt\" > $session_cutoff;")
     local open_positions=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE status = 'open';")
-    local total_pnl=$(db_query "SELECT COALESCE(SUM(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"createdAt\" > NOW() - INTERVAL '24 hours';")
+    local total_pnl=$(db_query "SELECT COALESCE(SUM(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"createdAt\" > $session_cutoff AND \"realizedPnL\" IS NOT NULL;")
     local recent_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"createdAt\" > NOW() - INTERVAL '1 hour';")
-    local winning_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" > 0 AND \"createdAt\" > NOW() - INTERVAL '24 hours';")
-    local losing_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" < 0 AND \"createdAt\" > NOW() - INTERVAL '24 hours';")
-    local breakeven_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" = 0 AND \"createdAt\" > NOW() - INTERVAL '24 hours';")
-    local total_with_pnl=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" IS NOT NULL AND \"createdAt\" > NOW() - INTERVAL '24 hours';")
+    local winning_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" > 0 AND \"createdAt\" > $session_cutoff;")
+    local losing_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" < 0 AND \"createdAt\" > $session_cutoff;")
+    local breakeven_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" = 0 AND \"createdAt\" > $session_cutoff;")
+    local total_with_pnl=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" IS NOT NULL AND \"createdAt\" > $session_cutoff;")
     
     # Get all-time statistics
     local all_time_trades=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" IS NOT NULL;")
@@ -167,13 +188,13 @@ display_dashboard() {
     local all_time_winning=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" > 0;")
     local all_time_losing=$(db_query "SELECT COUNT(*) FROM \"ManagedPosition\" WHERE \"realizedPnL\" < 0;")
     
-    # Get average win/loss amounts
-    local avg_win=$(db_query "SELECT COALESCE(AVG(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"realizedPnL\" > 0 AND \"createdAt\" > NOW() - INTERVAL '24 hours';")
-    local avg_loss=$(db_query "SELECT COALESCE(AVG(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"realizedPnL\" < 0 AND \"createdAt\" > NOW() - INTERVAL '24 hours';")
+    # Get average win/loss amounts (current session)
+    local avg_win=$(db_query "SELECT COALESCE(AVG(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"realizedPnL\" > 0 AND \"createdAt\" > $session_cutoff;")
+    local avg_loss=$(db_query "SELECT COALESCE(AVG(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"realizedPnL\" < 0 AND \"createdAt\" > $session_cutoff;")
     
-    # Get best and worst trades (24h)
-    local best_trade=$(db_query "SELECT COALESCE(MAX(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"createdAt\" > NOW() - INTERVAL '24 hours';")
-    local worst_trade=$(db_query "SELECT COALESCE(MIN(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"createdAt\" > NOW() - INTERVAL '24 hours';")
+    # Get best and worst trades (current session)
+    local best_trade=$(db_query "SELECT COALESCE(MAX(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"createdAt\" > $session_cutoff;")
+    local worst_trade=$(db_query "SELECT COALESCE(MIN(\"realizedPnL\"), 0) FROM \"ManagedPosition\" WHERE \"createdAt\" > $session_cutoff;")
     
     # Calculate win rates
     local win_rate=0
@@ -215,7 +236,8 @@ display_dashboard() {
     # Real Account Information
     echo -e "${BOLD}${GREEN}💰 REAL KRAKEN ACCOUNT${NC}"
     echo -e "${GREEN}═══════════════════════════════════════${NC}"
-    echo -e "  ${WHITE}Account Balance:${NC}    ${BOLD}${CYAN}$(format_currency $kraken_balance)${NC}"
+    echo -e "  ${WHITE}Account Balance:${NC}    ${BOLD}${CYAN}$(format_currency $kraken_balance)${NC} ${WHITE}(USD)${NC}"
+    echo -e "  ${WHITE}Portfolio Value:${NC}    ${BOLD}${MAGENTA}$(format_currency $portfolio_value)${NC} ${WHITE}(Total)${NC}"
     echo -e "  ${WHITE}Open Positions:${NC}     ${YELLOW}$(format_number $open_positions)${NC}"
     echo -e "  ${WHITE}Loss Limit:${NC}         ${BOLD}${RED}\\$100.00 MAX${NC}"
     
@@ -226,13 +248,13 @@ display_dashboard() {
     else
         pnl_color="${RED}"
     fi
-    echo -e "  ${WHITE}24h P&L:${NC}            ${pnl_color}$(format_currency $total_pnl)${NC}"
+    echo -e "  ${WHITE}Session P&L:${NC}        ${pnl_color}$(format_currency $total_pnl)${NC}"
     echo
     
-    # Trading Performance (24h)
-    echo -e "${BOLD}${PURPLE}📊 TRADING PERFORMANCE (24H)${NC}"
+    # Trading Performance (Current Session)
+    echo -e "${BOLD}${PURPLE}📊 TRADING PERFORMANCE (SESSION)${NC}"
     echo -e "${PURPLE}═══════════════════════════════════════${NC}"
-    echo -e "  ${WHITE}Total Trades:${NC}       ${CYAN}$(format_number $total_trades)${NC} (${BLUE}$(format_number $recent_trades)${NC} last hour)"
+    echo -e "  ${WHITE}Session Trades:${NC}     ${CYAN}$(format_number $total_trades)${NC} (${BLUE}$(format_number $recent_trades)${NC} last hour)"
     echo -e "  ${WHITE}Winning Trades:${NC}     ${GREEN}$(format_number $winning_trades)${NC}"
     echo -e "  ${WHITE}Losing Trades:${NC}      ${RED}$(format_number $losing_trades)${NC}"
     echo -e "  ${WHITE}Breakeven Trades:${NC}   ${YELLOW}$(format_number $breakeven_trades)${NC}"
@@ -263,7 +285,7 @@ display_dashboard() {
     echo
     
     # Recent Trading Activity
-    echo -e "${BOLD}${BLUE}⚡ RECENT TRADES (Last 2 Hours)${NC}"
+    echo -e "${BOLD}${BLUE}⚡ RECENT TRADES (Last 5 Minutes)${NC}"
     echo -e "${BLUE}═══════════════════════════════════════${NC}"
     
     # Get recent trades and display them
@@ -289,7 +311,7 @@ display_dashboard() {
             echo -e "  ${WHITE}$symbol:${NC} ${CYAN}$qty${NC} @ ${YELLOW}\$$price${NC} = ${pnl_color}\$$pnl${NC} (${BLUE}$time${NC})"
         done
     else
-        echo -e "  ${YELLOW}No recent trades in last 2 hours${NC}"
+        echo -e "  ${YELLOW}No recent trades in last 5 minutes${NC}"
     fi
     echo
     

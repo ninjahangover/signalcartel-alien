@@ -65,6 +65,18 @@ cleanup() {
         rm -f "$LOG_DIR/master-pipeline.pid"
     fi
     
+    # Stop Kraken Proxy Server
+    if [ -f "$LOG_DIR/kraken-proxy.pid" ]; then
+        PROXY_PID=$(cat "$LOG_DIR/kraken-proxy.pid")
+        if kill -0 "$PROXY_PID" 2>/dev/null; then
+            log "🛑 Stopping Kraken Proxy Server (PID: $PROXY_PID)..."
+            kill -TERM "$PROXY_PID" 2>/dev/null || true
+            sleep 3
+            kill -KILL "$PROXY_PID" 2>/dev/null || true
+        fi
+        rm -f "$LOG_DIR/kraken-proxy.pid"
+    fi
+    
     # Stop Smart Hunter
     if [ -f "$LOG_DIR/smart-hunter.pid" ]; then
         HUNTER_PID=$(cat "$LOG_DIR/smart-hunter.pid")
@@ -135,6 +147,18 @@ export ENABLE_GPU_STRATEGIES=true
 export NTFY_TOPIC="signal-cartel"
 export NODE_OPTIONS="--max-old-space-size=4096"
 
+log "🚀 Starting Kraken Proxy Server..."
+
+# Start Kraken proxy server first (required for trading engine)
+nohup npx tsx kraken-proxy-server.ts > "$LOG_DIR/kraken-proxy.log" 2>&1 &
+PROXY_PID=$!
+
+log "✅ Kraken Proxy Server started (PID: $PROXY_PID)"
+echo "$PROXY_PID" > "$LOG_DIR/kraken-proxy.pid"
+
+# Wait for proxy to fully initialize
+sleep 3
+
 log "🚀 Starting Master Trading Pipeline..."
 
 # Start Production Trading directly (more reliable than master pipeline)
@@ -194,7 +218,14 @@ echo "════════════════════════�
 
 # Check PIDs
 PIPELINE_PID=$(cat "$LOG_DIR/master-pipeline.pid" 2>/dev/null || echo "")
+PROXY_PID=$(cat "$LOG_DIR/kraken-proxy.pid" 2>/dev/null || echo "")
 HUNTER_PID=$(cat "$LOG_DIR/smart-hunter.pid" 2>/dev/null || echo "")
+
+if [ -n "$PROXY_PID" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
+    echo "✅ Kraken Proxy Server: Running (PID: $PROXY_PID)"
+else
+    echo "❌ Kraken Proxy Server: Not running"
+fi
 
 if [ -n "$PIPELINE_PID" ] && kill -0 "$PIPELINE_PID" 2>/dev/null; then
     echo "✅ Master Trading Pipeline: Running (PID: $PIPELINE_PID)"
@@ -240,6 +271,7 @@ log "   • Smart Hunter Service: Background opportunity detection"
 log "   • Log Monitoring: Real-time system status"
 log ""
 log "📊 System Status:"
+log "   • Kraken Proxy PID: $PROXY_PID"
 log "   • Pipeline PID: $PIPELINE_PID"
 log "   • Smart Hunter PID: $HUNTER_PID"
 log "   • Phase: Will auto-detect from database (likely Phase 0)"
