@@ -97,7 +97,13 @@ export class EnhancedPositionSizing {
     currentBalance: number
   ): Promise<PositionSizingResult> {
     const reasoning: string[] = [];
-    let baseSize = this.config.basePositionSize;
+    
+    // Dynamic base size calculation based on current balance
+    // Use 2% of available balance as base, with min $10 and max $500
+    const dynamicBaseSize = Math.min(Math.max(currentBalance * 0.02, 10), 500);
+    let baseSize = dynamicBaseSize;
+    
+    reasoning.push(`Dynamic base: 2% of $${currentBalance.toFixed(2)} = $${baseSize.toFixed(2)}`);
     
     // 1. CONFIDENCE-BASED MULTIPLIER
     const confidenceMultiplier = this.getConfidenceMultiplier(confidence);

@@ -26,6 +26,7 @@ export class AdaptivePairFilter {
   private performanceCache = new Map<string, PairPerformance>();
   private blockedPairs = new Set<string>();
   private consecutiveLosses = new Map<string, number>();
+  private prismaClient: PrismaClient;
   
   // Dynamic criteria that adapt based on overall system performance
   private filterCriteria: FilterCriteria = {
@@ -35,7 +36,9 @@ export class AdaptivePairFilter {
     maxConsecutiveLosses: 4   // Block after 4 consecutive losses
   };
 
-  constructor(private prisma: PrismaClient) {}
+  constructor(prisma: PrismaClient) {
+    this.prismaClient = prisma;
+  }
 
   /**
    * Check if a trading pair should be allowed based on historical performance
@@ -111,13 +114,13 @@ export class AdaptivePairFilter {
   private async updatePairPerformance(symbol: string): Promise<void> {
     try {
       // Safety check: Ensure prisma client is available
-      if (!this.prisma || !this.prisma.managedPosition) {
+      if (!this.prismaClient || !this.prismaClient.managedPosition) {
         console.error(`❌ AdaptivePairFilter: Prisma client not available for ${symbol}`);
         return;
       }
 
       // Get performance data using Prisma aggregation
-      const positions = await this.prisma.managedPosition.findMany({
+      const positions = await this.prismaClient.managedPosition.findMany({
         where: {
           symbol: symbol,
           status: 'closed',
@@ -164,12 +167,12 @@ export class AdaptivePairFilter {
   private async updateConsecutiveLosses(symbol: string): Promise<void> {
     try {
       // Safety check: Ensure prisma client is available
-      if (!this.prisma || !this.prisma.managedPosition) {
+      if (!this.prismaClient || !this.prismaClient.managedPosition) {
         console.error(`❌ AdaptivePairFilter: Prisma client not available for consecutive losses ${symbol}`);
         return;
       }
 
-      const recentTrades = await this.prisma.managedPosition.findMany({
+      const recentTrades = await this.prismaClient.managedPosition.findMany({
         where: {
           symbol: symbol,
           status: 'closed',

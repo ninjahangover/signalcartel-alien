@@ -89,7 +89,9 @@ get_recent_trades() {
         ROUND(quantity::numeric, 4) as qty,
         \"entryPrice\" as price,
         COALESCE(ROUND(\"realizedPnL\"::numeric, 4), 0.00) as pnl,
-        \"createdAt\"::timestamp::time as time
+        \"createdAt\"::timestamp::time as time,
+        LEFT(\"entryTradeId\", 8) as entry_tx,
+        CASE WHEN \"exitTradeId\" IS NOT NULL THEN LEFT(\"exitTradeId\", 8) ELSE 'OPEN' END as exit_tx
     FROM \"ManagedPosition\" 
     WHERE \"createdAt\" > NOW() - INTERVAL '5 minutes'
     ORDER BY \"createdAt\" DESC 
@@ -103,7 +105,8 @@ get_open_positions() {
         symbol,
         ROUND(quantity::numeric, 4) as qty,
         \"entryPrice\" as entry,
-        \"createdAt\"::timestamp::time as opened
+        \"createdAt\"::timestamp::time as opened,
+        LEFT(\"entryTradeId\", 8) as tx_id
     FROM \"ManagedPosition\" 
     WHERE status = 'open'
     ORDER BY \"createdAt\" DESC;" 2>/dev/null
@@ -293,13 +296,15 @@ display_dashboard() {
     trades_output=$(get_recent_trades 3)
     
     if [[ -n "$trades_output" && "$trades_output" != *"(0 rows)"* ]]; then
-        echo "$trades_output" | tail -n +3 | head -3 | while IFS='|' read -r symbol qty price pnl time; do
+        echo "$trades_output" | tail -n +3 | head -3 | while IFS='|' read -r symbol qty price pnl time entry_tx exit_tx; do
             # Clean up the fields
             symbol=$(echo "$symbol" | xargs)
             qty=$(echo "$qty" | xargs)
             price=$(echo "$price" | xargs)
             pnl=$(echo "$pnl" | xargs)
             time=$(echo "$time" | xargs)
+            entry_tx=$(echo "$entry_tx" | xargs)
+            exit_tx=$(echo "$exit_tx" | xargs)
             
             # Color code P&L
             if [[ "$pnl" =~ ^-.*$ ]] || [[ "$pnl" == "0.00" ]]; then
@@ -309,6 +314,7 @@ display_dashboard() {
             fi
             
             echo -e "  ${WHITE}$symbol:${NC} ${CYAN}$qty${NC} @ ${YELLOW}\$$price${NC} = ${pnl_color}\$$pnl${NC} (${BLUE}$time${NC})"
+            echo -e "    ${WHITE}📊 Entry TX:${NC} ${MAGENTA}$entry_tx${NC} | ${WHITE}Exit TX:${NC} ${MAGENTA}$exit_tx${NC}"
         done
     else
         echo -e "  ${YELLOW}No recent trades in last 5 minutes${NC}"
@@ -323,14 +329,16 @@ display_dashboard() {
     positions_output=$(get_open_positions)
     
     if [[ -n "$positions_output" && "$positions_output" != *"(0 rows)"* ]]; then
-        echo "$positions_output" | tail -n +3 | head -5 | while IFS='|' read -r symbol qty entry opened; do
+        echo "$positions_output" | tail -n +3 | head -5 | while IFS='|' read -r symbol qty entry opened tx_id; do
             # Clean up the fields
             symbol=$(echo "$symbol" | xargs)
             qty=$(echo "$qty" | xargs)
             entry=$(echo "$entry" | xargs)
             opened=$(echo "$opened" | xargs)
+            tx_id=$(echo "$tx_id" | xargs)
             
             echo -e "  ${WHITE}$symbol:${NC} ${CYAN}$qty${NC} @ ${YELLOW}\$$entry${NC} (${BLUE}$opened${NC})"
+            echo -e "    ${WHITE}📊 Entry TX:${NC} ${MAGENTA}$tx_id${NC}"
         done
     else
         echo -e "  ${GREEN}✅ No open positions${NC}"

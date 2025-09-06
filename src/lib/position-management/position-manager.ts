@@ -1,7 +1,12 @@
 /**
  * Position Management System
- * Tracks entry/exit trades and calculates real P&L
+ * Enhanced with GPU-Accelerated Predictive Intelligence for Exit Decisions
+ * 
+ * BREAKTHROUGH: Replaces mechanical exits (stop loss, take profit, time-based) 
+ * with Google-style predictive AI ensemble using Tensor Fusion + Markov Chains
  */
+
+import { predictivePositionManager } from '../predictive-position-manager';
 
 export interface Position {
   id: string;
@@ -314,8 +319,14 @@ export class PositionManager {
       // Update unrealized P&L
       position.unrealizedPnL = this.calculatePnL(position, currentPrice);
       
-      // Check exit conditions
-      const exitReason = this.checkExitConditions(position, currentPrice);
+      // GPU-ENHANCED PREDICTIVE EXIT EVALUATION (replaces mechanical logic)
+      const exitReason = await this.checkExitConditions(position, currentPrice, {
+        symbol: position.symbol,
+        price: currentPrice,
+        volume: 0, // Would be filled from market data
+        volatility: 0.03,
+        timestamp: Date.now()
+      });
       if (exitReason) {
         const result = await this.closePosition(position.id, currentPrice, exitReason);
         closedPositions.push(result);
@@ -337,36 +348,86 @@ export class PositionManager {
   }
   
   /**
-   * Check if position should be closed based on exit conditions
+   * GPU-ENHANCED PREDICTIVE EXIT EVALUATION
+   * 
+   * REVOLUTIONARY APPROACH: Replaces mechanical thresholds with Google-style
+   * predictive intelligence using Tensor Fusion + GPU-accelerated Markov Chains
+   * 
+   * NO MORE:
+   * - Fixed stop losses
+   * - Mechanical take profits 
+   * - Time-based exits
+   * 
+   * INSTEAD: Full AI ensemble predicts when bigger moves are coming
    */
-  private checkExitConditions(position: Position, currentPrice: number): string | null {
-    // Stop loss
+  private async checkExitConditions(position: Position, currentPrice: number, marketData?: any): Promise<string | null> {
+    console.log(`🧠 PREDICTIVE EXIT EVALUATION: ${position.symbol} at ${currentPrice}`);
+    
+    try {
+      // Use GPU-Enhanced Predictive Position Manager
+      const exitDecision = await predictivePositionManager.evaluatePositionExit(
+        {
+          symbol: position.symbol,
+          side: position.side,
+          entryPrice: position.entryPrice,
+          currentPrice: currentPrice,
+          quantity: position.quantity,
+          openTime: position.entryTime,
+          confidence: 0.8 // Default confidence
+        },
+        marketData || {
+          orderBook: null,
+          sentiment: null,
+          recentTrades: [],
+          volume: 0,
+          volatility: 0.03
+        }
+      );
+      
+      if (exitDecision.shouldExit) {
+        console.log(`🚪 PREDICTIVE EXIT: ${exitDecision.exitReason}`);
+        console.log(`⚡ AI CONFIDENCE: ${(exitDecision.confidence * 100).toFixed(1)}%`);
+        return 'predictive_intelligence';
+      } else {
+        console.log(`💎 PREDICTIVE HOLD: ${exitDecision.holdReason}`);
+        console.log(`🎯 PREDICTED MOVE: ${(exitDecision.predictedMove * 100).toFixed(2)}%`);
+        console.log(`⚡ AI CONFIDENCE: ${(exitDecision.confidence * 100).toFixed(1)}%`);
+        return null; // Hold the position
+      }
+      
+    } catch (error) {
+      console.warn('⚠️ Predictive exit evaluation failed, using fallback logic:', error.message);
+      return this.checkLegacyExitConditions(position, currentPrice);
+    }
+  }
+  
+  /**
+   * LEGACY FALLBACK: Original mechanical exit logic (only used if AI fails)
+   */
+  private checkLegacyExitConditions(position: Position, currentPrice: number): string | null {
+    console.log('📊 FALLBACK: Using legacy mechanical exit conditions');
+    
+    // Stop loss (only for disaster protection)
     if (position.stopLoss) {
       if (position.side === 'long' && currentPrice <= position.stopLoss) {
-        return 'stop_loss';
+        return 'stop_loss_fallback';
       }
       if (position.side === 'short' && currentPrice >= position.stopLoss) {
-        return 'stop_loss';
+        return 'stop_loss_fallback';
       }
     }
     
-    // Take profit
+    // Take profit (only for fallback)
     if (position.takeProfit) {
       if (position.side === 'long' && currentPrice >= position.takeProfit) {
-        return 'take_profit';
+        return 'take_profit_fallback';
       }
       if (position.side === 'short' && currentPrice <= position.takeProfit) {
-        return 'take_profit';
+        return 'take_profit_fallback';
       }
     }
     
-    // Max hold time
-    if (position.maxHoldTime) {
-      const holdTime = Date.now() - position.entryTime.getTime();
-      if (holdTime >= position.maxHoldTime) {
-        return 'max_hold_time';
-      }
-    }
+    // NOTE: NO MORE TIME-BASED EXITS (per user requirement)
     
     return null;
   }

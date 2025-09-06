@@ -16,21 +16,42 @@ export interface AvailableBalanceResult {
 
 export class AvailableBalanceCalculator {
   private positionManager: PositionManager;
+  private cachedBalance: AvailableBalanceResult | null = null;
+  private lastBalanceUpdate: number = 0;
+  private balanceCacheTime: number = 120000; // 2 minutes cache for non-priority pairs
+  private priorityPairs: Set<string> = new Set();
   
   constructor(positionManager: PositionManager) {
     this.positionManager = positionManager;
   }
 
   /**
-   * Calculate available balance for trading
+   * Update priority pairs from profit predator (only these get fresh Kraken API calls)
    */
-  async calculateAvailableBalance(): Promise<AvailableBalanceResult> {
+  updatePriorityPairs(pairs: string[]) {
+    this.priorityPairs = new Set(pairs);
+    console.log(`🎯 Priority pairs for Kraken API: ${Array.from(this.priorityPairs).join(', ')}`);
+  }
+
+  /**
+   * Calculate available balance for trading (cached for non-priority pairs)
+   */
+  async calculateAvailableBalance(symbol?: string): Promise<AvailableBalanceResult> {
+    const now = Date.now();
+    const isPriorityPair = !symbol || this.priorityPairs.has(symbol);
+    
+    // Use cached balance for non-priority pairs if cache is fresh
+    if (!isPriorityPair && this.cachedBalance && (now - this.lastBalanceUpdate) < this.balanceCacheTime) {
+      console.log(`💰 Using cached balance for ${symbol}: $${this.cachedBalance.availableBalance.toFixed(2)} (${Math.round((now - this.lastBalanceUpdate) / 1000)}s old)`);
+      return this.cachedBalance;
+    }
+
     try {
-      // Get current USD balance from Kraken
+      // Only call Kraken API for priority pairs or when cache is stale
       const accountInfo = await krakenApiService.getAccountInfo();
       const totalBalance = parseFloat(accountInfo.balance?.ZUSD || '0');
       
-      console.log(`💰 Kraken Balance: $${totalBalance.toFixed(2)}`);
+      console.log(`💰 Kraken Balance ${isPriorityPair ? '(PRIORITY)' : '(CACHE REFRESH)'}: $${totalBalance.toFixed(2)} for ${symbol || 'system'}`);
       
       // Get all open positions
       const openPositions = await this.positionManager.getOpenPositions();
@@ -69,6 +90,10 @@ export class AvailableBalanceCalculator {
         openPositionsCount: openPositions.length,
         confidenceThresholdAdjustment
       };
+      
+      // Update cache with fresh data
+      this.cachedBalance = result;
+      this.lastBalanceUpdate = now;
       
       console.log(`💰 Available Balance Calculation:
         Total Balance: $${totalBalance.toFixed(2)}

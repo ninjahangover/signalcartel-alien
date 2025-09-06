@@ -33,6 +33,7 @@ export interface TradingDecision {
   positionSize: number;       // Optimized position size
   reason: string;
   commissionBreakeven: number; // Breakeven point including commission
+  aiOverride: boolean;        // Flag for AI consultation on borderline cases
 }
 
 class IntelligentPairAdapter {
@@ -138,8 +139,8 @@ class IntelligentPairAdapter {
     const estimatedCommission = this.commissionProfile.taker * 2; // Assume taker fees both ways
     const commissionBreakeven = estimatedCommission * 100; // Convert to percentage
     
-    // Minimum profit target must exceed commission costs + small buffer  
-    const minProfitTarget = commissionBreakeven * 4.0; // 400% buffer above commission - require large moves only
+    // Minimum profit target must exceed commission costs + reasonable buffer  
+    const minProfitTarget = commissionBreakeven * 1.2; // 120% buffer above commission - profit over commission
     
     // Enhanced confidence calculation
     let enhancedConfidence = baseConfidence;
@@ -154,13 +155,21 @@ class IntelligentPairAdapter {
     const winRateBoost = characteristics.winRate > 0.6 ? 1.1 : characteristics.winRate > 0.4 ? 1.0 : 0.9;
     enhancedConfidence *= winRateBoost;
     
-    // Commission-aware confidence threshold  
-    const commissionAwareThreshold = 65 + (commissionBreakeven * 3.0); // Much higher threshold - only high conviction trades
+    // Reasonable commission-aware confidence threshold  
+    const commissionAwareThreshold = 40 + (commissionBreakeven * 0.5); // Lower threshold for more trades
     
-    // Only trade if we expect to beat commission by significant margin
-    // Allow trading if either condition is strong (high confidence OR good predicted move)
-    const shouldTrade = (enhancedConfidence >= commissionAwareThreshold && Math.abs(predictedMove) >= minProfitTarget) ||
-                       (enhancedConfidence >= 65 && Math.abs(predictedMove) >= 0.1); // High confidence override
+    // Smart trade logic with AI override capability
+    let shouldTrade = (enhancedConfidence >= commissionAwareThreshold && Math.abs(predictedMove) >= minProfitTarget) ||
+                     (enhancedConfidence >= 35 && Math.abs(predictedMove) >= minProfitTarget * 2) || // Lower confidence but excellent move
+                     (enhancedConfidence >= 60 && Math.abs(predictedMove) >= minProfitTarget * 0.75); // High confidence with good move
+    
+    // AI OVERRIDE: For borderline cases, allow Mathematical Intuition engine to make final decision
+    let aiOverride = false;
+    if (!shouldTrade && enhancedConfidence >= 25 && Math.abs(predictedMove) >= minProfitTarget * 0.5) {
+      // This is a borderline case - would normally be blocked by commission protection
+      // But it has some potential, so we flag it for AI consultation in the main trading loop
+      aiOverride = true;
+    }
     
     // Dynamic position sizing based on confidence and expected profit
     let positionSize = 0;
@@ -177,16 +186,17 @@ class IntelligentPairAdapter {
     }
     
     const reason = shouldTrade 
-      ? `High confidence (${enhancedConfidence.toFixed(1)}%) + predicted move (${predictedMove.toFixed(3)}%) > commission (${commissionBreakeven.toFixed(3)}%)`
-      : `Insufficient edge: confidence ${enhancedConfidence.toFixed(1)}% or move ${Math.abs(predictedMove).toFixed(3)}% < required ${minProfitTarget.toFixed(3)}%`;
+      ? `PROFITABLE: conf ${enhancedConfidence.toFixed(1)}% + move ${predictedMove.toFixed(3)}% > commission ${commissionBreakeven.toFixed(3)}% (min profit: ${minProfitTarget.toFixed(2)}%)`
+      : `COMMISSION PROTECTION: conf ${enhancedConfidence.toFixed(1)}% or move ${Math.abs(predictedMove).toFixed(3)}% < min profit ${minProfitTarget.toFixed(2)}% after ${commissionBreakeven.toFixed(3)}% commission`;
     
     return {
       shouldTrade,
       confidence: enhancedConfidence,
       minProfitTarget,
       positionSize,
-      reason,
-      commissionBreakeven
+      reason: aiOverride ? `AI CONSULTATION: ${reason} [FLAGGED FOR AI OVERRIDE]` : reason,
+      commissionBreakeven,
+      aiOverride
     };
   }
 

@@ -65,6 +65,18 @@ export class ProductionTensorIntegration {
   async convertToTensorInputs(bundle: ProductionAIBundle): Promise<AISystemOutput[]> {
     const outputs: AISystemOutput[] = [];
     
+    // VALIDATION: Ensure bundle is valid
+    if (!bundle || typeof bundle !== 'object') {
+      console.error('🚨 TENSOR INTEGRATION ERROR: Invalid bundle provided');
+      return [];
+    }
+    
+    // VALIDATION: Ensure critical fields are present
+    if (!bundle.symbol || !bundle.currentPrice || bundle.currentPrice <= 0) {
+      console.error('🚨 TENSOR INTEGRATION ERROR: Missing symbol or invalid price');
+      return [];
+    }
+    
     // FIRST: Process advanced strategies (high priority)
     console.log(`🚀 Processing ADVANCED AI strategies for ${bundle.symbol}`);
     
@@ -91,49 +103,93 @@ export class ProductionTensorIntegration {
     
     // Pine Script conversion (basic)
     if (bundle.pineScriptResult) {
-      const pineOutput: AISystemOutput = {
-        systemId: 'pine-script',
-        confidence: this.extractPineScriptConfidence(bundle.pineScriptResult),
-        direction: this.extractPineScriptDirection(bundle.pineScriptResult),
-        magnitude: this.estimatePineScriptMagnitude(bundle.pineScriptResult, bundle.currentPrice),
-        reliability: this.getPineScriptReliability(bundle.symbol),
-        timestamp: bundle.timestamp
-      };
-      outputs.push(pineOutput);
+      try {
+        const confidence = this.extractPineScriptConfidence(bundle.pineScriptResult);
+        const direction = this.extractPineScriptDirection(bundle.pineScriptResult);
+        const magnitude = this.estimatePineScriptMagnitude(bundle.pineScriptResult, bundle.currentPrice);
+        const reliability = this.getPineScriptReliability(bundle.symbol);
+        
+        // Validate all values before creating output
+        if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
+            this.isValidNumber(magnitude) && this.isValidNumber(reliability)) {
+          const pineOutput: AISystemOutput = {
+            systemId: 'pine-script',
+            confidence,
+            direction,
+            magnitude,
+            reliability,
+            timestamp: bundle.timestamp || new Date()
+          };
+          outputs.push(pineOutput);
+        } else {
+          console.warn('⚠️ Pine Script output validation failed - skipping');
+        }
+      } catch (error) {
+        console.warn('⚠️ Pine Script conversion error:', error.message);
+      }
     }
     
     // Mathematical Intuition conversion
     if (bundle.mathematicalIntuition) {
-      const mathOutput: AISystemOutput = {
-        systemId: 'mathematical-intuition',
-        confidence: bundle.mathematicalIntuition.originalIntuition || 0,
-        direction: this.extractMathIntuitionDirection(bundle.mathematicalIntuition),
-        magnitude: Math.abs(bundle.mathematicalIntuition.flowField || 0.01),
-        reliability: 0.80, // Historical performance
-        timestamp: bundle.timestamp,
-        additionalData: {
-          flowField: bundle.mathematicalIntuition.flowField,
-          patternResonance: bundle.mathematicalIntuition.patternResonance
+      try {
+        const confidence = bundle.mathematicalIntuition.originalIntuition || 0;
+        const direction = this.extractMathIntuitionDirection(bundle.mathematicalIntuition);
+        const magnitude = Math.abs(bundle.mathematicalIntuition.flowField || 0.01);
+        
+        // Validate all values
+        if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
+            this.isValidNumber(magnitude)) {
+          const mathOutput: AISystemOutput = {
+            systemId: 'mathematical-intuition',
+            confidence: Math.max(0, Math.min(1, confidence)),
+            direction: Math.max(-1, Math.min(1, direction)),
+            magnitude: Math.max(0, Math.min(1, magnitude)),
+            reliability: 0.80,
+            timestamp: bundle.timestamp || new Date(),
+            additionalData: {
+              flowField: bundle.mathematicalIntuition.flowField,
+              patternResonance: bundle.mathematicalIntuition.patternResonance
+            }
+          };
+          outputs.push(mathOutput);
+        } else {
+          console.warn('⚠️ Mathematical Intuition validation failed - skipping');
         }
-      };
-      outputs.push(mathOutput);
+      } catch (error) {
+        console.warn('⚠️ Mathematical Intuition conversion error:', error.message);
+      }
     }
     
     // Markov Chain conversion
     if (bundle.markovPrediction) {
-      const markovOutput: AISystemOutput = {
-        systemId: 'markov-chain',
-        confidence: bundle.markovPrediction.confidence || 0,
-        direction: bundle.markovPrediction.expectedReturn > 0 ? 1 : -1,
-        magnitude: Math.abs(bundle.markovPrediction.expectedReturn || 0.01),
-        reliability: 0.75, // Historical performance
-        timestamp: bundle.timestamp,
-        additionalData: {
-          currentState: bundle.markovPrediction.currentState,
-          nextStateProbabilities: bundle.markovPrediction.nextStateProbabilities
+      try {
+        const confidence = bundle.markovPrediction.confidence || 0;
+        const expectedReturn = bundle.markovPrediction.expectedReturn || 0;
+        const direction = expectedReturn > 0 ? 1 : -1;
+        const magnitude = Math.abs(expectedReturn || 0.01);
+        
+        // Validate all values
+        if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
+            this.isValidNumber(magnitude)) {
+          const markovOutput: AISystemOutput = {
+            systemId: 'markov-chain',
+            confidence: Math.max(0, Math.min(1, confidence)),
+            direction: Math.max(-1, Math.min(1, direction)),
+            magnitude: Math.max(0, Math.min(1, magnitude)),
+            reliability: 0.75,
+            timestamp: bundle.timestamp || new Date(),
+            additionalData: {
+              currentState: bundle.markovPrediction.currentState,
+              nextStateProbabilities: bundle.markovPrediction.nextStateProbabilities
+            }
+          };
+          outputs.push(markovOutput);
+        } else {
+          console.warn('⚠️ Markov Chain validation failed - skipping');
         }
-      };
-      outputs.push(markovOutput);
+      } catch (error) {
+        console.warn('⚠️ Markov Chain conversion error:', error.message);
+      }
     }
     
     // Adaptive Learning conversion
@@ -158,19 +214,34 @@ export class ProductionTensorIntegration {
     
     // Sentiment Analysis conversion (if available)
     if (bundle.sentimentAnalysis) {
-      const sentimentOutput: AISystemOutput = {
-        systemId: 'sentiment-analysis',
-        confidence: bundle.sentimentAnalysis.confidence || 0,
-        direction: bundle.sentimentAnalysis.bullishScore > 0.5 ? 1 : -1,
-        magnitude: Math.abs(bundle.sentimentAnalysis.bullishScore - 0.5) * 0.04, // Scale to 0-2%
-        reliability: 0.65, // Sentiment is less reliable
-        timestamp: bundle.timestamp,
-        additionalData: {
-          sources: bundle.sentimentAnalysis.sources,
-          volume: bundle.sentimentAnalysis.volume
+      try {
+        const confidence = bundle.sentimentAnalysis.confidence || 0;
+        const bullishScore = bundle.sentimentAnalysis.bullishScore || 0.5;
+        const direction = bullishScore > 0.5 ? 1 : -1;
+        const magnitude = Math.abs(bullishScore - 0.5) * 0.04;
+        
+        // Validate all values
+        if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
+            this.isValidNumber(magnitude)) {
+          const sentimentOutput: AISystemOutput = {
+            systemId: 'sentiment-analysis',
+            confidence: Math.max(0, Math.min(1, confidence)),
+            direction: Math.max(-1, Math.min(1, direction)),
+            magnitude: Math.max(0, Math.min(1, magnitude)),
+            reliability: 0.65,
+            timestamp: bundle.timestamp || new Date(),
+            additionalData: {
+              sources: bundle.sentimentAnalysis.sources,
+              volume: bundle.sentimentAnalysis.volume
+            }
+          };
+          outputs.push(sentimentOutput);
+        } else {
+          console.warn('⚠️ Sentiment Analysis validation failed - skipping');
         }
-      };
-      outputs.push(sentimentOutput);
+      } catch (error) {
+        console.warn('⚠️ Sentiment Analysis conversion error:', error.message);
+      }
     }
     
     return outputs;
@@ -209,7 +280,7 @@ export class ProductionTensorIntegration {
     console.log(`⚖️ Applied priority weights: Advanced strategies get 2-3x more influence`);
     
     // Perform tensor fusion with weighted outputs
-    const fusedDecision = tensorAIFusion.fuseAIOutputs(weightedOutputs, bundle.currentPrice, bundle.marketData);
+    const fusedDecision = await tensorAIFusion.fuseAIOutputs(weightedOutputs, bundle.currentPrice, bundle.marketData);
     
     // Create production-ready decision
     const decision: TensorTradingDecision = {
@@ -370,6 +441,19 @@ export class ProductionTensorIntegration {
       // DEFAULT
       ['unknown', 0.1]                      // Unknown strategies get minimal weight
     ]);
+  }
+  
+  /**
+   * Helper method to validate numbers
+   */
+  private isValidNumber(value: any): boolean {
+    return (
+      typeof value === 'number' &&
+      !isNaN(value) &&
+      isFinite(value) &&
+      value !== null &&
+      value !== undefined
+    );
   }
   
   /**

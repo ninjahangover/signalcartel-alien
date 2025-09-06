@@ -73,9 +73,9 @@ export class EnhancedMathematicalIntuition {
   ): Promise<EnhancedIntuitiveAnalysis> {
     console.log(`🧠 Enhanced Mathematical Intuition analyzing ${symbol} at $${currentPrice}`);
     
-    // Calculate real available balance accounting for open positions
+    // Calculate real available balance accounting for open positions (pass symbol for caching logic)
     const availableBalanceCalculator = getAvailableBalanceCalculator(positionManager);
-    const balanceInfo: AvailableBalanceResult = await availableBalanceCalculator.calculateAvailableBalance();
+    const balanceInfo: AvailableBalanceResult = await availableBalanceCalculator.calculateAvailableBalance(symbol);
     
     console.log(`💰 REAL AVAILABLE BALANCE: $${balanceInfo.availableBalance.toFixed(2)} (${balanceInfo.openPositionsCount} positions, +${balanceInfo.confidenceThresholdAdjustment}% confidence requirement)`);
     

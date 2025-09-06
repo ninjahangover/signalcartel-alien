@@ -12,6 +12,7 @@ const telemetry = initProductionTelemetry({
 });
 
 import { PositionManager } from './src/lib/position-management/position-manager';
+import { AvailableBalanceCalculator } from './src/lib/available-balance-calculator';
 import { phaseManager } from './src/lib/quantum-forge-phase-config';
 import { EnhancedMarkovPredictor } from './src/lib/enhanced-markov-predictor';
 import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-engine';
@@ -62,6 +63,7 @@ class ProductionTradingEngine {
   private isRunning = false;
   private cycleCount = 0;
   private positionManager: PositionManager;
+  private balanceCalculator: AvailableBalanceCalculator;
   private enhancedMarkovPredictor2: EnhancedMarkovPredictor;
   private mathEngine: MathematicalIntuitionEngine;
   private enhancedIntuition: typeof enhancedMathematicalIntuition;
@@ -99,6 +101,7 @@ class ProductionTradingEngine {
   
   constructor() {
     this.positionManager = new PositionManager(prisma);
+    this.balanceCalculator = new AvailableBalanceCalculator(this.positionManager);
     this.enhancedMarkovPredictor2 = new EnhancedMarkovPredictor();
     this.mathEngine = new MathematicalIntuitionEngine();
     this.enhancedIntuition = enhancedMathematicalIntuition;
@@ -348,6 +351,9 @@ class ProductionTradingEngine {
       if (allOpportunityPairs.length > 0) {
         const previousDynamic = [...this.dynamicPairs];
         this.dynamicPairs = allOpportunityPairs;
+        
+        // 🎯 UPDATE PRIORITY PAIRS FOR BALANCE CACHING (only top-scoring pairs get fresh Kraken API calls)
+        this.balanceCalculator.updatePriorityPairs([...this.CORE_PAIRS, ...topScoringPairs]);
         
         log(`🎆 AI OPPORTUNITY SELECTION: ${topScoringPairs.length} top + ${goodScoringPairs.length} good scoring pairs`);
         log(`   Top-Scoring (70%+): ${topScoringPairs.join(', ')}`);
@@ -1462,7 +1468,7 @@ class ProductionTradingEngine {
       // 🎯 ADAPTIVE PAIR FILTERING - Focus on high performers, avoid consistent losers
       try {
         const { AdaptivePairFilter } = await import('./src/lib/adaptive-pair-filter');
-        const pairFilter = new AdaptivePairFilter(this.prisma);
+        const pairFilter = new AdaptivePairFilter(prisma);
         
         const filteredPairs = [];
         for (const data of marketData) {
@@ -1559,18 +1565,23 @@ class ProductionTradingEngine {
             
             log(`🧠 ENHANCED SIZING: $${quantity.toFixed(2)} | TP: ${aiAnalysis.enhancedAnalysis.takeProfit.toFixed(2)}% SL: ${aiAnalysis.enhancedAnalysis.stopLoss.toFixed(2)}% | Expected: $${aiAnalysis.enhancedAnalysis.netExpectedReturn.toFixed(4)}`);
           } else {
-            // 🚀 ENHANCED POSITION SIZING SYSTEM - 67-333x improvement target
+            // 🚀 ENHANCED POSITION SIZING SYSTEM - Dynamic balance-based sizing
             try {
+              // Get real account balance dynamically
+              const balanceInfo = await this.balanceCalculator.calculateAvailableBalance();
+              
               const { EnhancedPositionSizing } = await import('./src/lib/enhanced-position-sizing');
-              const positionSizer = new EnhancedPositionSizing(this.prisma);
+              const positionSizer = new EnhancedPositionSizing(prisma);
               
               const sizingResult = await positionSizer.calculateOptimalSize({
                 symbol: data.symbol,
                 confidence: aiAnalysis.confidence,
                 currentPrice: data.price,
                 action: data.action,
-                accountBalance: 10000 // $10K starting balance
+                accountBalance: balanceInfo.availableBalance
               });
+              
+              log(`💰 DYNAMIC BALANCE: Total: $${balanceInfo.totalBalance.toFixed(2)} | Available: $${balanceInfo.availableBalance.toFixed(2)} | Open Positions: ${balanceInfo.openPositionsCount} ($${balanceInfo.openPositionsValue.toFixed(2)})`);
               
               quantity = sizingResult.finalPositionSize;
               
@@ -1579,29 +1590,39 @@ class ProductionTradingEngine {
               log(`🎯 Expected: $${sizingResult.expectedProfit.toFixed(4)} | Risk: ${sizingResult.riskLevel}`);
               
             } catch (error) {
-              log(`⚠️ Enhanced sizing failed, using fallback: ${error.message}`);
+              log(`⚠️ Enhanced sizing failed, using dynamic fallback: ${error.message}`);
               
-              // Fallback with improved multipliers based on your requirements
-              const accountBalance = 10000;
-              const baseSize = accountBalance * 0.01; // $100 base
-              
-              // Enhanced confidence multipliers (Priority #1)
-              let confidenceMultiplier = 1;
-              if (aiAnalysis.confidence >= 0.88) {
-                confidenceMultiplier = 10;  // 88%+ → 10x size
-              } else if (aiAnalysis.confidence >= 0.70) {
-                confidenceMultiplier = 5;   // 70-87% → 5x size
-              } else if (aiAnalysis.confidence >= 0.50) {
-                confidenceMultiplier = 2;   // 50-69% → 2x size
+              // Dynamic fallback - get real balance even in fallback mode
+              try {
+                const balanceInfo = await this.balanceCalculator.calculateAvailableBalance();
+                const accountBalance = balanceInfo.availableBalance;
+                const baseSize = Math.max(accountBalance * 0.01, 10); // 1% of available balance, min $10
+                
+                log(`💰 FALLBACK BALANCE: Total: $${balanceInfo.totalBalance.toFixed(2)} | Available: $${accountBalance.toFixed(2)}`);
+                
+                // Enhanced confidence multipliers (Priority #1)
+                let confidenceMultiplier = 1;
+                if (aiAnalysis.confidence >= 0.88) {
+                  confidenceMultiplier = 10;  // 88%+ → 10x size
+                } else if (aiAnalysis.confidence >= 0.70) {
+                  confidenceMultiplier = 5;   // 70-87% → 5x size
+                } else if (aiAnalysis.confidence >= 0.50) {
+                  confidenceMultiplier = 2;   // 50-69% → 2x size
+                }
+                
+                quantity = baseSize * confidenceMultiplier;
+                
+                // Ensure minimum viable position and maximum safe position
+                const minimumPosition = Math.max(accountBalance * 0.001, 5); // 0.1% minimum, min $5
+                const maximumPosition = accountBalance * 0.15; // Max 15% of available balance
+                quantity = Math.max(Math.min(quantity, maximumPosition), minimumPosition);
+                
+                log(`🎯 FALLBACK SIZING: Base $${baseSize.toFixed(2)} × ${confidenceMultiplier}x (${(aiAnalysis.confidence * 100).toFixed(1)}% conf) = $${quantity.toFixed(2)}`);
+                
+              } catch (balanceError) {
+                log(`❌ Could not fetch balance for fallback, skipping trade: ${balanceError.message}`);
+                continue; // Skip this trade entirely if we can't get balance
               }
-              
-              quantity = baseSize * confidenceMultiplier;
-              
-              // Ensure minimum viable position
-              const minimumPosition = accountBalance * 0.001; // 0.1% minimum ($10)
-              quantity = Math.max(quantity, minimumPosition);
-              
-              log(`🎯 FALLBACK SIZING: Base $${baseSize} × ${confidenceMultiplier}x (${(aiAnalysis.confidence * 100).toFixed(1)}% conf) = $${quantity.toFixed(2)}`);
             }
           }
           
