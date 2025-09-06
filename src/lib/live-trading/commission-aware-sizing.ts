@@ -107,7 +107,7 @@ export class CommissionAwarePositionSizer {
     if (confidence >= 0.90) return 0.20;  // 20% for ultra-high confidence
     if (confidence >= 0.85) return 0.15;  // 15% for high confidence  
     if (confidence >= 0.80) return 0.12;  // 12% for good confidence
-    if (confidence >= 0.75) return 0.08;  // 8% for minimum confidence
+    if (confidence >= 0.80) return 0.08;  // 8% for minimum confidence
     return 0; // Below minimum threshold
   }
   
@@ -137,7 +137,7 @@ export class CommissionAwarePositionSizer {
       { confidence: 0.95, move: 0.025, desc: 'Ultra-high confidence, 2.5% move' },
       { confidence: 0.85, move: 0.020, desc: 'High confidence, 2.0% move' },
       { confidence: 0.80, move: 0.015, desc: 'Good confidence, 1.5% move' },
-      { confidence: 0.75, move: 0.012, desc: 'Min confidence, 1.2% move' },
+      { confidence: 0.80, move: 0.025, desc: 'Min confidence, 2.5% move' },
       { confidence: 0.70, move: 0.015, desc: 'Below threshold, 1.5% move' }
     ];
     
@@ -163,8 +163,8 @@ export const krakenSmallAccountConfig: CommissionConfig = {
   takerFee: 0.0026,      // 0.26% Kraken taker fee  
   accountSize: 300,      // $300 starting account
   maxPositionPct: 0.20,  // Max 20% per trade
-  minConfidence: 0.75,   // 75% minimum confidence
-  minProfitTarget: 0.008 // 0.8% profit target above fees
+  minConfidence: 0.80,   // 80% minimum confidence - higher conviction only
+  minProfitTarget: 0.020 // 2.0% profit target above fees - only trade large moves
 };
 
 // Export singleton for easy use

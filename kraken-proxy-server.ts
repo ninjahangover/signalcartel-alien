@@ -26,8 +26,10 @@ function getKrakenSignature(path: string, request: string, secret: string, nonce
   const message = nonce.toString() + request;
   const hash_digest = hash.update(message).digest();
   
-  // Create the message for HMAC: path + hash_digest
-  const hmac_digest = hmac.update(Buffer.concat([Buffer.from(path, 'utf8'), hash_digest])).digest('base64');
+  // Create the message for HMAC: path + hash_digest (separate updates like website)
+  hmac.update(path);
+  hmac.update(hash_digest);
+  const hmac_digest = hmac.digest('base64');
   return hmac_digest;
 }
 

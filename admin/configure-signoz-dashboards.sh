@@ -8,7 +8,7 @@ set -euo pipefail
 # Configuration
 SIGNOZ_URL="${SIGNOZ_URL:-http://localhost:3301}"
 API_TOKEN="${SIGNOZ_API_TOKEN:-}"
-DASHBOARD_FILE="/home/telgkb9/depot/signalcartel/admin/signoz-trading-dashboards.json"
+DASHBOARD_FILE="/home/telgkb9/depot/current/admin/signoz-trading-dashboards.json"
 
 # Colors for output
 RED='\033[0;31m'

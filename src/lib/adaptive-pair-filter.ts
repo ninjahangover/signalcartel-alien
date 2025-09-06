@@ -41,10 +41,11 @@ export class AdaptivePairFilter {
    * Check if a trading pair should be allowed based on historical performance
    */
   async shouldAllowPair(symbol: string): Promise<boolean> {
-    // Always allow if no historical data
-    if (!this.performanceCache.has(symbol)) {
-      await this.updatePairPerformance(symbol);
-    }
+    try {
+      // Always allow if no historical data
+      if (!this.performanceCache.has(symbol)) {
+        await this.updatePairPerformance(symbol);
+      }
 
     const performance = this.performanceCache.get(symbol);
     if (!performance || performance.totalTrades < this.filterCriteria.minTrades) {
@@ -63,6 +64,10 @@ export class AdaptivePairFilter {
     }
 
     return this.evaluatePairPerformance(performance);
+    } catch (error) {
+      console.error(`❌ AdaptivePairFilter: Error checking pair ${symbol}:`, error);
+      return true; // Allow pair on error to avoid blocking trading
+    }
   }
 
   /**
@@ -105,6 +110,12 @@ export class AdaptivePairFilter {
    */
   private async updatePairPerformance(symbol: string): Promise<void> {
     try {
+      // Safety check: Ensure prisma client is available
+      if (!this.prisma || !this.prisma.managedPosition) {
+        console.error(`❌ AdaptivePairFilter: Prisma client not available for ${symbol}`);
+        return;
+      }
+
       // Get performance data using Prisma aggregation
       const positions = await this.prisma.managedPosition.findMany({
         where: {
@@ -152,6 +163,12 @@ export class AdaptivePairFilter {
    */
   private async updateConsecutiveLosses(symbol: string): Promise<void> {
     try {
+      // Safety check: Ensure prisma client is available
+      if (!this.prisma || !this.prisma.managedPosition) {
+        console.error(`❌ AdaptivePairFilter: Prisma client not available for consecutive losses ${symbol}`);
+        return;
+      }
+
       const recentTrades = await this.prisma.managedPosition.findMany({
         where: {
           symbol: symbol,
@@ -233,16 +250,26 @@ export class AdaptivePairFilter {
    * Adjust filter criteria based on overall system performance
    */
   adjustFilterCriteria(systemWinRate: number, totalPnL: number): void {
-    // Tighten criteria when system is performing well
-    if (systemWinRate > 80 && totalPnL > 5) {
-      this.filterCriteria.minWinRate = Math.min(75, systemWinRate - 5);
-      console.log(`🎯 TIGHTENING FILTER: Raising min win rate to ${this.filterCriteria.minWinRate}%`);
-    }
-    
-    // Loosen criteria when system struggles
-    if (systemWinRate < 60 || totalPnL < 0) {
-      this.filterCriteria.minWinRate = Math.max(40, systemWinRate - 10);
-      console.log(`⚠️ LOOSENING FILTER: Lowering min win rate to ${this.filterCriteria.minWinRate}%`);
+    try {
+      // Tighten criteria when system is performing well
+      if (systemWinRate > 80 && totalPnL > 5) {
+        this.filterCriteria = {
+          ...this.filterCriteria,
+          minWinRate: Math.min(75, systemWinRate - 5)
+        };
+        console.log(`🎯 TIGHTENING FILTER: Raising min win rate to ${this.filterCriteria.minWinRate}%`);
+      }
+      
+      // Loosen criteria when system struggles
+      if (systemWinRate < 60 || totalPnL < 0) {
+        this.filterCriteria = {
+          ...this.filterCriteria,
+          minWinRate: Math.max(40, systemWinRate - 10)
+        };
+        console.log(`⚠️ LOOSENING FILTER: Lowering min win rate to ${this.filterCriteria.minWinRate}%`);
+      }
+    } catch (error) {
+      console.error(`❌ AdaptivePairFilter: Failed to adjust criteria:`, error);
     }
   }
 

@@ -18,7 +18,6 @@ import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-en
 import { enhancedMathematicalIntuition } from './src/lib/enhanced-mathematical-intuition';
 import { getIntelligentPairAdapter } from './src/lib/intelligent-pair-adapter';
 import { adaptiveSignalLearning } from './src/lib/adaptive-signal-learning';
-import { productionTensorIntegration } from './src/lib/production-tensor-integration';
 import { PrismaClient } from '@prisma/client';
 import { webhookClient } from './src/lib/webhooks/webhook-client';
 import { WebhookPayloadAdapter } from './src/lib/webhook-payload-adapter';
@@ -68,10 +67,6 @@ class ProductionTradingEngine {
   private pairAdapter: ReturnType<typeof getIntelligentPairAdapter>;
   private webhookAdapter: WebhookPayloadAdapter;
   private krakenInitialized: boolean = false;
-  
-  // 🧮 TENSOR FUSION MODE (gradual rollout)
-  private tensorMode: boolean = process.env.TENSOR_MODE === 'true';
-  private tensorRolloutPercentage: number = parseFloat(process.env.TENSOR_ROLLOUT || '10'); // Start with 10%
   
   // 🎯 PRE-VALIDATION PRICE CACHE SYSTEM
   private priceCache = new Map<string, { price: number; timestamp: Date; isValid: boolean }>();
@@ -126,16 +121,6 @@ class ProductionTradingEngine {
     log('✅ Real trade counting for phase transitions');
     log('✅ Production-ready position tracking');
     log('📁 Logging to: ' + LOG_FILE);
-    log('');
-    
-    // 🧮 TENSOR FUSION STATUS
-    if (this.tensorMode) {
-      log('🧮 TENSOR FUSION: FULLY ENABLED - Using advanced AI fusion for all decisions');
-    } else if (this.tensorRolloutPercentage > 0) {
-      log(`🧮 TENSOR FUSION: GRADUAL ROLLOUT - ${this.tensorRolloutPercentage.toFixed(1)}% of trades use tensor system`);
-    } else {
-      log('🧮 TENSOR FUSION: DISABLED - Using original AI system');
-    }
     log('');
   }
   
@@ -764,70 +749,6 @@ class ProductionTradingEngine {
           log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}]`);
         } else {
           log(`📉 ❌ Signal below threshold: ${(confidence * 100).toFixed(1)}% < ${(phase.features.confidenceThreshold * 100).toFixed(1)}%`);
-        }
-      }
-
-      // 🧮 TENSOR FUSION INTEGRATION - LIVE DATA ONLY 
-      // Use tensor fusion for enhanced decision making with gradual rollout
-      if (this.shouldUseTensorFusion()) {
-        try {
-          log(`🧮 TENSOR FUSION: Analyzing with advanced AI fusion system`);
-          
-          // Create production AI bundle with all available data
-          const aiBundle = {
-            symbol: marketData.symbol,
-            currentPrice: marketData.price,
-            pineScriptResult: enhancedSignal || baseSignal,
-            mathematicalIntuition: enhancedAnalysis,
-            markovPrediction: markovAnalysis,
-            sentimentAnalysis: null, // Would be populated if available
-            marketData: marketData,
-            phase: phase.phase,
-            timestamp: new Date()
-          };
-          
-          // Get tensor-based decision
-          const tensorDecision = await productionTensorIntegration.makeDecision(aiBundle);
-          
-          log(`🎯 TENSOR DECISION: ${tensorDecision.shouldTrade ? 'TRADE' : 'SKIP'} ${tensorDecision.direction}`);
-          log(`   Tensor Confidence: ${(tensorDecision.confidence * 100).toFixed(1)}%`);
-          log(`   Expected Move: ${(tensorDecision.expectedMove * 100).toFixed(2)}%`);
-          log(`   Position Size: ${(tensorDecision.positionSize * 100).toFixed(1)}% of account`);
-          log(`   AI Systems Used: ${tensorDecision.aiSystemsUsed.join(', ')}`);
-          log(`   Reason: ${tensorDecision.fusedDecision.reason}`);
-          
-          // Track tensor performance
-          telemetry.trackAI({
-            system: 'tensor-ai-fusion',
-            responseTime: Date.now() - new Date().getTime(),
-            confidence: tensorDecision.confidence,
-            prediction: tensorDecision.shouldTrade ? 'TRADE' : 'HOLD',
-            success: true,
-            additionalData: {
-              tensorReason: tensorDecision.fusedDecision.reason,
-              informationContent: tensorDecision.fusedDecision.informationContent,
-              consensusStrength: tensorDecision.fusedDecision.consensusStrength
-            }
-          });
-          
-          // Compare with original decision for learning
-          if (tensorDecision.shouldTrade !== finalShouldTrade) {
-            log(`🔍 TENSOR vs ORIGINAL: Tensor=${tensorDecision.shouldTrade ? 'TRADE' : 'SKIP'}, Original=${finalShouldTrade ? 'TRADE' : 'SKIP'}`);
-          }
-          
-          // Use tensor decision (it has superior mathematical rigor)
-          return {
-            shouldTrade: tensorDecision.shouldTrade,
-            confidence: tensorDecision.confidence,
-            signal: enhancedSignal || baseSignal,
-            aiSystems: tensorDecision.aiSystemsUsed,
-            enhancedAnalysis: tensorDecision,
-            tensorDecision: tensorDecision // For position sizing
-          };
-          
-        } catch (tensorError) {
-          log(`⚠️ Tensor fusion failed, falling back to original: ${tensorError.message}`);
-          // Fall through to original return
         }
       }
 
@@ -1636,9 +1557,6 @@ class ProductionTradingEngine {
             let orderResult: any = null;
             let krakenOrderId: string = '';
             
-            // 🐛 CRITICAL FIX: Define strategyName before try-catch to ensure it's available in backup webhook path
-            const strategyName = `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'basic'}`;
-            
             try {
               // Convert internal side ('long'/'short') to Kraken API format ('buy'/'sell')
               const krakenSide = side === 'long' ? 'buy' : 'sell';
@@ -1660,6 +1578,7 @@ class ProductionTradingEngine {
                 log(`📋 Order Description: ${orderResult.result.descr?.order || 'Market order executed'}`);
                 
                 // ✅ KRAKEN ORDER SUCCESSFUL - Now create database position
+                const strategyName = `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'basic'}`;
                 log(`📝 Kraken order confirmed - creating database position: ${data.symbol} ${side} ${actualQuantity.toFixed(6)} @ $${data.price}`);
                 
                 const result = await this.positionManager.openPosition({
@@ -1840,20 +1759,6 @@ class ProductionTradingEngine {
     this.isRunning = false;
   }
   
-  /**
-   * 🧮 TENSOR FUSION DECISION - Gradual rollout with live data
-   */
-  private shouldUseTensorFusion(): boolean {
-    // Always use tensor fusion if explicitly enabled
-    if (this.tensorMode) {
-      return true;
-    }
-    
-    // Gradual rollout based on percentage
-    const random = Math.random() * 100;
-    return random < this.tensorRolloutPercentage;
-  }
-
   /**
    * 🧠 MARKET CONDITION DETECTOR
    * Uses existing AI levels to determine market state for adaptive trading

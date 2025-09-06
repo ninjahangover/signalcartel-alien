@@ -65,8 +65,8 @@ export class TensorAIFusionEngine {
   // Dynamic parameters (no hard-coded limitations)
   private LEARNING_RATE = 0.05;  // Adaptive learning rate
   private commissionCost: number = 0.0042;  // Will be fetched from Kraken API
-  private minInformationThreshold: number = 1.5;  // Lowered from 2.0 - adapts to market conditions
-  private minConsensusThreshold: number = 0.5;      // Lowered from 0.6 - adapts to volatility regime
+  private minInformationThreshold: number = 1.0;  // Further lowered to 1.0 - allow more trades but require higher profit
+  private minConsensusThreshold: number = 0.35;     // Further lowered to 35% - more trades but profitable ones only
   
   // Time-based auto-adjustment tracking
   private lastTradeTimestamp: Date = new Date();
@@ -289,8 +289,8 @@ export class TensorAIFusionEngine {
     const adjustedConsensusThreshold = this.minConsensusThreshold * this.thresholdAdjustmentFactor;
     
     // CRITICAL FIX: Increase minimum profit to ensure real gains after commission
-    // Commission is 0.42% round-trip, so we need AT LEAST 1% to make meaningful profit
-    const minProfitForTrade = Math.max(0.01, expectedNetReturn * 0.3); // At least 1% or 30% of expected return
+    // Commission is 0.42% round-trip, so we need AT LEAST 1.5% to make meaningful profit
+    const minProfitForTrade = Math.max(0.015, expectedNetReturn * 0.5); // At least 1.5% or 50% of expected return
     
     // Trading decision criteria (all dynamic, no hard-coded thresholds)
     const hasEnoughInformation = informationContent >= adjustedInfoThreshold;

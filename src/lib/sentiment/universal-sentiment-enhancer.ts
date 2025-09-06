@@ -69,7 +69,7 @@ export class UniversalSentimentEnhancer {
     
     // Order book validation settings
     enableOrderBookValidation: true, // Enable by default for QUANTUM FORGE™
-    minOrderBookValidation: 60, // Require 60% validation strength minimum
+    minOrderBookValidation: 35, // Require 35% validation strength minimum (lowered to allow more trades)
     skipOnOrderBookConflict: true, // Skip on order book conflicts
     maxOrderBookBoost: 0.25 // Order book can boost confidence by up to 25%
   };

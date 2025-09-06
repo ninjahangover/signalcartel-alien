@@ -162,11 +162,11 @@ export const smallAccountLiveConfig: LiveTradingConfig = {
     accountSize: 300,
     maxPositionPct: 0.20,     // 20% max position
     minConfidence: 0.80,      // Higher than paper trading
-    minProfitTarget: 0.012    // 1.2% minimum profit
+    minProfitTarget: 0.020    // 2.0% minimum profit - only trade large moves
   },
   
   // Strict signal filtering
-  minConfidence: 0.80,        // 80% minimum for live trades
+  minConfidence: 0.85,        // 85% minimum for live trades - higher conviction
   requiredPhase: 3,          // Phase 3+ only (Order Book Intelligence active)
   enabledAISystems: [
     'mathematical-intuition-engine',

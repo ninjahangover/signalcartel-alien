@@ -8,42 +8,22 @@ class KrakenApiService {
   private lastRequestTime = 0;
 
   async authenticate(apiKey: string, apiSecret: string): Promise<boolean> {
-    const maxRetries = 3;
-    let lastError: any;
-    
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        this.apiKey = apiKey;
-        this.apiSecret = apiSecret;
+    try {
+      this.apiKey = apiKey;
+      this.apiSecret = apiSecret;
 
-        // Try to make a test call to verify credentials
-        const accountInfo = await this.getAccountBalance();
-        if (accountInfo) {
-          this.isAuthenticated = true;
-          console.log(`✅ Kraken authentication successful on attempt ${attempt}`);
-          return true;
-        }
-        return false;
-      } catch (error: any) {
-        lastError = error;
-        console.error(`Authentication attempt ${attempt} failed:`, error?.message || error);
-        
-        // If rate limited, wait longer before retry
-        if (error?.message?.includes('Rate limit')) {
-          const waitTime = Math.min(30000, attempt * 10000); // 10s, 20s, 30s
-          console.log(`⏳ Rate limited - waiting ${waitTime/1000}s before retry...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        } else {
-          // Regular retry with exponential backoff
-          const waitTime = Math.min(5000, attempt * 2000); // 2s, 4s, 5s
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
+      // Try to make a test call to verify credentials
+      const accountInfo = await this.getAccountBalance();
+      if (accountInfo) {
+        this.isAuthenticated = true;
+        return true;
       }
+      return false;
+    } catch (error) {
+      console.error('Authentication failed:', error);
+      this.isAuthenticated = false;
+      return false;
     }
-    
-    console.error(`❌ Authentication failed after ${maxRetries} attempts:`, lastError);
-    this.isAuthenticated = false;
-    return false;
   }
 
   private async queueRequest<T>(requestFn: () => Promise<T>): Promise<T> {
