@@ -29,10 +29,16 @@ try {
 }
 
 try {
-  var { orderBookIntelligence } = require('./order-book-intelligence');
-} catch {
+  var { orderBookIntelligence } = require('./sentiment/order-book-intelligence');
+} catch (error) {
+  console.log('⚠️ Order book intelligence service not available:', error.message.split('\n')[0]);
   var orderBookIntelligence = {
-    analyzeOrderBook: async () => ({ signal: 'hold', confidence: 0.5, reasoning: 'Fallback order book' })
+    analyzeOrderBook: async () => ({ signal: 'hold', confidence: 0.5, reasoning: 'Fallback order book' }),
+    generateOrderBookSignal: async () => ({ signal: 'hold', confidence: 0.5, reasoning: 'Fallback order book' }),
+    getCurrentSignal: () => null,
+    on: () => {},
+    getAllSymbols: () => [],
+    getConnectionStatus: () => false
   };
 }
 

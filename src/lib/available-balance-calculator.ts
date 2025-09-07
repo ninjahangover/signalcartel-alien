@@ -22,6 +22,15 @@ export class AvailableBalanceCalculator {
   private priorityPairs: Set<string> = new Set();
   
   constructor(positionManager: PositionManager) {
+    // BULLETPROOF: Validate positionManager
+    if (!positionManager) {
+      console.error('⚠️ AvailableBalanceCalculator: positionManager is null/undefined');
+      throw new Error('PositionManager is required for AvailableBalanceCalculator');
+    }
+    if (typeof positionManager.getOpenPositions !== 'function') {
+      console.error('⚠️ AvailableBalanceCalculator: positionManager.getOpenPositions is not a function');
+      throw new Error('PositionManager must have getOpenPositions method');
+    }
     this.positionManager = positionManager;
   }
 
@@ -53,15 +62,39 @@ export class AvailableBalanceCalculator {
       
       console.log(`💰 Kraken Balance ${isPriorityPair ? '(PRIORITY)' : '(CACHE REFRESH)'}: $${totalBalance.toFixed(2)} for ${symbol || 'system'}`);
       
-      // Get all open positions
-      const openPositions = await this.positionManager.getOpenPositions();
-      
-      // Calculate total value of open positions
+      // BULLETPROOF: Get all open positions with error handling
+      let openPositions: Position[] = [];
       let openPositionsValue = 0;
-      for (const position of openPositions) {
-        const positionValue = Math.abs(position.quantity * position.entryPrice);
-        openPositionsValue += positionValue;
-        console.log(`📊 Open Position: ${position.symbol} ${position.side} $${positionValue.toFixed(2)}`);
+      
+      try {
+        if (!this.positionManager) {
+          console.error('⚠️ PositionManager is undefined - using empty positions fallback');
+          openPositions = [];
+        } else if (typeof this.positionManager.getOpenPositions !== 'function') {
+          console.error('⚠️ PositionManager.getOpenPositions is not a function - using empty positions fallback');
+          openPositions = [];
+        } else {
+          openPositions = await this.positionManager.getOpenPositions();
+          if (!Array.isArray(openPositions)) {
+            console.error('⚠️ getOpenPositions returned non-array - using empty positions fallback');
+            openPositions = [];
+          }
+        }
+        
+        // Calculate total value of open positions
+        for (const position of openPositions) {
+          if (position && typeof position.quantity === 'number' && typeof position.entryPrice === 'number') {
+            const positionValue = Math.abs(position.quantity * position.entryPrice);
+            if (!isNaN(positionValue) && positionValue > 0) {
+              openPositionsValue += positionValue;
+              console.log(`📊 Open Position: ${position.symbol || 'UNKNOWN'} ${position.side || 'UNKNOWN'} $${positionValue.toFixed(2)}`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`⚠️ Failed to get open positions: ${error.message} - continuing with zero positions`);
+        openPositions = [];
+        openPositionsValue = 0;
       }
       
       // Calculate available balance
