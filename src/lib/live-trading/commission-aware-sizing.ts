@@ -157,15 +157,33 @@ export class CommissionAwarePositionSizer {
   }
 }
 
-// Default configuration for small Kraken accounts
-export const krakenSmallAccountConfig: CommissionConfig = {
-  makerFee: 0.0016,      // 0.16% Kraken maker fee
-  takerFee: 0.0026,      // 0.26% Kraken taker fee  
-  accountSize: 300,      // $300 starting account
-  maxPositionPct: 0.20,  // Max 20% per trade
-  minConfidence: 0.80,   // 80% minimum confidence - higher conviction only
-  minProfitTarget: 0.020 // 2.0% profit target above fees - only trade large moves
-};
+// Dynamic configuration factory for any Kraken account size
+export function createDynamicKrakenConfig(accountSize: number): CommissionConfig {
+  // Dynamic profit target based on account size and volatility
+  let minProfitTarget: number;
+  
+  if (accountSize < 500) {
+    minProfitTarget = 0.025; // 2.5% for small accounts (more selective)
+  } else if (accountSize < 2000) {
+    minProfitTarget = 0.020; // 2.0% for medium accounts
+  } else if (accountSize < 10000) {
+    minProfitTarget = 0.015; // 1.5% for large accounts
+  } else {
+    minProfitTarget = 0.012; // 1.2% for very large accounts (more opportunities)
+  }
+  
+  return {
+    makerFee: 0.0016,      // 0.16% Kraken maker fee
+    takerFee: 0.0026,      // 0.26% Kraken taker fee  
+    accountSize,           // Dynamic account size
+    maxPositionPct: 0.20,  // Max 20% per trade
+    minConfidence: 0.80,   // 80% minimum confidence - higher conviction only
+    minProfitTarget        // Dynamic profit target based on account size
+  };
+}
+
+// Default configuration for small Kraken accounts (legacy compatibility)
+export const krakenSmallAccountConfig: CommissionConfig = createDynamicKrakenConfig(300);
 
 // Export singleton for easy use
 export const commissionAwareSizer = new CommissionAwarePositionSizer(krakenSmallAccountConfig);

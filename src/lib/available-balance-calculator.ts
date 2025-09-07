@@ -124,7 +124,8 @@ export class AvailableBalanceCalculator {
     availableBalance: number,
     confidence: number,
     predictedMove: number,
-    cashRatio: number
+    cashRatio: number,
+    totalBalance?: number
   ): number {
     // Base position size as percentage of available balance
     let basePercentage = 0.15; // Start with 15% of available balance
@@ -152,18 +153,34 @@ export class AvailableBalanceCalculator {
     // Calculate final position size
     let finalSize = baseSize * confidenceMultiplier * moveMultiplier;
     
-    // Apply safety caps
+    // Apply dynamic safety caps based on account size
     finalSize = Math.min(finalSize, availableBalance * 0.25); // Never more than 25% of available
-    finalSize = Math.min(finalSize, 500); // Hard cap at $500 per position
-    finalSize = Math.max(finalSize, 50);  // Minimum $50 per position
+    
+    // Dynamic maximum position size based on total account balance (no hardcoded $500 limit)
+    const accountBalance = totalBalance || availableBalance / cashRatio;
+    const dynamicMaxPosition = Math.min(
+      availableBalance * 0.3, // 30% of available balance
+      accountBalance * 0.15 // or 15% of total balance, whichever is smaller
+    );
+    finalSize = Math.min(finalSize, dynamicMaxPosition);
+    
+    // Dynamic minimum position size based on account balance (no hardcoded $50 minimum)
+    const dynamicMinPosition = Math.max(
+      availableBalance * 0.02, // 2% of available balance
+      Math.min(25, accountBalance * 0.005) // or 0.5% of total balance, min $25
+    );
+    finalSize = Math.max(finalSize, dynamicMinPosition);
     
     console.log(`📊 Dynamic Position Sizing:
+      Account Balance: $${accountBalance.toFixed(2)}
       Available Balance: $${availableBalance.toFixed(2)}
       Cash Ratio: ${(cashRatio * 100).toFixed(1)}%
       Base Percentage: ${(basePercentage * 100).toFixed(1)}%
       Base Size: $${baseSize.toFixed(2)}
       Confidence: ${confidence.toFixed(1)}% (×${confidenceMultiplier.toFixed(2)})
       Predicted Move: ${predictedMove.toFixed(3)}% (×${moveMultiplier.toFixed(2)})
+      Dynamic Max: $${dynamicMaxPosition.toFixed(2)} (${((dynamicMaxPosition/accountBalance)*100).toFixed(1)}% of account)
+      Dynamic Min: $${dynamicMinPosition.toFixed(2)} (${((dynamicMinPosition/accountBalance)*100).toFixed(2)}% of account)
       Final Size: $${finalSize.toFixed(2)}`);
     
     return finalSize;
@@ -177,6 +194,40 @@ export class AvailableBalanceCalculator {
     confidenceThresholdAdjustment: number
   ): number {
     return baseThreshold + confidenceThresholdAdjustment;
+  }
+
+  /**
+   * Calculate dynamic profit target based on account size, confidence, and market conditions
+   */
+  calculateDynamicProfitTarget(
+    accountBalance: number,
+    confidence: number,
+    volatility: number = 0.05
+  ): number {
+    // Base profit target scales with account size (larger accounts can take smaller profits)
+    let baseTarget: number;
+    
+    if (accountBalance < 500) {
+      baseTarget = 0.025; // 2.5% for small accounts (more selective)
+    } else if (accountBalance < 2000) {
+      baseTarget = 0.020; // 2.0% for medium accounts
+    } else if (accountBalance < 10000) {
+      baseTarget = 0.015; // 1.5% for large accounts
+    } else {
+      baseTarget = 0.012; // 1.2% for very large accounts (more opportunities)
+    }
+    
+    // Adjust based on confidence (higher confidence = can accept lower profit targets)
+    const confidenceAdjustment = Math.max(0.7, Math.min(1.3, (100 - confidence) / 50));
+    
+    // Adjust based on volatility (higher volatility = higher profit targets needed)
+    const volatilityAdjustment = Math.max(0.8, Math.min(1.5, volatility * 10));
+    
+    const finalTarget = baseTarget * confidenceAdjustment * volatilityAdjustment;
+    
+    console.log(`🎯 Dynamic Profit Target: ${(finalTarget * 100).toFixed(2)}% (base: ${(baseTarget * 100).toFixed(2)}%, confidence adj: ${confidenceAdjustment.toFixed(2)}x, volatility adj: ${volatilityAdjustment.toFixed(2)}x)`);
+    
+    return finalTarget;
   }
 }
 

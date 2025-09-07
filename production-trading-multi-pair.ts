@@ -222,9 +222,9 @@ class ProductionTradingEngine {
   }
   
   /**
-   * 🎯 BACKGROUND PRICE CACHE UPDATE
-   * Fetches and validates prices from PROFIT PREDATOR™ opportunities
-   * Only PROFIT PREDATOR™ + core pairs get cached
+   * 🎯 SMART BACKGROUND PRICE CACHE UPDATE
+   * Priority-based caching with API rate limit compliance
+   * Updates only priority pairs to prevent API exhaustion
    */
   private async updatePriceCacheBackground() {
     const now = Date.now();
@@ -234,21 +234,47 @@ class ProductionTradingEngine {
       return;
     }
     
-    log('💰 Updating cached prices for category-optimized pairs...');
+    log('💰 Smart cache update: Priority pairs only...');
     const startTime = Date.now();
     
-    // Fetch prices for ALL_PAIRS sequentially with delays to avoid rate limits
+    // Priority pairs that generate the most profit
+    const PRIORITY_PAIRS = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'AVAXUSD', 'DOTUSD'];
+    
+    // Additional pairs to update in rotation (max 3 per cycle to prevent overload)
+    const remainingPairs = this.ALL_PAIRS.filter(p => !PRIORITY_PAIRS.includes(p));
+    const cycleIndex = Math.floor(Date.now() / 300000) % Math.ceil(remainingPairs.length / 3); // 5-minute cycles
+    const additionalPairs = remainingPairs.slice(cycleIndex * 3, (cycleIndex + 1) * 3);
+    
+    const pairsToUpdate = [...PRIORITY_PAIRS, ...additionalPairs];
+    log(`🎯 Updating ${pairsToUpdate.length} pairs: ${pairsToUpdate.join(', ')}`);
+    
     const { realTimePriceFetcher } = await import('./src/lib/real-time-price-fetcher');
     const results = [];
+    let consecutiveFailures = 0;
     
-    for (let i = 0; i < this.ALL_PAIRS.length; i++) {
-      const symbol = this.ALL_PAIRS[i];
+    for (let i = 0; i < pairsToUpdate.length; i++) {
+      const symbol = pairsToUpdate[i];
       
       try {
-        // Add delay between requests to avoid rate limiting (2 seconds per request)
+        // Adaptive delay based on previous failures
+        const baseDelay = 15000; // 15 seconds base delay
+        const backoffDelay = Math.min(consecutiveFailures * 5000, 30000); // Up to 30s backoff
+        const totalDelay = baseDelay + backoffDelay;
+        
         if (i > 0) {
-          log(`⏳ Rate limit protection: waiting 2000ms before request for ${symbol}`);
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          log(`⏳ Smart delay: waiting ${totalDelay}ms before request for ${symbol} (failures: ${consecutiveFailures})`);
+          await new Promise(resolve => setTimeout(resolve, totalDelay));
+        }
+        
+        // Check if we should skip due to API circuit breakers
+        const cacheStatus = realTimePriceFetcher.getCacheStatus();
+        const existingCache = cacheStatus.find(c => c.symbol === symbol);
+        
+        // Skip if we have recent cache data and APIs are failing
+        if (existingCache && existingCache.age < 600 && consecutiveFailures > 2) { // 10 minutes
+          log(`⚡ Using existing cache for ${symbol} (${existingCache.age}s old) - APIs struggling`);
+          consecutiveFailures = Math.max(0, consecutiveFailures - 1); // Reduce failure count
+          continue;
         }
         
         const priceData = await realTimePriceFetcher.getCurrentPrice(symbol);
@@ -260,21 +286,39 @@ class ProductionTradingEngine {
             isValid: true
           });
           results.push({ status: 'fulfilled', value: { symbol, success: true, price: priceData.price } });
+          consecutiveFailures = Math.max(0, consecutiveFailures - 1); // Success reduces failure count
+          log(`✅ Cached: ${symbol} = $${priceData.price.toLocaleString()}`);
         } else {
+          consecutiveFailures++;
           this.priceCache.set(symbol, {
             price: 0,
             timestamp: new Date(),
             isValid: false
           });
           results.push({ status: 'fulfilled', value: { symbol, success: false, error: priceData.error } });
+          log(`❌ Failed: ${symbol} - ${priceData.error}`);
+          
+          // If too many failures, abort this cycle to prevent API exhaustion
+          if (consecutiveFailures >= 5) {
+            log('🛑 Too many API failures, aborting cache update cycle');
+            break;
+          }
         }
       } catch (error) {
+        consecutiveFailures++;
         this.priceCache.set(symbol, {
           price: 0,
           timestamp: new Date(),
           isValid: false
         });
         results.push({ status: 'rejected', reason: error, value: { symbol, success: false, error: error.message } });
+        log(`💥 Error: ${symbol} - ${error.message}`);
+        
+        // Break on too many consecutive errors
+        if (consecutiveFailures >= 5) {
+          log('🛑 Too many consecutive errors, aborting cache update cycle');
+          break;
+        }
       }
     }
     
@@ -399,7 +443,10 @@ class ProductionTradingEngine {
       let aiSystemsUsed: string[] = [];
       let enhancedSignal: any = null;
       
-      // 🎯 PINE SCRIPT FOUNDATION: Get technical signal from Pine Script strategies
+      // 🎯 REMOVED PINE SCRIPT - Now using pure AI systems
+      // Pine Script was providing technical indicators but not true predictive intelligence
+      // Our advanced AI systems (Mathematical Intuition, Markov, Bayesian, etc.) are superior
+      /* ARCHIVED: Pine Script code
       try {
         const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
         const pineSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(marketData.symbol, marketData.price);
@@ -421,6 +468,7 @@ class ProductionTradingEngine {
       } catch (error) {
         log(`⚠️ Pine Script signal unavailable: ${error.message} - using AI fallback`);
       }
+      */
       
       // 🧠 AI OPTIMIZATION 1: Enhanced Markov Chain Analysis
       // AI enhances Pine Script decisions for better market timing
@@ -1448,7 +1496,7 @@ class ProductionTradingEngine {
       await this.updateDynamicPairsFromProfitPredator();
       
       // 🎯 GET PRE-VALIDATED TRADING PAIRS (NO API CALLS IN PIPELINE!)
-      const marketData = this.getValidatedTradingPairs();
+      let marketData = this.getValidatedTradingPairs();
       
       if (marketData.length === 0) {
         log('⚠️  No valid trading pairs available (all price fetches failed)');

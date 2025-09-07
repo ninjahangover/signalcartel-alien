@@ -29,6 +29,7 @@ export interface ProductionAIBundle {
   quantumOscillatorResult?: any;
   profitOptimizerResult?: any;
   evolutionEngineResult?: any;
+  bayesianProbability?: any;
   
   // Market context
   marketData?: any;
@@ -101,7 +102,10 @@ export class ProductionTensorIntegration {
     // SECOND: Process basic strategies (legacy fallback)
     console.log(`📊 Processing basic AI strategies for ${bundle.symbol}`);
     
-    // Pine Script conversion (basic)
+    // REMOVED: Pine Script conversion - obsolete technical indicators
+    // Pine Script was just RSI/MACD rules, not predictive AI
+    // Our AI systems provide superior predictive intelligence
+    /* ARCHIVED: Pine Script conversion code
     if (bundle.pineScriptResult) {
       try {
         const confidence = this.extractPineScriptConfidence(bundle.pineScriptResult);
@@ -128,13 +132,35 @@ export class ProductionTensorIntegration {
         console.warn('⚠️ Pine Script conversion error:', error.message);
       }
     }
+    */
     
-    // Mathematical Intuition conversion
+    // Mathematical Intuition conversion - PURE AI PREDICTIVE
     if (bundle.mathematicalIntuition) {
       try {
-        const confidence = bundle.mathematicalIntuition.originalIntuition || 0;
-        const direction = this.extractMathIntuitionDirection(bundle.mathematicalIntuition);
-        const magnitude = Math.abs(bundle.mathematicalIntuition.flowField || 0.01);
+        // Use actual Mathematical Intuition analysis from 8-domain parallel processing
+        const intuitive = bundle.mathematicalIntuition.intuitive || bundle.mathematicalIntuition;
+        const confidence = intuitive.overallFeeling || intuitive.originalIntuition || 0;
+        
+        // Extract actual direction from Mathematical Intuition's recommendation
+        let direction = 0;
+        if (intuitive.recommendation === 'BUY') direction = 1;
+        else if (intuitive.recommendation === 'SELL') direction = -1;
+        else direction = this.extractMathIntuitionDirection(intuitive);
+        
+        // PREDICTIVE: Use Mathematical Intuition's actual analysis results
+        const flowFieldStrength = Math.abs(intuitive.flowFieldStrength || intuitive.flowField || 0);
+        const patternResonance = Math.abs(intuitive.patternResonance || 0);
+        const timingIntuition = Math.abs(intuitive.timingIntuition || 0);
+        const energyAlignment = Math.abs(intuitive.energyAlignment || 0);
+        
+        // Calculate magnitude from actual AI analysis (not hardcoded)
+        const magnitude = Math.max(
+          flowFieldStrength,
+          patternResonance, 
+          timingIntuition,
+          energyAlignment,
+          Math.abs(bundle.mathematicalIntuition.predictedMove || 0)
+        ) || 0.01;
         
         // Validate all values
         if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
@@ -144,14 +170,19 @@ export class ProductionTensorIntegration {
             confidence: Math.max(0, Math.min(1, confidence)),
             direction: Math.max(-1, Math.min(1, direction)),
             magnitude: Math.max(0, Math.min(1, magnitude)),
-            reliability: 0.80,
+            reliability: 0.85, // Higher reliability for 8-domain analysis
             timestamp: bundle.timestamp || new Date(),
             additionalData: {
-              flowField: bundle.mathematicalIntuition.flowField,
-              patternResonance: bundle.mathematicalIntuition.patternResonance
+              flowFieldStrength,
+              patternResonance,
+              timingIntuition,
+              energyAlignment,
+              mathIntuition: intuitive.mathIntuition,
+              reasoning: intuitive.reasoning
             }
           };
           outputs.push(mathOutput);
+          console.log(`🧠 Mathematical Intuition Tensor: confidence=${confidence.toFixed(3)}, direction=${direction}, magnitude=${magnitude.toFixed(3)}, reasoning="${intuitive.reasoning || 'N/A'}"`);
         } else {
           console.warn('⚠️ Mathematical Intuition validation failed - skipping');
         }
@@ -160,13 +191,26 @@ export class ProductionTensorIntegration {
       }
     }
     
-    // Markov Chain conversion
+    // Markov Chain conversion - PURE AI PREDICTIVE
     if (bundle.markovPrediction) {
       try {
-        const confidence = bundle.markovPrediction.confidence || 0;
-        const expectedReturn = bundle.markovPrediction.expectedReturn || 0;
-        const direction = expectedReturn > 0 ? 1 : -1;
-        const magnitude = Math.abs(expectedReturn || 0.01);
+        const prediction = bundle.markovPrediction;
+        const confidence = prediction.confidence || 0;
+        const expectedReturn = prediction.expectedReturn || 0;
+        const direction = expectedReturn > 0 ? 1 : (expectedReturn < 0 ? -1 : 0);
+        
+        // PREDICTIVE: Use Markov's actual state analysis and regime consistency
+        const stateStability = Math.abs(prediction.stateStability || 0);
+        const regimeConsistency = Math.abs(prediction.regimeConsistency || 0);
+        const correlationAdjustment = Math.abs(prediction.crossMarketInfluence?.correlationAdjustment || 0);
+        
+        // Calculate magnitude from actual Markov analysis (not hardcoded)
+        const magnitude = Math.max(
+          Math.abs(expectedReturn),
+          stateStability,
+          regimeConsistency,
+          correlationAdjustment
+        ) || 0.01;
         
         // Validate all values
         if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
@@ -176,14 +220,20 @@ export class ProductionTensorIntegration {
             confidence: Math.max(0, Math.min(1, confidence)),
             direction: Math.max(-1, Math.min(1, direction)),
             magnitude: Math.max(0, Math.min(1, magnitude)),
-            reliability: 0.75,
+            reliability: 0.80, // Higher reliability for enhanced state analysis
             timestamp: bundle.timestamp || new Date(),
             additionalData: {
-              currentState: bundle.markovPrediction.currentState,
-              nextStateProbabilities: bundle.markovPrediction.nextStateProbabilities
+              currentState: prediction.currentState,
+              mostLikelyNextState: prediction.mostLikelyNextState,
+              expectedReturn: prediction.expectedReturn,
+              stateStability: prediction.stateStability,
+              regimeConsistency: prediction.regimeConsistency,
+              optimalHoldingPeriod: prediction.optimalHoldingPeriod,
+              crossMarketInfluence: prediction.crossMarketInfluence
             }
           };
           outputs.push(markovOutput);
+          console.log(`🔗 Markov Chain Tensor: confidence=${confidence.toFixed(3)}, direction=${direction}, magnitude=${magnitude.toFixed(3)}, expectedReturn=${(expectedReturn*100).toFixed(2)}%`);
         } else {
           console.warn('⚠️ Markov Chain validation failed - skipping');
         }
@@ -212,13 +262,101 @@ export class ProductionTensorIntegration {
       }
     }
     
-    // Sentiment Analysis conversion (if available)
+    // Bayesian Probability conversion - PURE AI PREDICTIVE
+    if (bundle.bayesianProbability) {
+      try {
+        const bayesian = bundle.bayesianProbability;
+        const confidence = bayesian.confidence || 0;
+        
+        // Extract direction from most likely regime
+        let direction = 0;
+        if (bayesian.mostLikelyRegime === 'STRONG_BULL' || bayesian.mostLikelyRegime === 'BULL') {
+          direction = 1;
+        } else if (bayesian.mostLikelyRegime === 'STRONG_BEAR' || bayesian.mostLikelyRegime === 'BEAR') {
+          direction = -1;
+        } else if (bayesian.mostLikelyRegime === 'VOLATILE') {
+          direction = bayesian.directionBias || 0; // Use direction bias for volatile markets
+        }
+        
+        // PREDICTIVE: Use Bayesian's actual regime probabilities and strength
+        const regimeStrength = Math.abs(bayesian.regimeProbability || 0);
+        const posteriorEntropy = Math.abs(bayesian.posteriorEntropy || 0);
+        const evidenceWeight = Math.abs(bayesian.evidenceWeight || 0);
+        
+        // Calculate magnitude from actual Bayesian analysis (not hardcoded)
+        const magnitude = Math.max(
+          regimeStrength,
+          1 - posteriorEntropy, // Low entropy = high certainty = high magnitude
+          evidenceWeight
+        ) || 0.01;
+        
+        // Validate all values
+        if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
+            this.isValidNumber(magnitude)) {
+          const bayesianOutput: AISystemOutput = {
+            systemId: 'bayesian-probability',
+            confidence: Math.max(0, Math.min(1, confidence)),
+            direction: Math.max(-1, Math.min(1, direction)),
+            magnitude: Math.max(0, Math.min(1, magnitude)),
+            reliability: 0.85, // High reliability for Bayesian inference
+            timestamp: bundle.timestamp || new Date(),
+            additionalData: {
+              mostLikelyRegime: bayesian.mostLikelyRegime,
+              regimeProbability: bayesian.regimeProbability,
+              posteriorEntropy: bayesian.posteriorEntropy,
+              evidenceWeight: bayesian.evidenceWeight,
+              priors: bayesian.priors,
+              posteriors: bayesian.posteriors
+            }
+          };
+          outputs.push(bayesianOutput);
+          console.log(`🎲 Bayesian Probability Tensor: confidence=${confidence.toFixed(3)}, direction=${direction}, magnitude=${magnitude.toFixed(3)}, regime=${bayesian.mostLikelyRegime}`);
+        } else {
+          console.warn('⚠️ Bayesian Probability validation failed - skipping');
+        }
+      } catch (error) {
+        console.warn('⚠️ Bayesian Probability conversion error:', error.message);
+      }
+    }
+
+    // Multi-Source Sentiment Analysis conversion - PURE AI PREDICTIVE
     if (bundle.sentimentAnalysis) {
       try {
-        const confidence = bundle.sentimentAnalysis.confidence || 0;
-        const bullishScore = bundle.sentimentAnalysis.bullishScore || 0.5;
-        const direction = bullishScore > 0.5 ? 1 : -1;
-        const magnitude = Math.abs(bullishScore - 0.5) * 0.04;
+        const sentiment = bundle.sentimentAnalysis;
+        
+        // Use Quantum Forge Sentiment Engine data if available
+        const overallScore = sentiment.overallScore || sentiment.bullishScore || 0.5;
+        const confidence = sentiment.overallConfidence || sentiment.confidence || 0;
+        
+        // Extract direction from sentiment score (-1 to +1) or sentiment label
+        let direction = 0;
+        if (sentiment.sentiment) {
+          switch (sentiment.sentiment) {
+            case 'EXTREME_BULLISH': direction = 1; break;
+            case 'BULLISH': direction = 0.8; break;
+            case 'NEUTRAL': direction = 0; break;
+            case 'BEARISH': direction = -0.8; break;
+            case 'EXTREME_BEARISH': direction = -1; break;
+            default: direction = overallScore > 0.5 ? 1 : (overallScore < 0.5 ? -1 : 0);
+          }
+        } else {
+          direction = overallScore > 0.5 ? 1 : (overallScore < 0.5 ? -1 : 0);
+        }
+        
+        // PREDICTIVE: Use multi-source sentiment strength (not hardcoded)
+        const twitterStrength = Math.abs(sentiment.sources?.twitter?.score || 0);
+        const redditStrength = Math.abs(sentiment.sources?.reddit?.overallSentiment || 0);
+        const onchainStrength = Math.abs(sentiment.sources?.onChain?.netflow || 0) / 1000; // Normalize
+        const orderBookStrength = Math.abs(sentiment.sources?.orderBook?.marketPressure || 0) / 100; // Normalize
+        
+        // Calculate magnitude from actual multi-source analysis (not hardcoded)
+        const magnitude = Math.max(
+          Math.abs(overallScore - 0.5) * 2, // Overall sentiment deviation from neutral
+          twitterStrength,
+          redditStrength,
+          onchainStrength,
+          orderBookStrength
+        ) || 0.01;
         
         // Validate all values
         if (this.isValidNumber(confidence) && this.isValidNumber(direction) && 
@@ -228,14 +366,24 @@ export class ProductionTensorIntegration {
             confidence: Math.max(0, Math.min(1, confidence)),
             direction: Math.max(-1, Math.min(1, direction)),
             magnitude: Math.max(0, Math.min(1, magnitude)),
-            reliability: 0.65,
+            reliability: 0.75, // Higher reliability for multi-source sentiment
             timestamp: bundle.timestamp || new Date(),
             additionalData: {
-              sources: bundle.sentimentAnalysis.sources,
-              volume: bundle.sentimentAnalysis.volume
+              sentiment: sentiment.sentiment,
+              overallScore: sentiment.overallScore,
+              sources: {
+                twitter: sentiment.sources?.twitter,
+                reddit: sentiment.sources?.reddit,
+                onchain: sentiment.sources?.onChain,
+                orderBook: sentiment.sources?.orderBook
+              },
+              criticalEvents: sentiment.criticalEvents,
+              whaleAlerts: sentiment.whaleAlerts,
+              tradingSignal: sentiment.tradingSignal
             }
           };
           outputs.push(sentimentOutput);
+          console.log(`💭 Multi-Source Sentiment Tensor: confidence=${confidence.toFixed(3)}, direction=${direction}, magnitude=${magnitude.toFixed(3)}, sentiment=${sentiment.sentiment || 'BASIC'}`);
         } else {
           console.warn('⚠️ Sentiment Analysis validation failed - skipping');
         }
@@ -360,21 +508,44 @@ export class ProductionTensorIntegration {
   }
   
   private estimatePineScriptMagnitude(pineResult: any, currentPrice: number): number {
+    // PREDICTIVE AI: Use actual predicted move from Pine Script analysis
     if (pineResult.predictedMove) {
       return Math.abs(pineResult.predictedMove / 100); // Convert percentage to decimal
     }
     
-    // Estimate based on technical indicators
+    // DYNAMIC PREDICTION based on multiple technical factors
+    // Let the AI analyze the actual market conditions, not hardcoded values
+    let predictedMagnitude = 0;
+    let signals = 0;
+    
+    // RSI-based momentum prediction
     if (pineResult.rsi !== undefined) {
-      if (pineResult.rsi > 80 || pineResult.rsi < 20) {
-        return 0.02; // 2% move expected for extreme RSI
-      }
-      if (pineResult.rsi > 70 || pineResult.rsi < 30) {
-        return 0.015; // 1.5% move expected for high RSI
-      }
+      const rsiDeviation = Math.abs(pineResult.rsi - 50) / 50; // 0-1 scale
+      predictedMagnitude += rsiDeviation * 0.2; // Up to 20% based on RSI extremity
+      signals++;
     }
     
-    return 0.01; // Default 1% expected move
+    // MACD momentum prediction
+    if (pineResult.macd !== undefined && pineResult.macd !== 0) {
+      const macdStrength = Math.min(Math.abs(pineResult.macd) / 100, 0.3); // Cap at 30%
+      predictedMagnitude += macdStrength;
+      signals++;
+    }
+    
+    // Volatility-based prediction
+    if (pineResult.volatility !== undefined) {
+      predictedMagnitude += pineResult.volatility * 0.1; // Volatility contribution
+      signals++;
+    }
+    
+    // If we have signals, use their average; otherwise use market volatility estimate
+    if (signals > 0) {
+      return predictedMagnitude / signals;
+    }
+    
+    // Fallback: Estimate based on recent price action (not hardcoded)
+    // This should be replaced with actual price volatility calculation
+    return 0.02; // Minimal fallback only when no data available
   }
   
   private extractMathIntuitionDirection(mathIntuition: any): number {

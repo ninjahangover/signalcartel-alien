@@ -88,14 +88,8 @@ export class EnhancedMathematicalIntuition {
     let patternResonance = 0;
     
     try {
-      // Use existing mathematical intuition engine
-      const baseAnalysis = await this.baseEngine.analyzeParallel(symbol, {
-        signal,
-        marketData,
-        crossSiteData: marketData.sentiment || {},
-        flowField: marketData.flowField || 0.5,
-        additionalContext: { currentPrice }
-      });
+      // Use existing mathematical intuition engine with correct method
+      const baseAnalysis = await this.baseEngine.runParallelAnalysis(signal, marketData);
       
       if (baseAnalysis?.intuitive) {
         originalIntuition = baseAnalysis.intuitive.overallFeeling || 0.5;
@@ -176,7 +170,8 @@ export class EnhancedMathematicalIntuition {
         balanceInfo.availableBalance,
         pairAdaptedConfidence + balanceInfo.confidenceThresholdAdjustment,
         predictedMove,
-        cashRatio
+        cashRatio,
+        balanceInfo.totalBalance
       );
       
       console.log(`💰 Dynamic position size calculated: $${finalPositionSize.toFixed(2)} (available: $${balanceInfo.availableBalance.toFixed(2)}, cash ratio: ${(cashRatio * 100).toFixed(1)}%)`);
