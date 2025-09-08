@@ -2233,12 +2233,20 @@ export class TensorAIFusionEngine {
       holdScore += 1 / Math.E;
     }
     
-    // Marginal profitability trigger (within 2x commission cost)
+    // 💰 PROFIT MAXIMIZATION: Enhanced margin analysis
     const marginThreshold = this.commissionCost * 2; // 2x commission as margin
-    if (Math.abs(expectedReturn) < marginThreshold) {
-      holdTriggers.push(`marginal profit (${(expectedReturn * 100).toFixed(2)}% vs ${(marginThreshold * 100).toFixed(2)}% threshold)`);
-      // Pure mathematical: stability weight = 1/(2π) (half circle)
-      holdScore += 1 / (2 * Math.PI);
+    const expectedProfit = Math.abs(expectedReturn) - this.commissionCost;
+    
+    if (expectedProfit < marginThreshold) {
+      // Check if waiting could lead to better opportunity
+      const profitOpportunity = this.calculateProfitOpportunity(contributingSystems, expectedReturn);
+      if (profitOpportunity.waitScore > 0.3) {
+        holdTriggers.push(`💰 PROFIT WAIT: Current ${(expectedProfit * 100).toFixed(2)}% profit, ${profitOpportunity.reason}`);
+        holdScore += profitOpportunity.waitScore;
+      } else {
+        holdTriggers.push(`marginal profit (${(expectedReturn * 100).toFixed(2)}% vs ${(marginThreshold * 100).toFixed(2)}% threshold)`);
+        holdScore += 1 / (2 * Math.PI);
+      }
     }
     
     // Dynamic validation strength threshold based on system reliability
@@ -3303,6 +3311,60 @@ export class TensorAIFusionEngine {
     };
     
     return baselines[systemId] || baselines['default'];
+  }
+  
+  /**
+   * 💰 PROFIT MAXIMIZATION: Calculate if waiting could lead to better profit opportunity
+   */
+  private calculateProfitOpportunity(
+    contributingSystems: any[], 
+    currentExpectedReturn: number
+  ): { waitScore: number; reason: string } {
+    let waitScore = 0;
+    let reasons: string[] = [];
+    
+    // Analyze system confidence trends
+    const avgSystemConfidence = contributingSystems.reduce((sum, sys) => sum + sys.confidence, 0) / contributingSystems.length;
+    const highConfidenceSystems = contributingSystems.filter(sys => sys.confidence > 0.8).length;
+    
+    // 💰 PROFIT LOGIC 1: If low confidence but some systems are highly confident, wait for alignment
+    if (avgSystemConfidence < 0.6 && highConfidenceSystems >= 2) {
+      waitScore += 0.4;
+      reasons.push(`${highConfidenceSystems} systems highly confident - wait for alignment`);
+    }
+    
+    // 💰 PROFIT LOGIC 2: Small magnitude might indicate beginning of larger move
+    const avgMagnitude = contributingSystems.reduce((sum, sys) => sum + Math.abs(sys.magnitude), 0) / contributingSystems.length;
+    if (avgMagnitude < 0.02 && Math.abs(currentExpectedReturn) < 0.015) {
+      // Check if this could be start of larger trend
+      const trendingSystems = contributingSystems.filter(sys => sys.systemId.includes('markov') || sys.systemId.includes('mathematical')).length;
+      if (trendingSystems >= 1) {
+        waitScore += 0.3;
+        reasons.push(`small magnitude ${(avgMagnitude * 100).toFixed(1)}% - could be start of larger trend`);
+      }
+    }
+    
+    // 💰 PROFIT LOGIC 3: Recent market volatility suggests waiting for clearer signal
+    const volatilityBonus = this.marketVolatilityCache ? 
+      Object.values(this.marketVolatilityCache).reduce((sum, v) => sum + v, 0) / Object.keys(this.marketVolatilityCache).length : 0.05;
+    if (volatilityBonus > 0.06) { // High volatility
+      waitScore += 0.25;
+      reasons.push(`high volatility ${(volatilityBonus * 100).toFixed(1)}% - wait for clearer signal`);
+    }
+    
+    // 💰 PROFIT LOGIC 4: Commission cost vs expected return ratio suggests waiting
+    const profitToCommissionRatio = Math.abs(currentExpectedReturn) / this.commissionCost;
+    if (profitToCommissionRatio < 3.0) { // Less than 3x commission in profit
+      waitScore += 0.2;
+      reasons.push(`profit-to-commission ratio ${profitToCommissionRatio.toFixed(1)}x - wait for better opportunity`);
+    }
+    
+    const finalReason = reasons.length > 0 ? reasons.join(', ') : 'no clear profit advantage to waiting';
+    
+    return {
+      waitScore: Math.min(1.0, waitScore),
+      reason: finalReason
+    };
   }
 }
 
