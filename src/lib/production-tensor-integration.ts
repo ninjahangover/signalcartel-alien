@@ -204,9 +204,15 @@ export class ProductionTensorIntegration {
         const regimeConsistency = Math.abs(prediction.regimeConsistency || 0);
         const correlationAdjustment = Math.abs(prediction.crossMarketInfluence?.correlationAdjustment || 0);
         
-        // Calculate magnitude from actual Markov analysis (not hardcoded)
+        // Enhanced magnitude calculation using volatility-adjusted predictions
+        const predictedMagnitude = Math.abs(prediction.predictedMagnitude || 0);
+        const volatilityAdjusted = Math.abs(prediction.volatilityAdjustedMagnitude || 0);
+        
+        // Calculate magnitude from enhanced Markov analysis (not hardcoded)
         const magnitude = Math.max(
           Math.abs(expectedReturn),
+          predictedMagnitude,
+          volatilityAdjusted,
           stateStability,
           regimeConsistency,
           correlationAdjustment

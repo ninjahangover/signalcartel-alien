@@ -54,6 +54,11 @@ export interface EnhancedMarkovPrediction {
   transitionRisk: number;          // Risk of unexpected transition
   optimalHoldingPeriod: number;   // Minutes to hold position
   regimeConsistency: number;      // Consistency with market regime
+  
+  // Enhanced magnitude predictions
+  predictedMagnitude: number;     // Expected price move magnitude (%)
+  volatilityAdjustedMagnitude: number; // Magnitude adjusted for current volatility
+  magnitudeConfidence: number;    // Confidence in magnitude prediction
 }
 
 export interface MultiSymbolTransition {
@@ -321,6 +326,9 @@ export class EnhancedMarkovPredictor {
     // Calculate confidence based on sample size and consistency
     const confidence = this.calculatePredictionConfidence(symbol, currentState);
     
+    // Calculate enhanced magnitude predictions
+    const magnitudePrediction = this.calculateMagnitudePredictions(symbol, currentState, mostLikelyNextState, intelligence);
+    
     return {
       symbol,
       currentState,
@@ -337,7 +345,10 @@ export class EnhancedMarkovPredictor {
       stateStability: 0,
       transitionRisk: 0,
       optimalHoldingPeriod: 0,
-      regimeConsistency: 0
+      regimeConsistency: 0,
+      predictedMagnitude: magnitudePrediction.magnitude,
+      volatilityAdjustedMagnitude: magnitudePrediction.volatilityAdjusted,
+      magnitudeConfidence: magnitudePrediction.confidence
     };
   }
   
@@ -710,6 +721,76 @@ export class EnhancedMarkovPredictor {
     if (relativeVolatility < 0.7) return 'low';
     if (relativeVolatility > 1.3) return 'high';
     return 'normal';
+  }
+  
+  /**
+   * Calculate enhanced magnitude predictions based on state transitions and volatility
+   */
+  private calculateMagnitudePredictions(
+    symbol: string,
+    currentState: EnhancedMarketState,
+    nextState: EnhancedMarketState,
+    intelligence: any
+  ): {
+    magnitude: number;
+    volatilityAdjusted: number;
+    confidence: number;
+  } {
+    // Base magnitude from historical state transitions
+    const baseMagnitude = this.getStateTransitionMagnitude(symbol, currentState, nextState);
+    
+    // Current market volatility factor
+    const volatility = intelligence?.volatility || 0.05; // Default 5% volatility
+    
+    // Volatility-adjusted magnitude (higher volatility = larger expected moves)
+    const volatilityMultiplier = 1 + (volatility - 0.05) / 0.05; // Normalize around 5%
+    const volatilityAdjusted = baseMagnitude * Math.max(0.5, Math.min(2.0, volatilityMultiplier));
+    
+    // Confidence based on historical consistency of state transitions
+    const transitionHistory = this.getStateTransitionHistory(symbol, currentState, nextState);
+    const confidence = Math.min(1.0, transitionHistory.length / 10.0); // More history = higher confidence
+    
+    return {
+      magnitude: Math.max(0.001, Math.min(0.20, baseMagnitude)), // 0.1% to 20% range
+      volatilityAdjusted: Math.max(0.001, Math.min(0.30, volatilityAdjusted)), // 0.1% to 30% range
+      confidence: Math.max(0.1, confidence) // Minimum 10% confidence
+    };
+  }
+  
+  /**
+   * Get historical magnitude for specific state transitions
+   */
+  private getStateTransitionMagnitude(symbol: string, fromState: EnhancedMarketState, toState: EnhancedMarketState): number {
+    const history = this.transitionHistories.get(symbol);
+    if (!history) return 0.02; // Default 2% magnitude
+    
+    // Find similar transitions
+    const similarTransitions = history.filter(h => 
+      h.fromState === fromState && h.toState === toState
+    );
+    
+    if (similarTransitions.length === 0) {
+      // Fallback: use any transitions from current state
+      const fallbackTransitions = history.filter(h => h.fromState === fromState);
+      if (fallbackTransitions.length === 0) return 0.02;
+      
+      const avgMagnitude = fallbackTransitions.reduce((sum, t) => sum + Math.abs(t.returnChange), 0) / fallbackTransitions.length;
+      return avgMagnitude;
+    }
+    
+    // Calculate average magnitude for this specific transition
+    const avgMagnitude = similarTransitions.reduce((sum, t) => sum + Math.abs(t.returnChange), 0) / similarTransitions.length;
+    return avgMagnitude;
+  }
+  
+  /**
+   * Get transition history for confidence calculation
+   */
+  private getStateTransitionHistory(symbol: string, fromState: EnhancedMarketState, toState: EnhancedMarketState): any[] {
+    const history = this.transitionHistories.get(symbol);
+    if (!history) return [];
+    
+    return history.filter(h => h.fromState === fromState && h.toState === toState);
   }
 }
 
