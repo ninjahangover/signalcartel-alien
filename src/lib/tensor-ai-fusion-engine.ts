@@ -3038,12 +3038,39 @@ export class TensorAIFusionEngine {
     // Step 7: Select primary timeframe based on AI system analysis
     const primaryTimeframe = this.selectPrimaryTimeframe(fusedConfidence, volatilityProfile.volatilityRegime);
     
-    console.log(`⏰ Multi-Timeframe Analysis Results:`);
-    console.log(`   Primary timeframe: ${primaryTimeframe}`);
+    // 💰 Step 8: PROFIT ENHANCEMENT - Calculate profit-maximizing timeframe strategy
+    const profitEnhancement = this.calculateProfitMaximizingTimeframeStrategy(
+      trendConsistency,
+      volatilityProfile,
+      supportResistance,
+      fusedConfidence,
+      contributingSystems
+    );
+    
+    // 💰 Step 9: PROFIT ENHANCEMENT - Identify optimal entry/exit timing within timeframes
+    const optimalTiming = this.identifyOptimalEntryExitTiming(
+      timeframeData,
+      trendConsistency,
+      supportResistance,
+      currentPrice
+    );
+    
+    // 💰 Step 10: PROFIT ENHANCEMENT - Calculate risk-adjusted profit potential
+    const riskAdjustedProfit = this.calculateRiskAdjustedProfitPotential(
+      timeframeRecommendation,
+      volatilityProfile,
+      supportResistance,
+      fusedMagnitude
+    );
+    
+    console.log(`💰 PROFIT-ENHANCED Multi-Timeframe Analysis Results:`);
+    console.log(`   Primary timeframe: ${primaryTimeframe} (Profit score: ${(profitEnhancement.profitScore * 100).toFixed(1)}%)`);
     console.log(`   Timeframe alignment: ${(timeframeAlignment * 100).toFixed(1)}%`);
     console.log(`   Trend consistency: ST=${trendConsistency.shortTerm.toFixed(2)}, MT=${trendConsistency.mediumTerm.toFixed(2)}, LT=${trendConsistency.longTerm.toFixed(2)}`);
-    console.log(`   Volatility regime: ${volatilityProfile.volatilityRegime}`);
+    console.log(`   Volatility regime: ${volatilityProfile.volatilityRegime} (Risk-adjusted profit: ${(riskAdjustedProfit.expectedProfit * 100).toFixed(2)}%)`);
     console.log(`   Optimal approach: ${timeframeRecommendation.holdingPeriod} (${timeframeRecommendation.optimalTimeframe})`);
+    console.log(`   💰 PROFIT TIMING: ${optimalTiming.timing} - ${optimalTiming.reason}`);
+    console.log(`   💰 PROFIT STRATEGY: ${profitEnhancement.strategy} (${profitEnhancement.reasoning})`);
     
     return {
       primaryTimeframe,
@@ -3051,7 +3078,11 @@ export class TensorAIFusionEngine {
       trendConsistency,
       volatilityProfile,
       supportResistance,
-      timeframeRecommendation
+      timeframeRecommendation,
+      // 💰 PROFIT ENHANCEMENT additions
+      profitEnhancement,
+      optimalTiming,
+      riskAdjustedProfit
     };
   }
 
@@ -3448,6 +3479,237 @@ export class TensorAIFusionEngine {
       reason: finalReason,
       exitScore: Math.min(1.0, exitScore),
       urgency
+    };
+  }
+
+  /**
+   * 💰 PROFIT ENHANCEMENT: Calculate profit-maximizing timeframe strategy
+   */
+  private calculateProfitMaximizingTimeframeStrategy(
+    trendConsistency: any,
+    volatilityProfile: any,
+    supportResistance: any,
+    fusedConfidence: number,
+    contributingSystems: AISystemOutput[]
+  ): {
+    profitScore: number;
+    strategy: 'AGGRESSIVE_SCALP' | 'MOMENTUM_RIDE' | 'BREAKOUT_HUNT' | 'SWING_CAPTURE';
+    reasoning: string;
+    expectedHoldTime: string;
+  } {
+    let profitScore = 0;
+    let strategy: 'AGGRESSIVE_SCALP' | 'MOMENTUM_RIDE' | 'BREAKOUT_HUNT' | 'SWING_CAPTURE';
+    const reasons: string[] = [];
+    
+    // 💰 PROFIT LOGIC 1: High volatility + high confidence = aggressive scalping opportunities
+    if (volatilityProfile.volatilityRegime === 'HIGH' && fusedConfidence > 0.8 && trendConsistency.shortTerm > 0.6) {
+      strategy = 'AGGRESSIVE_SCALP';
+      profitScore += 0.4;
+      reasons.push(`high volatility (${volatilityProfile.volatilityRegime}) + ${(fusedConfidence * 100).toFixed(1)}% confidence perfect for scalping`);
+    }
+    // 💰 PROFIT LOGIC 2: Strong trend consistency across timeframes = momentum riding
+    else if (trendConsistency.overallAlignment > 0.7 && (trendConsistency.mediumTerm > 0.5 || trendConsistency.longTerm > 0.5)) {
+      strategy = 'MOMENTUM_RIDE';
+      profitScore += 0.35;
+      reasons.push(`${(trendConsistency.overallAlignment * 100).toFixed(1)}% trend alignment enables momentum capture`);
+    }
+    // 💰 PROFIT LOGIC 3: Near support/resistance with strong AI consensus = breakout hunting
+    else if (Math.abs(supportResistance.nearestSupport - supportResistance.nearestResistance) < 0.05 && 
+             contributingSystems.length >= 5 && fusedConfidence > 0.7) {
+      strategy = 'BREAKOUT_HUNT';
+      profitScore += 0.45;
+      reasons.push(`${contributingSystems.length} AI systems agree near key levels - breakout potential`);
+    }
+    // 💰 PROFIT LOGIC 4: Lower volatility with long-term trend = swing capture
+    else {
+      strategy = 'SWING_CAPTURE';
+      profitScore += 0.25;
+      reasons.push('stable conditions suitable for swing profit capture');
+    }
+    
+    // 💰 PROFIT BONUS: Multiple high-confidence systems increase profit potential
+    const highConfidenceSystems = contributingSystems.filter(sys => sys.confidence > 0.8).length;
+    if (highConfidenceSystems >= 4) {
+      profitScore += 0.15;
+      reasons.push(`${highConfidenceSystems} high-confidence systems boost profit potential`);
+    }
+    
+    // 💰 PROFIT BONUS: Volatility trend alignment
+    if (volatilityProfile.volatilityTrend === 'INCREASING' && strategy === 'AGGRESSIVE_SCALP') {
+      profitScore += 0.1;
+      reasons.push('increasing volatility perfect for scalping profits');
+    } else if (volatilityProfile.volatilityTrend === 'DECREASING' && strategy === 'SWING_CAPTURE') {
+      profitScore += 0.1;
+      reasons.push('decreasing volatility ideal for swing profits');
+    }
+    
+    // Expected hold times for profit maximization
+    const expectedHoldTime = strategy === 'AGGRESSIVE_SCALP' ? '1-5 minutes' :
+                           strategy === 'MOMENTUM_RIDE' ? '15-60 minutes' :
+                           strategy === 'BREAKOUT_HUNT' ? '5-30 minutes' :
+                           '2-8 hours'; // SWING_CAPTURE
+    
+    return {
+      profitScore: this.validateRealNumber(Math.min(1.0, profitScore), 'profit_score'),
+      strategy,
+      reasoning: reasons.join(', '),
+      expectedHoldTime
+    };
+  }
+
+  /**
+   * 💰 PROFIT ENHANCEMENT: Identify optimal entry/exit timing within timeframes
+   */
+  private identifyOptimalEntryExitTiming(
+    timeframeData: any,
+    trendConsistency: any,
+    supportResistance: any,
+    currentPrice: number
+  ): {
+    timing: 'IMMEDIATE' | 'WAIT_PULLBACK' | 'WAIT_BREAKOUT' | 'WAIT_CONFIRMATION';
+    reason: string;
+    confidence: number;
+    targetEntry?: number;
+    targetExit?: number;
+  } {
+    const reasons: string[] = [];
+    let timing: 'IMMEDIATE' | 'WAIT_PULLBACK' | 'WAIT_BREAKOUT' | 'WAIT_CONFIRMATION';
+    let confidence = 0.5;
+    let targetEntry: number | undefined;
+    let targetExit: number | undefined;
+    
+    // Distance to nearest support/resistance levels
+    const distanceToSupport = Math.abs(currentPrice - supportResistance.nearestSupport) / currentPrice;
+    const distanceToResistance = Math.abs(currentPrice - supportResistance.nearestResistance) / currentPrice;
+    
+    // 💰 PROFIT TIMING 1: Near strong support with upward trend = immediate entry
+    if (distanceToSupport < 0.015 && // Within 1.5% of support
+        supportResistance.supportStrength > 0.7 && 
+        trendConsistency.shortTerm > 0.3) {
+      timing = 'IMMEDIATE';
+      confidence = 0.8;
+      targetEntry = currentPrice;
+      targetExit = supportResistance.nearestResistance * 0.98; // Exit slightly below resistance
+      reasons.push(`strong support bounce opportunity - ${(distanceToSupport * 100).toFixed(1)}% from support`);
+    }
+    // 💰 PROFIT TIMING 2: Strong trends but overextended = wait for pullback
+    else if (trendConsistency.overallAlignment > 0.6 && 
+             (distanceToSupport > 0.03 && distanceToResistance > 0.03)) {
+      timing = 'WAIT_PULLBACK';
+      confidence = 0.7;
+      targetEntry = trendConsistency.shortTerm > 0 ? 
+                   currentPrice * 0.985 : // Long pullback target
+                   currentPrice * 1.015;  // Short pullback target
+      reasons.push(`strong trend but overextended - wait for ${((1 - (targetEntry! / currentPrice)) * 100).toFixed(1)}% pullback`);
+    }
+    // 💰 PROFIT TIMING 3: Near resistance with weak confidence = wait for breakout confirmation
+    else if (distanceToResistance < 0.02 && 
+             supportResistance.resistanceStrength > 0.6 && 
+             trendConsistency.shortTerm > 0.2) {
+      timing = 'WAIT_BREAKOUT';
+      confidence = 0.75;
+      targetEntry = supportResistance.nearestResistance * 1.005; // Enter above resistance
+      targetExit = supportResistance.nearestResistance * 1.035; // 3.5% above resistance
+      reasons.push(`breakout setup - enter above ${(supportResistance.nearestResistance).toFixed(2)} resistance`);
+    }
+    // 💰 PROFIT TIMING 4: Mixed signals = wait for confirmation
+    else {
+      timing = 'WAIT_CONFIRMATION';
+      confidence = 0.6;
+      reasons.push(`mixed signals - wait for clearer profit opportunity`);
+    }
+    
+    // 💰 PROFIT BONUS: Volatility consideration for timing
+    const volatilityFactor = timeframeData['5m']?.volatility || 0.02;
+    if (volatilityFactor > 0.04 && timing === 'IMMEDIATE') {
+      confidence += 0.1; // High volatility increases immediate entry confidence
+      reasons.push(`${(volatilityFactor * 100).toFixed(1)}% volatility supports immediate action`);
+    }
+    
+    return {
+      timing,
+      reason: reasons.join(', '),
+      confidence: this.validateRealNumber(confidence, 'timing_confidence'),
+      targetEntry,
+      targetExit
+    };
+  }
+
+  /**
+   * 💰 PROFIT ENHANCEMENT: Calculate risk-adjusted profit potential across timeframes
+   */
+  private calculateRiskAdjustedProfitPotential(
+    timeframeRecommendation: any,
+    volatilityProfile: any,
+    supportResistance: any,
+    fusedMagnitude: number
+  ): {
+    expectedProfit: number;
+    riskAdjustedReturn: number;
+    sharpeEstimate: number;
+    maxDrawdownRisk: number;
+    profitProbability: number;
+  } {
+    // Base profit calculation from fused magnitude
+    let expectedProfit = Math.abs(fusedMagnitude);
+    
+    // 💰 PROFIT CALCULATION 1: Timeframe-specific profit adjustments
+    if (timeframeRecommendation.holdingPeriod === 'SCALP') {
+      expectedProfit *= 0.8; // Lower per-trade profit but higher frequency
+    } else if (timeframeRecommendation.holdingPeriod === 'SWING') {
+      expectedProfit *= 1.3; // Higher profit potential for longer holds
+    }
+    
+    // 💰 PROFIT CALCULATION 2: Volatility regime profit scaling
+    const volatilityMultiplier = {
+      'LOW': 0.7,     // Lower volatility = lower profit potential
+      'NORMAL': 1.0,  // Baseline
+      'HIGH': 1.4,    // Higher volatility = higher profit potential
+      'EXTREME': 1.8  // Extreme volatility = extreme profits (with higher risk)
+    }[volatilityProfile.volatilityRegime] || 1.0;
+    
+    expectedProfit *= volatilityMultiplier;
+    
+    // 💰 PROFIT CALCULATION 3: Support/resistance distance profit scaling
+    const supportResistanceRange = Math.abs(supportResistance.nearestResistance - supportResistance.nearestSupport) / 
+                                 ((supportResistance.nearestResistance + supportResistance.nearestSupport) / 2);
+    const rangeMultiplier = Math.min(2.0, Math.max(0.5, supportResistanceRange * 20)); // 0.5x to 2.0x based on range
+    expectedProfit *= rangeMultiplier;
+    
+    // 💰 RISK CALCULATION 1: Maximum drawdown estimation
+    const maxDrawdownRisk = volatilityProfile.currentVolatility * 1.5; // 1.5x volatility as max drawdown estimate
+    
+    // 💰 RISK CALCULATION 2: Risk-adjusted return (Profit/Risk ratio)
+    const riskAdjustedReturn = expectedProfit / Math.max(maxDrawdownRisk, 0.01); // Avoid division by zero
+    
+    // 💰 RISK CALCULATION 3: Sharpe ratio estimate (using mathematical approximation)
+    // Assuming risk-free rate ≈ 0.02 (2%) and using volatility as risk measure
+    const sharpeEstimate = (expectedProfit - 0.02) / Math.max(volatilityProfile.currentVolatility, 0.01);
+    
+    // 💰 PROFIT PROBABILITY: Based on timeframe recommendation confidence and market conditions
+    let profitProbability = timeframeRecommendation.confidence * 0.7; // Base from timeframe confidence
+    
+    // Volatility regime adjustments
+    if (volatilityProfile.volatilityRegime === 'NORMAL') profitProbability += 0.1;
+    else if (volatilityProfile.volatilityRegime === 'EXTREME') profitProbability -= 0.15;
+    
+    // Support/resistance strength adjustments
+    const avgLevelStrength = (supportResistance.supportStrength + supportResistance.resistanceStrength) / 2;
+    profitProbability += (avgLevelStrength - 0.5) * 0.2; // ±0.1 adjustment based on level strength
+    
+    // Mathematical bounds: Keep values in realistic ranges
+    expectedProfit = this.validateRealNumber(Math.max(0, Math.min(0.20, expectedProfit)), 'expected_profit'); // Max 20%
+    maxDrawdownRisk = this.validateRealNumber(Math.max(0.005, Math.min(0.15, maxDrawdownRisk)), 'max_drawdown'); // 0.5% to 15%
+    riskAdjustedReturn = this.validateRealNumber(Math.max(0, Math.min(10, riskAdjustedReturn)), 'risk_adjusted_return'); // Max 10:1 ratio
+    sharpeEstimate = this.validateRealNumber(Math.max(-3, Math.min(5, sharpeEstimate)), 'sharpe_estimate'); // -3 to 5 range
+    profitProbability = this.validateRealNumber(Math.max(0.1, Math.min(0.95, profitProbability)), 'profit_probability'); // 10% to 95%
+    
+    return {
+      expectedProfit,
+      riskAdjustedReturn,
+      sharpeEstimate,
+      maxDrawdownRisk,
+      profitProbability
     };
   }
 }
