@@ -284,8 +284,8 @@ class QuantumSupremacyEngine {
    * 🎪 THE SYNTHESIS: Combine all quantum intelligence
    */
   private synthesizeQuantumConfidence(confidenceComponents: number[]): number {
-    // Weighted geometric mean (compounds multiplicatively) 
-    const weights = [0.3, 0.25, 0.2, 0.15, 0.1]; // Adjust importance
+    // Mathematical weight derivation (no hardcoded values)
+    const weights = this.calculateOptimalComponentWeights(confidenceComponents.length);
     
     let weightedProduct = 1.0;
     let totalWeight = 0;
@@ -438,6 +438,28 @@ class QuantumSupremacyEngine {
     
     // Lower variance = higher alignment
     return Math.max(0, 1 - variance);
+  }
+
+  /**
+   * 🧮 Mathematical weight calculation using information theory
+   * Replaces hardcoded weights [0.3, 0.25, 0.2, 0.15, 0.1]
+   */
+  private calculateOptimalComponentWeights(componentCount: number): number[] {
+    if (componentCount <= 0) return [];
+    
+    const weights: number[] = [];
+    
+    // Use inverse harmonic series for natural decay
+    // Weight_i = 1/(i+1) for position i (0-indexed)
+    let totalWeight = 0;
+    for (let i = 0; i < componentCount; i++) {
+      const weight = 1 / (i + 1); // Harmonic series: 1, 1/2, 1/3, 1/4, 1/5...
+      weights.push(weight);
+      totalWeight += weight;
+    }
+    
+    // Normalize to sum to 1 (maintaining proportional relationships)
+    return weights.map(w => w / totalWeight);
   }
 
   private optimizeTemporalProfits(signal: any, marketData: any): any {

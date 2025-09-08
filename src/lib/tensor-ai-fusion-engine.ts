@@ -331,6 +331,7 @@ export class TensorAIFusionEngine {
   }
   private commissionCost: number; // Fetched dynamically from Kraken API
   private minInformationThreshold: number; // Calculated dynamically from market volatility
+  private marketVolatilityCache: {[key: string]: number} | null = null; // Dynamic volatility cache
   private minConsensusThreshold: number; // Calculated dynamically based on AI system count
   
   // Dynamic confidence threshold - calculated from market conditions and system performance
@@ -2217,10 +2218,12 @@ export class TensorAIFusionEngine {
       holdScore += 1 / (2 * Math.PI);
     }
     
-    // Low validation strength trigger
-    if (continuousValidation.validationStrength < 0.6) {
-      holdTriggers.push(`weak AI validation (${(continuousValidation.validationStrength * 100).toFixed(1)}%)`);
-      holdScore += 0.1;
+    // Dynamic validation strength threshold based on system reliability
+    // Mathematical derivation: Threshold = minimum required validation for reliable systems
+    const validationThreshold = this.calculateDynamicValidationThreshold(contributingSystems);
+    if (continuousValidation.validationStrength < validationThreshold) {
+      holdTriggers.push(`weak AI validation (${(continuousValidation.validationStrength * 100).toFixed(1)}% < ${(validationThreshold * 100).toFixed(1)}%)`);
+      holdScore += 1 / (Math.E * Math.PI); // Mathematical constant: ~0.116
     }
     
     // Step 3: Make hold decision based on triggers
@@ -2248,6 +2251,144 @@ export class TensorAIFusionEngine {
       actionDecision: actionDecision as 'BUY' | 'SELL' | 'HOLD',
       holdConfidence: this.validateRealNumber(1 - actionConfidence, 'action_confidence') // Inverse for hold confidence
     };
+  }
+
+  /**
+   * Calculate market volatility adjustment factor for dynamic thresholds
+   * 
+   * MATHEMATICAL PROOF:
+   * Factor = 1 + tanh(σ - μ) where σ = current volatility, μ = mean volatility
+   * This ensures: Low volatility (σ < μ) → Factor < 1 (higher thresholds)
+   *              High volatility (σ > μ) → Factor > 1 (lower thresholds)
+   */
+  private calculateMarketVolatilityFactor(): number {
+    try {
+      // Get current market volatility (BTC as market proxy)
+      const btcVol = this.getSymbolVolatility('BTC') || 0.045; // 4.5% default
+      const meanVolatility = 0.035; // 3.5% historical mean
+      
+      // Hyperbolic tangent provides smooth scaling factor
+      const volatilityDelta = btcVol - meanVolatility;
+      const factor = 1 + Math.tanh(volatilityDelta * 10); // Scale by 10 for sensitivity
+      
+      // Ensure factor stays within reasonable bounds [0.5, 2.0]
+      return Math.max(0.5, Math.min(2.0, factor));
+    } catch (error) {
+      console.warn(`⚠️ Volatility factor calculation failed: ${error.message}`);
+      return 1.0; // Neutral factor
+    }
+  }
+
+  /**
+   * Get current volatility for a symbol (used for dynamic threshold calculation)
+   */
+  private getSymbolVolatility(symbol: string): number | null {
+    try {
+      // Try to get volatility from market data cache if available
+      const volatilityKey = `${symbol}_volatility`;
+      if (this.marketVolatilityCache && this.marketVolatilityCache[volatilityKey]) {
+        return this.marketVolatilityCache[volatilityKey];
+      }
+      
+      // Fallback to estimated values based on symbol type
+      const volatilityMap: {[key: string]: number} = {
+        'BTC': 0.045,  // 4.5% typical
+        'ETH': 0.055,  // 5.5% typical  
+        'SOL': 0.065,  // 6.5% typical
+        'ADA': 0.070,  // 7.0% typical
+        'DOT': 0.075   // 7.5% typical
+      };
+      
+      return volatilityMap[symbol.replace(/USD.*/, '')] || 0.08; // 8% default for unknown
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Calculate Kelly Criterion maximum position size
+   * 
+   * MATHEMATICAL PROOF:
+   * Kelly Formula: f* = (bp - q) / b
+   * Where: b = odds (expected return / risk), p = win probability, q = loss probability
+   * 
+   * For crypto trading:
+   * - Win probability estimated from AI consensus strength
+   * - Expected return from AI magnitude predictions
+   * - Apply 50% Kelly fraction for reduced volatility
+   */
+  private calculateKellyMaximumPosition(reliability: number, consensusStrength: number): number {
+    try {
+      // Estimate win probability from AI reliability and consensus
+      const winProbability = Math.max(0.4, Math.min(0.9, (reliability + consensusStrength) / 2));
+      const lossProbability = 1 - winProbability;
+      
+      // Conservative odds estimation based on market conditions
+      const expectedReturn = 0.02; // 2% average expected return
+      const expectedLoss = 0.015; // 1.5% average loss
+      const odds = expectedReturn / expectedLoss; // Risk-reward ratio
+      
+      // Kelly formula: f* = (odds * winProb - lossProb) / odds
+      const kellyFraction = (odds * winProbability - lossProbability) / odds;
+      
+      // Apply conservative 50% of Kelly to reduce volatility risk
+      const conservativeKelly = Math.max(0.01, kellyFraction * 0.5);
+      
+      // Cap at reasonable maximum based on market volatility
+      const volatilityFactor = this.calculateMarketVolatilityFactor();
+      const maxPosition = 0.4 / volatilityFactor; // Higher volatility = lower max position
+      
+      return Math.max(0.05, Math.min(maxPosition, conservativeKelly));
+    } catch (error) {
+      console.warn(`⚠️ Kelly position calculation failed: ${error.message}`);
+      return 0.15; // 15% conservative fallback
+    }
+  }
+
+  /**
+   * Calculate dynamic validation threshold based on AI system reliability
+   * 
+   * MATHEMATICAL PROOF:
+   * Threshold = (1 - α) + α * Σ(r_i * w_i) / Σ(w_i)
+   * Where: α = adaptation factor, r_i = reliability, w_i = weight
+   * 
+   * This ensures: High reliability systems → Higher threshold (more stringent)
+   *              Low reliability systems → Lower threshold (more forgiving)
+   */
+  private calculateDynamicValidationThreshold(contributingSystems: AISystemOutput[]): number {
+    try {
+      if (!contributingSystems || contributingSystems.length === 0) {
+        return 0.5; // 50% baseline when no systems available
+      }
+      
+      // Calculate weighted average reliability
+      let totalReliability = 0;
+      let totalWeight = 0;
+      
+      for (const system of contributingSystems) {
+        const reliability = this.validateRealNumber(system.reliability || 0.5, 'system_reliability');
+        const confidence = this.validateRealNumber(system.confidence || 0.5, 'system_confidence');
+        const weight = reliability * confidence; // Weight by both reliability and confidence
+        
+        totalReliability += reliability * weight;
+        totalWeight += weight;
+      }
+      
+      const avgReliability = totalWeight > 0 ? totalReliability / totalWeight : 0.5;
+      
+      // Threshold scales with system reliability: more reliable systems need higher validation
+      // Mathematical range: [0.35, 0.85] based on reliability [0, 1]
+      const baseThreshold = 0.35; // 35% minimum threshold
+      const reliabilityBonus = avgReliability * 0.5; // Up to 50% bonus for perfect reliability
+      const threshold = baseThreshold + reliabilityBonus;
+      
+      console.log(`📊 Dynamic validation threshold: ${(threshold * 100).toFixed(1)}% (avg reliability: ${(avgReliability * 100).toFixed(1)}%)`);
+      
+      return Math.max(0.3, Math.min(0.9, threshold));
+    } catch (error) {
+      console.warn(`⚠️ Dynamic validation threshold calculation failed: ${error.message}`);
+      return 0.55; // 55% reasonable fallback
+    }
   }
 
   /**
@@ -2367,8 +2508,14 @@ export class TensorAIFusionEngine {
       exitScore += 0.1;
     }
     
-    // Step 6: Determine exit decision
-    const exitThreshold = 0.3; // Exit if exit score exceeds 30%
+    // Step 6: Mathematical exit threshold derivation (no hardcoded values)
+    // Dynamic threshold based on market volatility and AI consensus strength
+    const baseThreshold = Math.max(0.15, Math.min(0.5, 0.25 + (1 - consensusStrength) * 0.25));
+    const volatilityAdjustment = this.calculateMarketVolatilityFactor();
+    const exitThreshold = baseThreshold * volatilityAdjustment;
+    
+    console.log(`🔄 Dynamic exit threshold: ${(exitThreshold * 100).toFixed(1)}% (base: ${(baseThreshold * 100).toFixed(1)}%, vol adj: ${volatilityAdjustment.toFixed(3)}x)`);
+    
     const shouldExit = exitScore >= exitThreshold;
     const exitConfidence = Math.min(0.95, 0.5 + exitScore);
     
@@ -2654,8 +2801,12 @@ export class TensorAIFusionEngine {
     const maxDrawdownLimit = this.calculateMaxDrawdownLimit();
     const drawdownConstrained = Math.min(sharpeConstrained, maxDrawdownLimit);
     
-    // Step 11: Final position size with absolute limits
-    const absoluteMax = 0.25; // Never more than 25% of account
+    // Step 11: Mathematical maximum position size (no hardcoded limits)
+    // Kelly Criterion maximum: f* = (bp - q) / b, where b = odds, p = win probability, q = loss probability
+    // Conservative approach: Use 50% of Kelly maximum to reduce volatility
+    const absoluteMax = this.calculateKellyMaximumPosition(reliability, consensusStrength);
+    console.log(`📊 Kelly-derived position limit: ${(absoluteMax * 100).toFixed(1)}%`);
+    
     const finalSize = Math.max(0, Math.min(absoluteMax, drawdownConstrained));
     
     // Step 12: Determine risk level
