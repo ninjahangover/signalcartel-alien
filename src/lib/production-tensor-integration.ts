@@ -44,6 +44,7 @@ export interface TensorTradingDecision {
   expectedMove: number;
   positionSize: number;
   expectedPnL: number;
+  expectedReturn: number;
   
   // Mathematical details
   fusedDecision: FusedDecision;
@@ -444,6 +445,7 @@ export class ProductionTensorIntegration {
       expectedMove: fusedDecision.fusedMagnitude,
       positionSize: fusedDecision.positionSize,
       expectedPnL: fusedDecision.expectedReturn,
+      expectedReturn: fusedDecision.expectedReturn, // Critical: Make the expected return accessible
       
       fusedDecision,
       aiSystemsUsed: aiOutputs.map(ai => ai.systemId)

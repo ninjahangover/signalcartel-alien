@@ -153,11 +153,26 @@ export class EnhancedMathematicalIntuition {
     // Store prediction for accuracy tracking
     this.storePrediction(symbol, pairAdaptedConfidence, predictedMove);
     
-    // Recalculate shouldTrade based on corrected confidence and move
-    const correctedShouldTrade = pairAdaptedConfidence > 0 && Math.abs(predictedMove) >= 0.780; // Commission threshold
+    // 🚀 PROACTIVE TENSOR PREDICTIONS: Leverage mathematical prediction strength
+    // Enable worthwhile risk-taking when tensor mathematics shows strong signals
+    let moveThreshold = 0.2; // Base 0.2% minimum move
+    let confidenceThreshold = 25; // Base confidence threshold
+    
+    // BREAKTHROUGH: Lower thresholds for high-quality mathematical predictions
+    if (pairAdaptedConfidence > 60) {
+      // Strong mathematical confidence - be more aggressive
+      moveThreshold *= 0.6; // Reduce to 0.12% for high-confidence predictions
+      confidenceThreshold = 20; // Lower confidence requirement
+    } else if (pairAdaptedConfidence > 45) {
+      // Moderate confidence - somewhat more aggressive
+      moveThreshold *= 0.8; // Reduce to 0.16% for moderate-confidence predictions
+      confidenceThreshold = 22;
+    }
+    
+    const correctedShouldTrade = pairAdaptedConfidence > confidenceThreshold && Math.abs(predictedMove) >= moveThreshold;
     const correctedReason = correctedShouldTrade 
       ? `Enhanced confidence: ${pairAdaptedConfidence.toFixed(1)}%, predicted move: ${predictedMove.toFixed(3)}%`
-      : `Insufficient edge: confidence ${pairAdaptedConfidence.toFixed(1)}% or move ${Math.abs(predictedMove).toFixed(3)}% < required 0.780%`;
+      : `Insufficient edge: confidence ${pairAdaptedConfidence.toFixed(1)}% or move ${Math.abs(predictedMove).toFixed(3)}% < required ${moveThreshold.toFixed(1)}%`;
     
     console.log(`🔧 Trade decision: ${correctedShouldTrade ? 'TRADE' : 'SKIP'} - ${correctedReason}`);
     

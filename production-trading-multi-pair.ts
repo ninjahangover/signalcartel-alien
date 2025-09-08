@@ -1582,17 +1582,75 @@ class ProductionTradingEngine {
         
         const aiAnalysis = await this.shouldTrade(data, currentPhase);
         
+        // 🧮 TENSOR FUSION AS PRIMARY AUTHORITY - Integrate all AI intelligence
+        // Instead of committee voting, tensor fusion synthesizes all AI systems into one decision
+        if (aiAnalysis.tensorDecision && aiAnalysis.tensorDecision.shouldTrade) {
+          const tensorReturnPercent = (aiAnalysis.tensorDecision.expectedReturn || 0) * 100;
+          const tensorConfidencePercent = (aiAnalysis.tensorDecision.confidence || 0) * 100;
+          
+          // 🎯 DYNAMIC PROFIT THRESHOLD - Based on market intelligence
+          const commissionCost = 0.42; // Kraken commission
+          const marketVolatility = Math.abs(data.price_change_24h || 0);
+          const dynamicReturnThreshold = Math.max(
+            commissionCost * 2.5, // Minimum: 2.5x commission cost
+            marketVolatility * 0.3, // Or 30% of daily volatility  
+            0.8 // Absolute minimum 0.8%
+          );
+          const dynamicConfidenceThreshold = Math.max(
+            25, // Minimum 25%
+            50 - (marketVolatility * 2), // Higher volatility = lower confidence needed
+            Math.min(70, tensorConfidencePercent * 0.6) // Adaptive to tensor's confidence
+          );
+          
+          if (tensorReturnPercent >= dynamicReturnThreshold && tensorConfidencePercent >= dynamicConfidenceThreshold) {
+            log(`🧮 TENSOR MATHEMATICAL PROOF: ${data.symbol} - ${tensorReturnPercent.toFixed(2)}% expected return, ${tensorConfidencePercent.toFixed(1)}% confidence`);
+            log(`📊 Market Analysis: Return threshold ${dynamicReturnThreshold.toFixed(2)}%, Confidence threshold ${dynamicConfidenceThreshold.toFixed(1)}% (volatility: ${marketVolatility.toFixed(2)}%)`);
+            
+            // 🎯 TENSOR INCLUDES ALL AI INTELLIGENCE - V₂-V₇ systems already integrated
+            log(`🧠 AI Systems Consensus: ${aiAnalysis.tensorDecision.aiSystemsUsed.join(', ')} - Mathematical proof validated`);
+            
+            // Tensor fusion already incorporates adaptive learning, so proceed with integrated decision
+            aiAnalysis.shouldTrade = true;
+            
+          } else {
+            log(`📊 TENSOR ANALYSIS: ${data.symbol} - Mathematical proof insufficient (Return: ${tensorReturnPercent.toFixed(2)}%, Confidence: ${tensorConfidencePercent.toFixed(1)}%)`);
+            continue; // Mathematical proof requires higher standards
+          }
+        } else if (!aiAnalysis.tensorDecision) {
+          log(`⚠️ No tensor fusion available for ${data.symbol} - falling back to individual AI systems`);
+          // Continue to individual AI system evaluation below
+        } else {
+          // Tensor mathematical proof says don't trade
+          log(`🧮 TENSOR PROOF: ${data.symbol} - Mathematical analysis recommends SKIP`);
+          continue;
+        }
+        
         if (aiAnalysis.shouldTrade) {
-          // 🧠 ADAPTIVE LEARNING SYSTEM - Check signal recommendation before proceeding
+          // 🧮 TENSOR FUSION INTEGRATES ALL AI INTELLIGENCE
+          // Tensor fusion already includes V₂-V₇ systems + adaptive learning insights
           const signal = aiAnalysis.signal || {};
+          
+          // 🧠 ADAPTIVE LEARNING SYSTEM - Provides insights to enhance tensor decisions
           const adaptiveRecommendation = adaptiveSignalLearning.getSignalRecommendation(
             data.symbol, 
             signal.action || 'BUY'
           );
           
-          if (!adaptiveRecommendation.shouldTrade) {
-            log(`🚫 ADAPTIVE LEARNING BLOCKED: ${data.symbol} - ${adaptiveRecommendation.reason}`);
-            continue; // Skip this pair and move to next
+          // 🧮 TENSOR OVERRIDE AUTHORITY - Final decision power over committee
+          if (aiAnalysis.tensorDecision?.shouldTrade) {
+            // TENSOR MATHEMATICAL PROOF can override committee blocks
+            if (!adaptiveRecommendation.shouldTrade) {
+              log(`🧮 TENSOR OVERRIDE: Mathematical proof overrides adaptive learning concerns`);
+              log(`📊 Adaptive Concerns: ${adaptiveRecommendation.reason} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
+              log(`🎯 Tensor Decision: Proceeding based on mathematical proof of profitability`);
+            } else {
+              log(`🧮 TENSOR & ADAPTIVE CONSENSUS: Both systems agree on ${data.symbol} trade`);
+              log(`📊 Adaptive Support: ${adaptiveRecommendation.reason} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
+            }
+          } else if (!adaptiveRecommendation.shouldTrade) {
+            // No tensor override available, respect adaptive learning
+            log(`🚫 ADAPTIVE LEARNING BLOCK: ${data.symbol} - ${adaptiveRecommendation.reason} (No tensor override)`);
+            continue;
           }
           
           // Log adaptive learning insights
@@ -2125,6 +2183,7 @@ class ProductionTradingEngine {
           direction: 'NEUTRAL',
           expectedMove: 0,
           positionSize: 0,
+          expectedReturn: 0, // Critical: Add expected return field
           aiSystemsUsed: ['emergency-fallback'],
           reasoning: `Emergency fallback due to tensor integration error: ${error.message}`
         };
@@ -2141,10 +2200,10 @@ class ProductionTradingEngine {
       const safeDecision = {
         shouldTrade: Boolean(tensorDecision?.shouldTrade) || false,
         confidence: typeof tensorDecision?.confidence === 'number' ? tensorDecision.confidence : 0,
-        signal: tensorDecision || { shouldTrade: false, confidence: 0, direction: 'NEUTRAL' },
+        signal: tensorDecision || { shouldTrade: false, confidence: 0, direction: 'NEUTRAL', expectedReturn: 0 },
         aiSystems: Array.isArray(tensorDecision?.aiSystemsUsed) ? tensorDecision.aiSystemsUsed : ['error-fallback'],
-        enhancedAnalysis: tensorDecision || { confidence: 0, direction: 'NEUTRAL' },
-        tensorDecision: tensorDecision || { shouldTrade: false, confidence: 0, direction: 'NEUTRAL', reasoning: 'Error fallback' }
+        enhancedAnalysis: tensorDecision || { confidence: 0, direction: 'NEUTRAL', expectedReturn: 0 },
+        tensorDecision: tensorDecision || { shouldTrade: false, confidence: 0, direction: 'NEUTRAL', expectedReturn: 0, reasoning: 'Error fallback' }
       };
       
       return safeDecision;
