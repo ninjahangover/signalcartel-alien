@@ -454,12 +454,14 @@ class ProductionTradingEngine {
         return this.executePureAITensorFusion(marketData, phase);
       }
       
+      // ⚠️ LEGACY PHASE SYSTEM - DEPRECATED IN FAVOR OF TENSOR FUSION
+      // Pine Script integration commented out - use TENSOR_MODE for pure AI
       let confidence = 0;
       let aiSystemsUsed: string[] = [];
       let enhancedSignal: any = null;
       
       // 🧠 AI OPTIMIZATION 1: Enhanced Markov Chain Analysis
-      // AI enhances Pine Script decisions for better market timing
+      // [DEPRECATED] Previously enhanced Pine Script decisions - now tensor fusion handles this
       let markovAnalysis: any = null;
       try {
         // Use fresh instance
@@ -526,16 +528,16 @@ class ProductionTradingEngine {
         );
         log(`🔮 MARKOV ENTRY: State ${markovAnalysis.currentState}, Expected Return: ${(markovAnalysis.expectedReturn * 100).toFixed(2)}%`);
         
-        // AI ENHANCEMENT: Boost Pine Script confidence if Markov confirms direction
+        // [DEPRECATED] Previously enhanced Pine Script with Markov - now tensor fusion handles this
         if (confidence > 0 && markovAnalysis.expectedReturn > 0) {
           const markovBoost = Math.min(0.2, markovAnalysis.confidence * markovAnalysis.expectedReturn * 2); // Max 20% boost
           confidence += markovBoost;
-          log(`🚀 AI BOOST: Markov chains CONFIRM Pine Script - boosting confidence by ${(markovBoost * 100).toFixed(1)}%`);
+          log(`🚀 AI BOOST: Markov chains CONFIRM technical signal - boosting confidence by ${(markovBoost * 100).toFixed(1)}%`);
           aiSystemsUsed.push('quantum-markov-chains');
         } else if (confidence === 0 && markovAnalysis.expectedReturn > 0.01) {
-          // Fallback: Strong Markov signal when Pine Script shows HOLD
+          // Fallback: Strong Markov signal when technical shows HOLD
           confidence = Math.min(0.3, markovAnalysis.confidence * markovAnalysis.expectedReturn * 10);
-          log(`🧠 AI FALLBACK: Strong Markov signal (${(confidence * 100).toFixed(1)}%) when Pine Script = HOLD`);
+          log(`🧠 AI FALLBACK: Strong Markov signal (${(confidence * 100).toFixed(1)}%) when technical = HOLD`);
           aiSystemsUsed.push('quantum-markov-fallback');
         }
       } catch (error) {
@@ -562,18 +564,24 @@ class ProductionTradingEngine {
         confidence += Math.max(0, Math.min(0.4, mathConfidence)); // Max 40% from Math Intuition
         aiSystemsUsed.push('mathematical-intuition');
         
-        // Don't overwrite Pine Script signal - preserve it for Enhanced Intelligence
-        // enhancedSignal = baseSignal; // REMOVED - would overwrite Pine Script confidence
+        // [DEPRECATED] Previously preserved Pine Script signal for Enhanced Intelligence
+        // enhancedSignal = baseSignal; // REMOVED - legacy Pine Script integration
       } catch (error) {
         log(`⚠️ Mathematical Intuition analysis failed: ${error.message}`);
       }
 
-      // Generate REAL Pine Script technical signal (NO MORE RANDOM VALUES!)
-      const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
-      const baseSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(marketData.symbol, marketData.price);
+      // [DEPRECATED] Generate Pine Script technical signal - replaced by tensor fusion
+      // const { quantumForgeSignalGenerator } = await import('./src/lib/quantum-forge-signal-generator');
+      // const baseSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(marketData.symbol, marketData.price);
       
-      // Ensure signal has phase-appropriate strategy name
-      baseSignal.strategy = 'phase-' + phase.phase + '-' + baseSignal.strategy;
+      // Generate fallback signal for legacy phase system (when not using TENSOR_MODE)
+      const baseSignal = {
+        strategy: `phase-${phase.phase}-fallback`,
+        confidence: 0.5,
+        direction: 'HOLD' as const,
+        expectedMove: 0,
+        positionSize: 0
+      };
 
       // 🔥 PHASE 0: Raw signals only (ultra-low barriers)
       if (phase.phase === 0) {
@@ -593,8 +601,8 @@ class ProductionTradingEngine {
           });
           
           confidence = sentimentResult.confidence;
-          // Don't overwrite Pine Script signal for Enhanced Intelligence
-          // enhancedSignal = sentimentResult; // REMOVED - preserve Pine Script confidence
+          // [DEPRECATED] Previously preserved Pine Script signal for Enhanced Intelligence  
+          // enhancedSignal = sentimentResult; // REMOVED - legacy Pine Script integration
           aiSystemsUsed = ['basic-technical', 'fear-greed-sentiment', 'reddit-sentiment'];
           log(`💭 Phase 1: Sentiment-enhanced confidence ${(confidence * 100).toFixed(1)}%`);
         } catch (error) {
