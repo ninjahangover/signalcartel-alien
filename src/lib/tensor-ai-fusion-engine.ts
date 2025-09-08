@@ -1010,9 +1010,10 @@ export class TensorAIFusionEngine {
         markovEnhancedReturn = markovDecision.shouldTrade ? markovDecision.positionSize / 1000 * 0.01 : 0;
         markovTensorMultiplier = markovPrediction.tensorMultiplier || 1.0;
         
-        console.log(`🔮 Markov Decision: ${markovDecision.shouldTrade ? 'TRADE' : 'SKIP'} (${(markovConfidence * 100).toFixed(1)}% confidence, tensor×${markovTensorMultiplier.toFixed(3)})`);
+        // 🧮 MARKOV AS MATHEMATICAL VARIABLE: Contributes tensor multiplier only (no decisions)
+        console.log(`🧮 Markov Variables: confidence=${(markovConfidence * 100).toFixed(1)}%, enhanced_return=${(markovEnhancedReturn * 100).toFixed(2)}%, tensor×${markovTensorMultiplier.toFixed(3)}`);
       } catch (error) {
-        console.warn('⚠️ Markov position sizing failed:', error.message);
+        console.warn('⚠️ Markov mathematical variables failed:', error.message);
         // Even if position sizing fails, use mathematical variables if available
         markovTensorMultiplier = markovPrediction.tensorMultiplier || 1.0;
       }
@@ -1102,25 +1103,20 @@ export class TensorAIFusionEngine {
       reason = `TRADE: ${informationContent.toFixed(1)} bits, ${(coherenceMetrics.consensusStrength * 100).toFixed(1)}% consensus, ${(combinedExpectedReturn * 100).toFixed(2)}% combined net${markovInfo}`;
     }
     
-    // ENHANCED: Calculate continuous AI validation for hold logic
-    const continuousValidation = this.calculateContinuousAIValidation(
-      contributingSystems,
-      coherenceMetrics.consensusStrength,
-      fusedConfidence,
-      markovPrediction
-    );
+    // 🧮 TENSOR FUSION: SINGLE DECISION MAKER - No committee decisions
+    // All AI systems (V₂-V₇) are mathematical variables ONLY
+    // Markov Chain, Mathematical Intuition, Bayesian, etc. contribute data, NOT decisions
     
-    // ENHANCED: Determine final action decision with hold logic
-    const { actionDecision, holdReason, holdConfidence } = this.determineActionWithHoldLogic(
-      shouldTrade,
-      fusedDirection,
-      continuousValidation,
-      combinedExpectedReturn,
-      coherenceMetrics.consensusStrength,
-      contributingSystems
-    );
+    // Record trade timestamp if tensor fusion decided to trade
+    if (shouldTrade) {
+      this.lastTradeTimestamp = new Date();
+      console.log(`🚀 TENSOR DECISION: TRADE ${fusedDirection > 0 ? 'BUY' : 'SELL'} - Mathematical proof meets requirements`);
+      console.log(`✅ Enhanced return: ${(combinedExpectedReturn * 100).toFixed(2)}% after ${(this.commissionCost * 100).toFixed(2)}% commission`);
+    } else {
+      console.log(`🚀 TENSOR DECISION: SKIP TRADE - Mathematical proof insufficient (Return: ${(combinedExpectedReturn * 100).toFixed(2)}%, Confidence: ${(fusedConfidence * 100).toFixed(1)}%)`);
+    }
     
-    // ENHANCED: Calculate dynamic exit logic based on order book/sentiment shifts
+    // ENHANCED: Calculate dynamic exit logic for position management (not decision making)
     const dynamicExit = await this.calculateDynamicExitLogic(
       contributingSystems,
       currentPrice,
@@ -1128,7 +1124,7 @@ export class TensorAIFusionEngine {
       markovPrediction
     );
     
-    // ENHANCED: Calculate multi-timeframe analysis integration
+    // ENHANCED: Calculate multi-timeframe analysis for context (not decision making)
     const multiTimeframe = await this.calculateMultiTimeframeAnalysis(
       contributingSystems,
       currentPrice,
@@ -1137,14 +1133,6 @@ export class TensorAIFusionEngine {
       fusedConfidence,
       fusedTensor
     );
-    
-    // Record trade timestamp if we decided to trade
-    if (shouldTrade && actionDecision !== 'HOLD') {
-      this.lastTradeTimestamp = new Date();
-      console.log(`✅ ENHANCED TENSOR TRADE: Expected combined return ${(combinedExpectedReturn * 100).toFixed(2)}% after ${(this.commissionCost * 100).toFixed(2)}% commission`);
-    } else if (actionDecision === 'HOLD') {
-      console.log(`🛡️ HOLD DECISION: ${holdReason} (Hold confidence: ${(holdConfidence * 100).toFixed(1)}%)`);
-    }
     
     return {
       fusedConfidence,
@@ -1160,12 +1148,6 @@ export class TensorAIFusionEngine {
       
       // ENHANCED: Advanced position sizing based on fusion confidence and reliability
       positionSizing,
-      
-      // ENHANCED: Advanced hold logic based on continuous AI validation
-      actionDecision,
-      holdReason,
-      holdConfidence,
-      continuousValidation,
       
       // ENHANCED: Dynamic exit logic based on order book/sentiment shifts
       dynamicExit,

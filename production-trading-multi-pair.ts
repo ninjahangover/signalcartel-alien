@@ -1379,6 +1379,30 @@ class ProductionTradingEngine {
             const winLoss = result.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
             log(`🎯 EXIT: ${result.position.id} | ${reason} | $${result.pnl.toFixed(2)} | ${winLoss}`);
             
+            // 🧠 TENSOR AI LEARNING SYSTEM: Update weights based on trade outcome
+            try {
+              if (position.metadata?.tensorDecisionData && this.tensorEngine) {
+                // Calculate actual direction and magnitude from trade outcome
+                const actualDirection = side === 'long' ? 1 : -1; // Position direction
+                const actualMagnitude = Math.abs(result.pnl / position.entryValue); // Actual P&L percentage
+                const actualPnLPercent = result.pnl / position.entryValue; // Signed P&L percentage
+                
+                // Update tensor fusion learning system
+                this.tensorEngine.recordTradeOutcomeWithMarkov(
+                  position.metadata.tensorDecisionData,  // Original tensor decision
+                  actualDirection,                       // Actual trade direction  
+                  actualMagnitude,                       // Actual magnitude achieved
+                  actualPnLPercent,                      // Actual P&L percentage
+                  position.symbol                        // Trading symbol
+                );
+                
+                log(`🧠 TENSOR LEARNING: Recorded ${winLoss} trade outcome for future decisions`);
+                log(`   Expected: ${(position.metadata.tensorDecisionData?.expectedReturn * 100 || 0).toFixed(2)}% | Actual: ${(actualPnLPercent * 100).toFixed(2)}%`);
+              }
+            } catch (learningError) {
+              log(`⚠️ TENSOR LEARNING ERROR: ${learningError.message} - Trade learning skipped`);
+            }
+            
             // 🔥 Execute position close directly on Kraken API
             try {
               const closeAction = side === 'long' ? 'sell' : 'buy'; // Opposite action to close position
@@ -1826,7 +1850,8 @@ class ProductionTradingEngine {
                     phase: currentPhase.phase,
                     predictedMove: aiAnalysis.enhancedAnalysis?.predictedMove || adjustedTakeProfit || 1.5,
                     positionSize: quantity,
-                    krakenOrderId: krakenOrderId // Store Kraken order ID for tracking
+                    krakenOrderId: krakenOrderId, // Store Kraken order ID for tracking
+                    tensorDecisionData: aiAnalysis.tensorDecision // Store tensor decision for learning
                   }
                 });
                 
