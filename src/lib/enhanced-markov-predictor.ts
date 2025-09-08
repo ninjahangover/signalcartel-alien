@@ -137,7 +137,7 @@ export class EnhancedMarkovPredictor {
     this.updateTransitionMatrix(symbol);
     
     // Generate base prediction
-    const basePrediction = this.generateBasePrediction(symbol, state, metrics);
+    const basePrediction = this.generateBasePrediction(symbol, state, metrics, intelligence);
     
     // Enhance with correlation analysis
     const enhancedPrediction = this.enhanceWithCorrelations(symbol, basePrediction);
@@ -290,7 +290,8 @@ export class EnhancedMarkovPredictor {
   private generateBasePrediction(
     symbol: string,
     currentState: EnhancedMarketState,
-    metrics: MarketStateMetrics
+    metrics: MarketStateMetrics,
+    intelligence?: MarketIntelligenceData
   ): EnhancedMarkovPrediction {
     const matrix = this.transitionMatrices.get(symbol);
     const nextStateProbabilities = new Map<EnhancedMarketState, number>();
@@ -697,7 +698,8 @@ export class EnhancedMarkovPredictor {
     return this.generateBasePrediction(
       symbol,
       currentState,
-      {} as MarketStateMetrics // Simplified for quick access
+      {} as MarketStateMetrics, // Simplified for quick access
+      undefined // No intelligence data for quick predictions
     );
   }
   

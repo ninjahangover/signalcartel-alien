@@ -1596,13 +1596,16 @@ class ProductionTradingEngine {
           }
           
           // Log adaptive learning insights
+          const currentAction = signal.action || 'BUY';  // Ensure we have a valid action
+          const currentDirection = currentAction === 'BUY' ? 'LONG' : 'SHORT';
+          
           if (adaptiveRecommendation.recommendedDirection && 
-              adaptiveRecommendation.recommendedDirection !== (signal.action === 'BUY' ? 'LONG' : 'SHORT')) {
-            log(`🔄 ADAPTIVE PIVOT: ${data.symbol} - Switching from ${signal.action} to ${adaptiveRecommendation.recommendedDirection} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
+              adaptiveRecommendation.recommendedDirection !== currentDirection) {
+            log(`🔄 ADAPTIVE PIVOT: ${data.symbol} - Switching from ${currentDirection} to ${adaptiveRecommendation.recommendedDirection} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
             // Override the signal action based on adaptive learning
             signal.action = adaptiveRecommendation.recommendedDirection === 'LONG' ? 'BUY' : 'SELL';
           } else {
-            log(`✅ ADAPTIVE APPROVED: ${data.symbol} ${signal.action} - ${adaptiveRecommendation.reason} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
+            log(`✅ ADAPTIVE APPROVED: ${data.symbol} ${currentAction} - ${adaptiveRecommendation.reason} (Confidence: ${(adaptiveRecommendation.confidence * 100).toFixed(1)}%)`);
           }
           
           // CRITICAL FIX: Correct directional trading based on AI market analysis
