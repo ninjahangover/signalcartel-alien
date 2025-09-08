@@ -2484,10 +2484,19 @@ export class TensorAIFusionEngine {
     // Step 4: Analyze sentiment shifts
     const sentimentShift = this.analyzeSentimentShifts(symbol, currentSentimentData);
     
-    // Step 5: Calculate exit triggers
+    // Step 5: Calculate exit triggers with PROFIT PROTECTION
     const exitTriggers: string[] = [];
     let exitScore = 0;
     let exitUrgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
+    
+    // 💰 PROFIT PROTECTION: Analyze current profit situation
+    const profitProtection = this.calculateProfitProtectionExit(contributingSystems, consensusStrength);
+    if (profitProtection.shouldExit) {
+      exitTriggers.push(`💰 PROFIT PROTECTION: ${profitProtection.reason}`);
+      exitScore += profitProtection.exitScore;
+      if (profitProtection.urgency === 'HIGH' && exitUrgency !== 'CRITICAL') exitUrgency = 'HIGH';
+      if (profitProtection.urgency === 'CRITICAL') exitUrgency = 'CRITICAL';
+    }
     
     // Order Book Exit Triggers
     if (orderBookShift.microstructureAlert) {
@@ -3364,6 +3373,81 @@ export class TensorAIFusionEngine {
     return {
       waitScore: Math.min(1.0, waitScore),
       reason: finalReason
+    };
+  }
+  
+  /**
+   * 💰 PROFIT PROTECTION: Calculate if we should exit to protect current profits
+   */
+  private calculateProfitProtectionExit(
+    contributingSystems: any[],
+    consensusStrength: number
+  ): {
+    shouldExit: boolean;
+    reason: string;
+    exitScore: number;
+    urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  } {
+    let exitScore = 0;
+    let reasons: string[] = [];
+    let urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
+    
+    // Analyze AI system consensus degradation
+    const avgSystemConfidence = contributingSystems.reduce((sum, sys) => sum + sys.confidence, 0) / contributingSystems.length;
+    const systemsInAgreement = contributingSystems.filter(sys => 
+      contributingSystems.filter(other => Math.sign(other.direction) === Math.sign(sys.direction)).length >= contributingSystems.length * 0.6
+    ).length;
+    
+    // 💰 PROFIT PROTECTION 1: Consensus deteriorating - exit before reversal
+    if (consensusStrength < 0.4 && avgSystemConfidence > 0.7) {
+      exitScore += 0.35;
+      reasons.push(`consensus degrading to ${(consensusStrength * 100).toFixed(1)}% despite high AI confidence`);
+      urgency = 'HIGH';
+    }
+    
+    // 💰 PROFIT PROTECTION 2: AI system direction conflict emerging
+    if (systemsInAgreement < contributingSystems.length * 0.5) {
+      exitScore += 0.3;
+      reasons.push(`${systemsInAgreement}/${contributingSystems.length} AI systems in agreement - direction conflict emerging`);
+      if (urgency === 'LOW') urgency = 'MEDIUM';
+    }
+    
+    // 💰 PROFIT PROTECTION 3: Magnitude predictions declining (trend weakening)
+    const avgMagnitude = contributingSystems.reduce((sum, sys) => sum + Math.abs(sys.magnitude), 0) / contributingSystems.length;
+    const strongMagnitudeSystems = contributingSystems.filter(sys => Math.abs(sys.magnitude) > 0.03).length;
+    if (avgMagnitude < 0.015 && strongMagnitudeSystems < contributingSystems.length * 0.3) {
+      exitScore += 0.25;
+      reasons.push(`trend weakening - avg magnitude ${(avgMagnitude * 100).toFixed(1)}%, only ${strongMagnitudeSystems} strong systems`);
+      if (urgency === 'LOW') urgency = 'MEDIUM';
+    }
+    
+    // 💰 PROFIT PROTECTION 4: Commission erosion risk (small expected moves)
+    const expectedProfitRange = Math.max(...contributingSystems.map(sys => Math.abs(sys.magnitude))) - this.commissionCost;
+    if (expectedProfitRange < this.commissionCost * 1.5) { // Less than 1.5x commission in profit potential
+      exitScore += 0.2;
+      reasons.push(`profit potential ${(expectedProfitRange * 100).toFixed(2)}% < 1.5x commission cost - exit before erosion`);
+    }
+    
+    // 💰 PROFIT PROTECTION 5: Reliability-weighted system doubt
+    const avgReliability = contributingSystems.reduce((sum, sys) => sum + (sys.reliability || 0.5), 0) / contributingSystems.length;
+    const reliableSystemsWithLowConfidence = contributingSystems.filter(sys => 
+      (sys.reliability || 0.5) > 0.75 && sys.confidence < 0.5
+    ).length;
+    
+    if (reliableSystemsWithLowConfidence >= 2) {
+      exitScore += 0.4;
+      reasons.push(`${reliableSystemsWithLowConfidence} reliable AI systems losing confidence - critical exit signal`);
+      urgency = 'CRITICAL';
+    }
+    
+    const shouldExit = exitScore > 0.3; // 30% threshold for profit protection exit
+    const finalReason = reasons.length > 0 ? reasons.join(', ') : 'no profit protection concerns';
+    
+    return {
+      shouldExit,
+      reason: finalReason,
+      exitScore: Math.min(1.0, exitScore),
+      urgency
     };
   }
 }
