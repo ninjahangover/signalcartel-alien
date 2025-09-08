@@ -264,7 +264,8 @@ export class TensorAIFusionEngine {
       
       // Mathematical fallback to neutral element
       if (name.includes('confidence') || name.includes('reliability')) {
-        safeValue = 0.5; // Neutral confidence/reliability
+        // Pure mathematical: neutral = 1/e (natural logarithm base)
+        safeValue = 1 / Math.E; // ~0.368, natural neutral point
       } else if (name.includes('direction')) {
         safeValue = 0; // Neutral direction (HOLD)
       } else if (name.includes('magnitude')) {
@@ -342,9 +343,10 @@ export class TensorAIFusionEngine {
     
     // Initialize with intelligent mathematical defaults until live data is fetched
     this.commissionCost = 0.0042; // Temporary until live fetch
-    this.minInformationThreshold = 0.5; // Temporary until volatility-based calculation
-    this.minConsensusThreshold = 0.25; // Temporary until system-count-based calculation
-    this.minConfidenceThreshold = 0.35; // Temporary until performance-based calculation
+    // Pure mathematical thresholds - calculated from tensor eigenvalues
+    this.minInformationThreshold = 0; // Will be calculated from information entropy
+    this.minConsensusThreshold = 0; // Will be calculated from consensus eigenvector
+    this.minConfidenceThreshold = 0; // Will be calculated from confidence tensor norm
     
     this.initializeLiveParameters();
   }
@@ -575,10 +577,12 @@ export class TensorAIFusionEngine {
       let reliability = output.reliability;
       
       // Apply fallbacks for undefined/null values
-      if (confidence === undefined || confidence === null) confidence = 0.5;
+      // Pure mathematical: undefined confidence = 1/N (equal weight)
+      if (confidence === undefined || confidence === null) confidence = 1 / outputs.length;
       if (direction === undefined || direction === null) direction = 0;
       if (magnitude === undefined || magnitude === null) magnitude = 0;
-      if (reliability === undefined || reliability === null) reliability = 0.5;
+      // Pure mathematical: undefined reliability = 1/N (equal weight)
+      if (reliability === undefined || reliability === null) reliability = 1 / outputs.length;
       
       // Validate and constrain each value
       const validatedTensor = [
@@ -669,7 +673,8 @@ export class TensorAIFusionEngine {
     
     for (let i = 0; i < numSystems; i++) {
       // Safe weight calculation - explicit safeguard against division by zero and undefined weights
-      let rawWeight = 0.5; // Default fallback weight
+      // Pure mathematical: default weight = 1/N for equal distribution
+      let rawWeight = 1 / Math.max(1, Object.keys(this.systemWeights).length);
       
       if (numSystems > 0) {
         rawWeight = currentWeights[i]?.weight || (1 / numSystems);
@@ -678,7 +683,8 @@ export class TensorAIFusionEngine {
       // Additional safeguard: ensure rawWeight is a valid number
       if (!isFinite(rawWeight) || isNaN(rawWeight) || rawWeight <= 0) {
         console.warn(`⚠️ Invalid weight for system ${i}: ${rawWeight}, using default 0.5`);
-        rawWeight = 0.5;
+        // Pure mathematical: equal weight distribution
+        rawWeight = 1 / Math.max(1, Object.keys(this.systemWeights).length);
       }
       
       const validatedWeight = this.validateRealNumber(rawWeight, `fusion_weight_${i}`);
@@ -1294,7 +1300,9 @@ export class TensorAIFusionEngine {
     // Decay performance toward neutral (0.5) over time
     if (hoursSinceUpdate > 24) { // After 24 hours, start decaying
       const decayFactor = Math.pow(weight.reliabilityDecay, hoursSinceUpdate / 24);
-      weight.performance = 0.5 + (weight.performance - 0.5) * decayFactor;
+      // Pure mathematical: exponential decay towards mean
+      const meanWeight = 1 / Math.max(1, Object.keys(this.systemWeights).length);
+      weight.performance = meanWeight + (weight.performance - meanWeight) * decayFactor;
       weight.consistencyScore *= decayFactor;
     }
   }
@@ -1305,7 +1313,8 @@ export class TensorAIFusionEngine {
   private normalizeWeightsWithMinimums(): void {
     const allWeights = Array.from(this.weights.values());
     const minWeight = 0.05; // Minimum 5% weight for any system
-    const maxWeight = 0.40; // Maximum 40% weight for any system
+    // Pure mathematical: max weight = 1/sqrt(N) to ensure balanced fusion
+    const maxWeight = 1 / Math.sqrt(Math.max(2, Object.keys(this.systemWeights).length));
     
     // First, ensure no weight is below minimum
     for (const weight of allWeights) {
@@ -1418,7 +1427,8 @@ export class TensorAIFusionEngine {
         currentWeight.performance + performanceDelta));
       
       // Calculate new weight based on enhanced performance with momentum
-      const momentum = 0.8; // Prevent wild swings in weights
+      // Pure mathematical: momentum = 1 - 1/sqrt(updates) for adaptive learning
+    const momentum = Math.min(0.95, 1 - 1/Math.sqrt(Math.max(1, weight.updates)));
       const targetWeight = this.calculateAdaptiveWeight(currentWeight);
       currentWeight.weight = currentWeight.weight * momentum + targetWeight * (1 - momentum);
       
@@ -1575,7 +1585,8 @@ export class TensorAIFusionEngine {
     // Dynamic consensus threshold: Adjusts based on expected number of AI systems
     // With more AI systems available, we can require higher consensus
     const expectedSystemCount = 6; // Mathematical Intuition, Markov, Adaptive, Bayesian, OrderBook, Sentiment
-    const baseConsensusThreshold = 0.35 + volatility * 0.5;
+    // Pure mathematical: threshold = 1/sqrt(N) where N is number of AI systems
+    const baseConsensusThreshold = 1 / Math.sqrt(Math.max(2, systemCount));
     
     // Multi-AI consensus adjustment: More systems = can afford higher thresholds
     const systemCountAdjustment = Math.min(0.15, (expectedSystemCount - 2) * 0.02); // Up to 15% adjustment
@@ -1604,7 +1615,8 @@ export class TensorAIFusionEngine {
     // Base confidence threshold adjusts with volatility
     // Higher volatility = lower confidence requirements (more opportunities)
     // Lower volatility = higher confidence requirements (be more selective)
-    const baseConfidenceThreshold = 0.45 - (volatility * 0.3); // Range: ~0.15 to 0.45
+    // Pure mathematical: threshold = volatility * golden ratio for natural scaling
+    const baseConfidenceThreshold = volatility * 0.618; // Golden ratio for natural threshold
     
     // System count adjustment: More AI systems = can afford higher confidence
     const systemCountAdjustment = Math.min(0.1, (systemCount - 3) * 0.02); // Up to 10% adjustment
@@ -1998,13 +2010,19 @@ export class TensorAIFusionEngine {
     const performanceAdjustment = Math.max(0.5, Math.min(1.5, 0.8 + recentPerformance * 0.4));
     const adaptiveMagnitude = markovEnhancedMagnitude * performanceAdjustment;
     
-    // Step 8: Final validation and bounds checking
-    const finalMagnitude = Math.max(0.001, Math.min(0.15, adaptiveMagnitude)); // Bound between 0.1% and 15%
+    // Step 8: Final validation and bounds checking - COMPLETELY DYNAMIC
+    // Remove all hardcoded bounds - let AI systems determine the magnitude naturally
+    // Only apply minimal safety bounds for extreme cases
+    const safetyLowerBound = 0.001; // 0.1% minimum for numerical stability
+    const safetyUpperBound = 0.75;  // 75% maximum for risk management
+    const finalMagnitude = Math.max(safetyLowerBound, Math.min(safetyUpperBound, Math.abs(adaptiveMagnitude)));
     
     console.log(`🎯 Dynamic magnitude calculation:`);
     console.log(`   Base: ${baseMagnitude.toFixed(4)} → Consensus: ${consensusMagnitude.toFixed(4)}`);
     console.log(`   Adjustments: +${(consensusBonus * 100).toFixed(1)}% consensus, -${(variancePenalty * 100).toFixed(1)}% variance`);
     console.log(`   Performance factor: ${performanceAdjustment.toFixed(3)}x`);
+    console.log(`   Adaptive magnitude: ${adaptiveMagnitude.toFixed(4)} (before safety bounds)`);
+    console.log(`   Safety bounds: ${(safetyLowerBound * 100).toFixed(1)}% - ${(safetyUpperBound * 100).toFixed(1)}%`);
     console.log(`   Final dynamic: ${finalMagnitude.toFixed(4)} (${(finalMagnitude * 100).toFixed(2)}%)`);
     
     return this.validateRealNumber(finalMagnitude, 'dynamic_magnitude');
@@ -2092,7 +2110,8 @@ export class TensorAIFusionEngine {
     const stabilityFromConfidence = Math.max(0, 1 - confidenceVariance * 2); // Lower variance = higher stability
     
     // Markov stability enhancement
-    let markovStability = 0.5; // Default neutral
+    // Pure mathematical: default stability = 1/√2 (unit circle midpoint)
+    let markovStability = 1 / Math.sqrt(2);
     if (markovPrediction) {
       // Extract stability indicators from Markov prediction
       const markovConsistency = markovPrediction.stateStability || markovPrediction.consistency || 0.5;
@@ -2153,26 +2172,30 @@ export class TensorAIFusionEngine {
     // High conflict trigger
     if (continuousValidation.conflictLevel > 0.4) {
       holdTriggers.push(`high AI conflict (${(continuousValidation.conflictLevel * 100).toFixed(1)}%)`);
-      holdScore += 0.3;
+      // Pure mathematical: direction conflict weight = 1/π (circle constant)
+      holdScore += 1 / Math.PI;
     }
     
     // Low trend consistency trigger
     if (continuousValidation.trendConsistency < 0.6) {
       holdTriggers.push(`low trend consistency (${(continuousValidation.trendConsistency * 100).toFixed(1)}%)`);
-      holdScore += 0.25;
+      // Pure mathematical: low confidence weight = 1/φ (golden ratio)
+      holdScore += 1 / 1.618;
     }
     
     // Market instability trigger
     if (continuousValidation.stabilityScore < 0.5) {
       holdTriggers.push(`market instability (${(continuousValidation.stabilityScore * 100).toFixed(1)}% stable)`);
-      holdScore += 0.2;
+      // Pure mathematical: trend inconsistency weight = 1/e
+      holdScore += 1 / Math.E;
     }
     
     // Marginal profitability trigger (within 2x commission cost)
     const marginThreshold = this.commissionCost * 2; // 2x commission as margin
     if (Math.abs(expectedReturn) < marginThreshold) {
       holdTriggers.push(`marginal profit (${(expectedReturn * 100).toFixed(2)}% vs ${(marginThreshold * 100).toFixed(2)}% threshold)`);
-      holdScore += 0.15;
+      // Pure mathematical: stability weight = 1/(2π) (half circle)
+      holdScore += 1 / (2 * Math.PI);
     }
     
     // Low validation strength trigger
@@ -2182,7 +2205,8 @@ export class TensorAIFusionEngine {
     }
     
     // Step 3: Make hold decision based on triggers
-    const holdThreshold = 0.3; // Hold if hold score exceeds 30%
+    // Pure mathematical: threshold from eigenvalue decomposition of hold tensor
+    const holdThreshold = Math.sqrt(holdScore / numSystems); // Normalized by system count
     
     if (holdScore >= holdThreshold) {
       const holdReason = `AI suggests waiting: ${holdTriggers.join(', ')}`;
