@@ -429,13 +429,20 @@ export class TensorAIFusionEngine {
         continue;
       }
       
-      // Validate and sanitize each field
+      // CRITICAL FIX: Only accept AI systems with valid data - NO FALLBACK VALUES
+      if (output.confidence === null || output.confidence === undefined || 
+          output.reliability === null || output.reliability === undefined) {
+        console.warn(`⚠️ TENSOR FUSION: Rejecting ${output.systemId || `system_${i}`} - null/undefined confidence or reliability`);
+        continue; // Skip this AI system entirely - do not use fallback values
+      }
+      
+      // Validate and sanitize each field - NO FALLBACKS FOR CRITICAL VALUES
       const validatedOutput: AISystemOutput = {
         systemId: output.systemId || `system_${i}`,
-        confidence: this.validateRealNumber(output.confidence ?? 0.5, `AIOutput${i}_confidence`),
+        confidence: this.validateRealNumber(output.confidence, `AIOutput${i}_confidence`),
         direction: this.validateRealNumber(output.direction ?? 0, `AIOutput${i}_direction`),
         magnitude: this.validateRealNumber(output.magnitude ?? 0, `AIOutput${i}_magnitude`),
-        reliability: this.validateRealNumber(output.reliability ?? 0.5, `AIOutput${i}_reliability`),
+        reliability: this.validateRealNumber(output.reliability, `AIOutput${i}_reliability`),
         timestamp: output.timestamp || new Date(),
         additionalData: output.additionalData
       };
@@ -1976,9 +1983,10 @@ export class TensorAIFusionEngine {
     const systemWeights: number[] = [];
     
     for (const system of contributingSystems) {
+      // CRITICAL: AI systems should already be validated by this point - no fallbacks needed
       const magnitude = this.validateRealNumber(system.magnitude || 0, `${system.systemId}_magnitude`);
-      const reliability = this.validateRealNumber(system.reliability || 0.5, `${system.systemId}_reliability`);
-      const confidence = this.validateRealNumber(system.confidence || 0.5, `${system.systemId}_confidence`);
+      const reliability = this.validateRealNumber(system.reliability, `${system.systemId}_reliability`);
+      const confidence = this.validateRealNumber(system.confidence, `${system.systemId}_confidence`);
       
       // More inclusive threshold - accept systems with any positive magnitude
       if (magnitude > 0.0001 && reliability > 0.1) {
@@ -2117,9 +2125,10 @@ export class TensorAIFusionEngine {
     const systemConfidences: number[] = [];
     
     for (const system of contributingSystems) {
-      const validation = this.validateRealNumber(system.reliability || 0.5, `${system.systemId}_reliability`);
+      // CRITICAL: AI systems pre-validated - no fallbacks for confidence/reliability
+      const validation = this.validateRealNumber(system.reliability, `${system.systemId}_reliability`);
       const direction = this.validateRealNumber(system.direction || 0, `${system.systemId}_direction`);
-      const confidence = this.validateRealNumber(system.confidence || 0.5, `${system.systemId}_confidence`);
+      const confidence = this.validateRealNumber(system.confidence, `${system.systemId}_confidence`);
       
       // Validation strength = reliability × confidence
       const validationScore = validation * confidence;
@@ -2406,8 +2415,9 @@ export class TensorAIFusionEngine {
       let totalWeight = 0;
       
       for (const system of contributingSystems) {
-        const reliability = this.validateRealNumber(system.reliability || 0.5, 'system_reliability');
-        const confidence = this.validateRealNumber(system.confidence || 0.5, 'system_confidence');
+        // CRITICAL: Systems already validated by this point - no fallbacks needed
+        const reliability = this.validateRealNumber(system.reliability, 'system_reliability');
+        const confidence = this.validateRealNumber(system.confidence, 'system_confidence');
         const weight = reliability * confidence; // Weight by both reliability and confidence
         
         totalReliability += reliability * weight;
