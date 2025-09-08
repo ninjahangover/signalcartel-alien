@@ -259,21 +259,29 @@ export class TensorAIFusionEngine {
   
   private validateRealNumber(x: number, name: string): number {
     if (!this.isValidReal(x)) {
-      // BULLETPROOF: Auto-fix NaN with mathematical safe defaults (no error logging for real money trading)
+      // Enhanced diagnostic logging for debugging AI system outputs
+      console.warn(`⚠️ TENSOR VALIDATION: Invalid value for ${name}: ${x} (${typeof x})`);
+      
       let safeValue: number;
       
-      // Mathematical fallback to neutral element
+      // Mathematical fallback to meaningful defaults instead of zeros
       if (name.includes('confidence') || name.includes('reliability')) {
         // Pure mathematical: neutral = 1/e (natural logarithm base)
         safeValue = 1 / Math.E; // ~0.368, natural neutral point
       } else if (name.includes('direction')) {
         safeValue = 0; // Neutral direction (HOLD)
       } else if (name.includes('magnitude')) {
-        safeValue = 0; // Neutral magnitude (no expected move)
+        // Instead of 0, use minimum viable expected move for analysis
+        safeValue = 0.015; // 1.5% minimum expected move for meaningful trading
+      } else if (name.includes('position')) {
+        // Position size should never be 0 - use small but meaningful value
+        safeValue = 0.02; // 2% minimum position size
       } else {
         safeValue = 0; // Generic neutral element
       }
-      return safeValue; // FIXED: Return the safe value instead of the invalid x
+      
+      console.warn(`   → Using mathematical fallback: ${(safeValue * 100).toFixed(2)}% for ${name}`);
+      return safeValue;
     }
     return x;
   }
@@ -1939,21 +1947,32 @@ export class TensorAIFusionEngine {
       const reliability = this.validateRealNumber(system.reliability || 0.5, `${system.systemId}_reliability`);
       const confidence = this.validateRealNumber(system.confidence || 0.5, `${system.systemId}_confidence`);
       
-      // Skip systems with zero magnitude or very low reliability
-      if (magnitude > 0.001 && reliability > 0.2) {
+      // More inclusive threshold - accept systems with any positive magnitude
+      if (magnitude > 0.0001 && reliability > 0.1) {
         magnitudePredictions.push(magnitude);
         
         // Weight combines reliability and confidence
         const systemWeight = reliability * confidence;
         systemWeights.push(systemWeight);
         
-        console.log(`   ${system.systemId}: magnitude=${magnitude.toFixed(4)}, reliability=${reliability.toFixed(3)}, weight=${systemWeight.toFixed(3)}`);
+        console.log(`   ✅ ${system.systemId}: magnitude=${magnitude.toFixed(4)}, reliability=${reliability.toFixed(3)}, weight=${systemWeight.toFixed(3)}`);
+      } else {
+        console.warn(`   ❌ ${system.systemId}: SKIPPED - magnitude=${magnitude.toFixed(4)}, reliability=${reliability.toFixed(3)} (below thresholds)`);
       }
     }
     
     // Validation: ensure we have at least some predictions
     if (magnitudePredictions.length === 0) {
-      console.warn('⚠️ No valid magnitude predictions from AI systems, using base magnitude');
+      console.warn('⚠️ No valid magnitude predictions from AI systems');
+      console.log(`   Base magnitude available: ${baseMagnitude.toFixed(4)}`);
+      
+      // If base magnitude is also invalid/zero, use mathematical market volatility estimate
+      if (baseMagnitude <= 0.001) {
+        const marketVolatilityEstimate = 0.025; // 2.5% typical daily volatility estimate
+        console.warn(`   → Using market volatility estimate: ${(marketVolatilityEstimate * 100).toFixed(1)}%`);
+        return this.validateRealNumber(marketVolatilityEstimate, 'market_volatility_estimate');
+      }
+      
       return this.validateRealNumber(baseMagnitude, 'fallback_magnitude');
     }
     

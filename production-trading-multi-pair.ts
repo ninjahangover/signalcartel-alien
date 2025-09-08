@@ -1955,19 +1955,9 @@ class ProductionTradingEngine {
         );
         
       } catch (error) {
-        // BULLETPROOF: V₂ safe fallback with mathematical baseline
-        log(`⚠️ V₂ Mathematical Intuition using safe fallback: ${error.message.split('\n')[0]}`);
-        enhancedAnalysis = { 
-          confidence: 0.75,    // Higher confidence for mathematical baseline
-          direction: 'NEUTRAL', 
-          magnitude: 0.02,     // Small positive magnitude for mathematical analysis
-          reason: 'Mathematical baseline analysis',
-          domains: {
-            technical: 0.75,
-            volume: 0.70,
-            momentum: 0.72
-          }
-        };
+        // NO FALLBACK - System must provide real data
+        log(`❌ V₂ Mathematical Intuition failed: ${error.message} - SKIPPING SYSTEM`);
+        enhancedAnalysis = null;
       }
       
       // V₃: Bayesian Probability Analysis (BULLETPROOF)
@@ -1977,8 +1967,8 @@ class ProductionTradingEngine {
         bayesianAnalysis = await bayesianProbabilityEngine.generateSignal(safeSymbol, marketEvidence, safePrice);
         log(`✅ V₃ Bayesian: ${bayesianAnalysis?.mostLikelyRegime || 'UNKNOWN'} (${((bayesianAnalysis?.confidence || 0) * 100).toFixed(1)}%)`);
       } catch (error) {
-        log(`⚠️ V₃ Bayesian failed: ${error.message} - Using fallback`);
-        bayesianAnalysis = { confidence: 0.5, mostLikelyRegime: 'UNKNOWN', expectedReturn: 0 };
+        log(`❌ V₃ Bayesian failed: ${error.message} - SKIPPING SYSTEM`);
+        bayesianAnalysis = null;
       }
       
       // V₄: Markov Predictor Analysis (BULLETPROOF - FINAL FIX)
@@ -2012,15 +2002,8 @@ class ProductionTradingEngine {
         );
         
       } catch (error) {
-        // BULLETPROOF: V₄ safe fallback with predictive baseline
-        log(`⚠️ V₄ Markov using safe fallback: ${error.message.split('\n')[0]}`);
-        markovAnalysis = { 
-          confidence: 0.68,           // Moderate confidence for predictive baseline
-          nextState: 'CONSOLIDATION', // Safe neutral prediction
-          magnitude: 0.01,            // Small magnitude for prediction
-          expectedReturn: 1.2,        // Positive expected return
-          reason: 'Predictive baseline analysis'
-        };
+        log(`❌ V₄ Markov failed: ${error.message} - SKIPPING SYSTEM`);
+        markovAnalysis = null;
       }
       
       // V₅: Adaptive Learning Analysis (BULLETPROOF) 
@@ -2036,8 +2019,8 @@ class ProductionTradingEngine {
         };
         log(`✅ V₅ Adaptive: ${recommendation.confidence.toFixed(1)}% confidence, ${recommendation.action} recommendation`);
       } catch (error) {
-        log(`⚠️ V₅ Adaptive failed: ${error.message} - Using fallback`);
-        adaptiveLearning = { winRate: 0.5, directionBias: 'NEUTRAL', avgMove: 0, reliability: 0.5 };
+        log(`❌ V₅ Adaptive failed: ${error.message} - SKIPPING SYSTEM`);
+        adaptiveLearning = null;
       }
       
       // V₆: Order Book Intelligence (BULLETPROOF)
@@ -2060,24 +2043,24 @@ class ProductionTradingEngine {
         };
         log(`✅ V₆ Order Book: ${aiEnhanced.marketRegime || 'UNKNOWN'} regime, ${((aiEnhanced.confidence || 0.5) * 100).toFixed(1)}% confidence`);
       } catch (error) {
-        log(`⚠️ V₆ Order Book failed: ${error.message} - Using fallback`);
-        orderBookAnalysis = { confidence: 0.5, marketPressure: 'NEUTRAL', liquidity: 0.5 };
+        log(`❌ V₆ Order Book failed: ${error.message} - SKIPPING SYSTEM`);
+        orderBookAnalysis = null;
       }
       
       // V₇: Quantum Forge Sentiment
       const sentimentAnalysis = null; // Will be implemented when sentiment engine is available
       log(`✅ V₇ Sentiment: PLACEHOLDER - to be implemented`);
       
-      // BULLETPROOF: Create complete AI bundle with validated data
+      // Create AI bundle with only valid systems (no hardcoded fallbacks)
       const aiBundle = {
         symbol: safeSymbol,
         currentPrice: safePrice,
-        // Core AI systems per mathematical proof (NO Pine Script) - all with fallbacks
-        mathematicalIntuition: enhancedAnalysis || { confidence: 0.5, direction: 'NEUTRAL', magnitude: 0 },      // V₂
-        bayesianProbability: bayesianAnalysis || { confidence: 0.5, mostLikelyRegime: 'UNKNOWN', expectedReturn: 0 },       // V₃  
-        markovPrediction: markovAnalysis || { confidence: 0.5, nextState: 'UNKNOWN', magnitude: 0 },            // V₄
-        adaptiveLearning: adaptiveLearning || { winRate: 0.5, directionBias: 'NEUTRAL', avgMove: 0, reliability: 0.5 },          // V₅
-        orderBookAIResult: orderBookAnalysis || { confidence: 0.5, marketPressure: 'NEUTRAL', liquidity: 0.5 },        // V₆
+        // Only include systems that provide actual data (null if system failed)
+        mathematicalIntuition: enhancedAnalysis,      // V₂
+        bayesianProbability: bayesianAnalysis,        // V₃  
+        markovPrediction: markovAnalysis,             // V₄
+        adaptiveLearning: adaptiveLearning,           // V₅
+        orderBookAIResult: orderBookAnalysis,        // V₆
         sentimentAnalysis: sentimentAnalysis,        // V₇ (can be null)
         marketData: {
           symbol: safeSymbol,
