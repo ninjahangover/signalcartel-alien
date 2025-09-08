@@ -841,7 +841,14 @@ export class TensorAIFusionEngine {
     const baseConsensus = Math.max(0, 1 - weightedStdDev);
     
     // System count bonus: More systems agreeing = higher confidence in consensus
-    const systemCountBonus = Math.min(0.3, (numSystems - 2) * 0.05); // Up to 30% bonus for 8+ systems
+    // Special optimization for 6-AI system
+    let systemCountBonus = Math.min(0.3, (numSystems - 2) * 0.05); // Up to 30% bonus for 8+ systems
+    
+    // 6-AI system bonus: Complete tensor fusion gets additional consensus strength
+    if (numSystems >= 6) {
+      systemCountBonus += 0.08; // 8% additional bonus for complete 6-AI tensor fusion
+      console.log(`🎯 6-AI TENSOR BONUS: +8% consensus strength for complete system (${numSystems} systems active)`);
+    }
     
     // High-reliability system bonus: If we have many high-reliability systems, boost consensus
     const avgReliability = reliabilities.reduce((sum, r) => sum + r, 0) / numSystems;
@@ -1597,8 +1604,11 @@ export class TensorAIFusionEngine {
     // Pure mathematical: threshold = 1/sqrt(N) where N is number of AI systems
     const baseConsensusThreshold = 1 / Math.sqrt(Math.max(2, systemCount));
     
-    // Multi-AI consensus adjustment: More systems = can afford higher thresholds
-    const systemCountAdjustment = Math.min(0.15, (expectedSystemCount - 2) * 0.02); // Up to 15% adjustment
+    // Multi-AI consensus adjustment: Optimized for 6-AI system
+    // Uses mathematical scaling based on Central Limit Theorem: threshold scales with 1/√N
+    const optimalSystemCount = 6; // Our target 6-AI configuration
+    const systemEfficiencyBonus = expectedSystemCount >= optimalSystemCount ? 0.05 : 0; // 5% bonus for full system
+    const systemCountAdjustment = Math.min(0.20, (expectedSystemCount - 2) * 0.025) + systemEfficiencyBonus;
     
     // Final consensus threshold with system scaling
     this.minConsensusThreshold = Math.max(0.20, Math.min(0.70, baseConsensusThreshold + systemCountAdjustment));
@@ -1627,8 +1637,11 @@ export class TensorAIFusionEngine {
     // Pure mathematical: threshold = volatility * golden ratio for natural scaling
     const baseConfidenceThreshold = volatility * 0.618; // Golden ratio for natural threshold
     
-    // System count adjustment: More AI systems = can afford higher confidence
-    const systemCountAdjustment = Math.min(0.1, (systemCount - 3) * 0.02); // Up to 10% adjustment
+    // System count adjustment: Optimized for 6-AI system performance
+    // More AI systems = can afford higher confidence due to consensus redundancy
+    const optimalSystemCount = 6;
+    const isOptimalSystemCount = systemCount >= optimalSystemCount;
+    const systemCountAdjustment = Math.min(0.15, (systemCount - 3) * 0.025) + (isOptimalSystemCount ? 0.03 : 0);
     
     // Recent performance adjustment: Good performing systems = lower confidence needed
     const recentPerformance = this.calculateRecentSystemPerformance();
