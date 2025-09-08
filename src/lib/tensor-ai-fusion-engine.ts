@@ -228,6 +228,7 @@ export interface PerformanceTracker {
 
 export class TensorAIFusionEngine {
   private weights: Map<string, TensorWeights> = new Map();
+  private systemWeights: { [key: string]: number } = {}; // System weight tracking for mathematical operations
   private performance: Map<string, PerformanceTracker> = new Map();
   private decisionHistory: FusedDecision[] = [];
   
@@ -1269,6 +1270,9 @@ export class TensorAIFusionEngine {
           specializationScore: 0.5, // Neutral specialization
           consistencyScore: 0.5 // Neutral consistency
         });
+        
+        // Sync systemWeights for mathematical operations
+        this.systemWeights[output.systemId] = baseWeight;
       } else {
         // Apply time-based reliability decay to existing weights
         this.applyReliabilityDecay(output.systemId);
@@ -1367,6 +1371,11 @@ export class TensorAIFusionEngine {
       for (const weight of allWeights) {
         weight.weight = weight.weight / totalWeight;
       }
+    }
+    
+    // Sync systemWeights after normalization for mathematical operations
+    for (const weight of allWeights) {
+      this.systemWeights[weight.systemId] = weight.weight;
     }
   }
   
@@ -2844,7 +2853,7 @@ export class TensorAIFusionEngine {
     // Step 11: Mathematical maximum position size (no hardcoded limits)
     // Kelly Criterion maximum: f* = (bp - q) / b, where b = odds, p = win probability, q = loss probability
     // Conservative approach: Use 50% of Kelly maximum to reduce volatility
-    const absoluteMax = this.calculateKellyMaximumPosition(reliability, consensusStrength);
+    const absoluteMax = this.calculateKellyMaximumPosition(fusedReliability, consensusStrength);
     console.log(`📊 Kelly-derived position limit: ${(absoluteMax * 100).toFixed(1)}%`);
     
     const finalSize = Math.max(0, Math.min(absoluteMax, drawdownConstrained));
