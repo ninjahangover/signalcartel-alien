@@ -739,8 +739,9 @@ export class EnhancedMarkovPredictor {
     // Base magnitude from historical state transitions
     const baseMagnitude = this.getStateTransitionMagnitude(symbol, currentState, nextState);
     
-    // Current market volatility factor
-    const volatility = intelligence?.volatility || 0.05; // Default 5% volatility
+    // CRITICAL FIX: Add null safety for intelligence parameter
+    const safeIntelligence = intelligence || {};
+    const volatility = safeIntelligence.volatility || 0.05; // Default 5% volatility
     
     // Volatility-adjusted magnitude (higher volatility = larger expected moves)
     const volatilityMultiplier = 1 + (volatility - 0.05) / 0.05; // Normalize around 5%

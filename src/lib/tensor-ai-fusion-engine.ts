@@ -1064,7 +1064,8 @@ export class TensorAIFusionEngine {
       fusedDirection,
       continuousValidation,
       combinedExpectedReturn,
-      coherenceMetrics.consensusStrength
+      coherenceMetrics.consensusStrength,
+      contributingSystems
     );
     
     // ENHANCED: Calculate dynamic exit logic based on order book/sentiment shifts
@@ -1100,7 +1101,9 @@ export class TensorAIFusionEngine {
       
       shouldTrade,
       expectedReturn: combinedExpectedReturn, // Use Markov-enhanced return
-      positionSize: shouldTrade && actionDecision !== 'HOLD' ? consensusAdjustedSize : 0,
+      // CRITICAL FIX: Always show calculated position size for monitoring purposes
+      // Even if we don't trade, show what the position size would be for transparency
+      positionSize: consensusAdjustedSize, // Show calculated size regardless of trading decision
       
       // ENHANCED: Advanced position sizing based on fusion confidence and reliability
       positionSizing,
@@ -2214,7 +2217,8 @@ export class TensorAIFusionEngine {
     fusedDirection: number,
     continuousValidation: any,
     expectedReturn: number,
-    consensusStrength: number
+    consensusStrength: number,
+    contributingSystems: AISystemOutput[]
   ): { actionDecision: 'BUY' | 'SELL' | 'HOLD'; holdReason?: string; holdConfidence: number } {
     
     // Step 1: If basic criteria aren't met, definitely hold
@@ -2277,6 +2281,7 @@ export class TensorAIFusionEngine {
     
     // Step 3: Make hold decision based on triggers
     // Pure mathematical: threshold from eigenvalue decomposition of hold tensor
+    const numSystems = contributingSystems.length || 6; // Default to 6 systems
     const holdThreshold = Math.sqrt(holdScore / numSystems); // Normalized by system count
     
     if (holdScore >= holdThreshold) {
@@ -3696,14 +3701,14 @@ export class TensorAIFusionEngine {
     expectedProfit *= rangeMultiplier;
     
     // 💰 RISK CALCULATION 1: Maximum drawdown estimation
-    const maxDrawdownRisk = volatilityProfile.currentVolatility * 1.5; // 1.5x volatility as max drawdown estimate
+    let maxDrawdownRisk = volatilityProfile.currentVolatility * 1.5; // 1.5x volatility as max drawdown estimate
     
     // 💰 RISK CALCULATION 2: Risk-adjusted return (Profit/Risk ratio)
-    const riskAdjustedReturn = expectedProfit / Math.max(maxDrawdownRisk, 0.01); // Avoid division by zero
+    let riskAdjustedReturn = expectedProfit / Math.max(maxDrawdownRisk, 0.01); // Avoid division by zero
     
     // 💰 RISK CALCULATION 3: Sharpe ratio estimate (using mathematical approximation)
     // Assuming risk-free rate ≈ 0.02 (2%) and using volatility as risk measure
-    const sharpeEstimate = (expectedProfit - 0.02) / Math.max(volatilityProfile.currentVolatility, 0.01);
+    let sharpeEstimate = (expectedProfit - 0.02) / Math.max(volatilityProfile.currentVolatility, 0.01);
     
     // 💰 PROFIT PROBABILITY: Based on timeframe recommendation confidence and market conditions
     let profitProbability = timeframeRecommendation.confidence * 0.7; // Base from timeframe confidence

@@ -520,13 +520,13 @@ class ProductionTradingEngine {
           }
         };
         
-        markovAnalysis = await this.enhancedMarkovPredictor2.processMarketData(
+        markovAnalysis = this.enhancedMarkovPredictor2.processMarketData(
           marketData.symbol, 
           ohlcData, 
           intelligenceData,
           [ohlcData] // recentHistory array
         );
-        log(`🔮 MARKOV ENTRY: State ${markovAnalysis.currentState}, Expected Return: ${(markovAnalysis.expectedReturn * 100).toFixed(2)}%`);
+        log(`🔮 MARKOV ENTRY: State ${markovAnalysis.currentState}, Expected Return: ${((markovAnalysis.expectedReturn || 0) * 100).toFixed(2)}%`);
         
         // [DEPRECATED] Previously enhanced Pine Script with Markov - now tensor fusion handles this
         if (confidence > 0 && markovAnalysis.expectedReturn > 0) {
@@ -555,7 +555,7 @@ class ProductionTradingEngine {
         const baseSignal = await quantumForgeSignalGenerator.generateTechnicalSignal(marketData.symbol, marketData.price);
         
         mathIntuitionAnalysis = await this.mathEngine.analyzeIntuitively(baseSignal, marketData);
-        log(`🎭 MATHEMATICAL INTUITION: Overall ${(mathIntuitionAnalysis.mathIntuition * 100).toFixed(1)}%, Flow Field ${mathIntuitionAnalysis.flowFieldStrength.toFixed(4)}`);
+        log(`🎭 MATHEMATICAL INTUITION: Overall ${((mathIntuitionAnalysis.mathIntuition || 0) * 100).toFixed(1)}%, Flow Field ${(mathIntuitionAnalysis.flowFieldStrength || 0).toFixed(4)}`);
         
         // Mathematical Intuition confidence contribution
         const intuitionScore = mathIntuitionAnalysis.mathIntuition;
@@ -762,7 +762,7 @@ class ProductionTradingEngine {
         finalConfidence = enhancedAnalysis.confidence / 100; // Convert back to 0-1 scale
         
         if (finalShouldTrade) {
-          log(`📈 ✅ ENHANCED TRADE SIGNAL: ${marketData.symbol} @ $${marketData.price} (${enhancedAnalysis.confidence.toFixed(1)}% confidence)`);
+          log(`📈 ✅ ENHANCED TRADE SIGNAL: ${marketData.symbol} @ $${marketData.price} (${(enhancedAnalysis.confidence || 0).toFixed(1)}% confidence)`);
           log(`🤖 AI Systems: [${aiSystemsUsed.join(', ')}] + Enhanced Intelligence`);
           log(`💰 ${this.enhancedIntuition.getAnalysisSummary(enhancedAnalysis)}`);
           
@@ -1997,15 +1997,42 @@ class ProductionTradingEngine {
           close: safePrice,
           volume: safeVolume
         };
-        const intelligence = {
-          volatility: 0.05, // 5% default volatility
-          trend: 'NEUTRAL',
-          strength: 0.5
+        // Create proper MarketIntelligenceData structure for Markov analysis
+        const intelligenceData = {
+          symbol: safeSymbol,
+          captureStartTime: new Date(Date.now() - 24 * 60 * 60 * 1000),
+          captureEndTime: new Date(),
+          dataPoints: [{...ohlcData, price: ohlcData.close}],
+          patterns: [],
+          // CRITICAL FIX: Add missing required properties for MarketIntelligenceData interface
+          momentum: {
+            short: 0,
+            medium: 0,
+            long: 0,
+            overall: 'neutral' as const
+          },
+          regime: {
+            current: 'NORMAL' as const,
+            confidence: 0.5,
+            duration: 1
+          },
+          predictiveSignals: {
+            next_1h: 'neutral' as const,
+            next_4h: 'neutral' as const,
+            next_24h: 'neutral' as const,
+            confidence: 0.5
+          },
+          tradingAdjustments: {
+            position_sizing: 1.0,
+            stop_loss_adjustment: 0,
+            take_profit_adjustment: 0,
+            entry_timing: 'immediate' as const
+          }
         };
         markovAnalysis = this.enhancedMarkovPredictor2.processMarketData(
           safeSymbol,
           ohlcData,
-          intelligence,
+          intelligenceData,
           [ohlcData] // Array of recent history with at least current data
         );
         
