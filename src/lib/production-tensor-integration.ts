@@ -16,7 +16,7 @@ export interface ProductionAIBundle {
   currentPrice: number;
   
   // Basic AI outputs (legacy)
-  pineScriptResult?: any;
+  // pineScriptResult?: any; // REMOVED - deprecated technical indicators
   mathematicalIntuition?: any;
   markovPrediction?: any;
   adaptiveLearning?: any;
