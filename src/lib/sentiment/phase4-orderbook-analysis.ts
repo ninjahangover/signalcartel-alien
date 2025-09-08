@@ -403,7 +403,9 @@ export class OrderBookAnalyzer extends EventEmitter {
     orderFlow: any
   ) {
     let positionBias: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
-    let entryConfidence = 50;
+    
+    // CRITICAL FIX: Dynamic confidence based on order book quality instead of hardcoded 50
+    let entryConfidence = this.calculateDynamicConfidence(snapshot, marketStructure, orderFlow);
     
     // Combine signals
     if (marketStructure.trend === 'BULLISH' && orderFlow.institutionalFlow === 'BUYING') {
@@ -478,6 +480,51 @@ export class OrderBookAnalyzer extends EventEmitter {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  /**
+   * Calculate dynamic confidence based on order book quality
+   * CRITICAL FIX: Replace hardcoded 50% with real market analysis
+   */
+  private calculateDynamicConfidence(
+    snapshot: OrderBookSnapshot,
+    marketStructure: any,
+    orderFlow: any
+  ): number {
+    // Base confidence on order book quality
+    const bidCount = snapshot.bids?.length || 0;
+    const askCount = snapshot.asks?.length || 0;
+    const totalDepth = bidCount + askCount;
+    
+    // Order book depth contributes 30-60% base confidence
+    let confidence = Math.max(30, Math.min(60, 30 + (totalDepth / 10) * 3));
+    
+    // Spread quality (tighter spreads = higher confidence)
+    const spreadPercent = (snapshot.spreadPercent || 0.001) * 100; // Convert to percentage
+    confidence += Math.max(-15, Math.min(10, (0.1 - spreadPercent) * 100)); // Penalize wide spreads
+    
+    // Volume quality 
+    const totalVolume = (snapshot.bids?.[0]?.quantity || 0) + (snapshot.asks?.[0]?.quantity || 0);
+    if (totalVolume > 100) confidence += 5;  // Good liquidity
+    if (totalVolume > 1000) confidence += 5; // Excellent liquidity
+    
+    // Market structure confidence
+    if (marketStructure?.confidence) {
+      confidence += Math.max(-10, Math.min(15, (marketStructure.confidence - 50) * 0.3));
+    }
+    
+    // Order flow confidence  
+    if (orderFlow?.confidence) {
+      confidence += Math.max(-10, Math.min(15, (orderFlow.confidence - 50) * 0.3));
+    }
+    
+    // Data freshness (newer data = higher confidence)
+    const dataAge = Date.now() - (snapshot.timestamp || 0);
+    if (dataAge < 5000) confidence += 5;   // Very fresh data
+    else if (dataAge > 30000) confidence -= 10; // Stale data
+    
+    // Ensure bounds [20, 85]
+    return Math.max(20, Math.min(85, Math.round(confidence)));
   }
 }
 
