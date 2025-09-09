@@ -941,9 +941,13 @@ export class TensorAIFusionEngine {
    * variables based on predictive analytics principles
    */
   private generateMarkovMathematicalVariables(marketContext: any): any {
-    // Extract market volatility and trend characteristics
-    const volatility = marketContext?.volatility || 0.05; // Default 5% if unknown
-    const trendStrength = Math.abs(marketContext?.trend || 0);
+    // Extract market volatility and trend characteristics with safe fallbacks
+    const rawVolatility = marketContext?.volatility || 0.05; // Default 5% if unknown
+    const rawTrend = marketContext?.trend || 0;
+    
+    // Ensure values are valid numbers
+    const volatility = (isNaN(rawVolatility) || rawVolatility <= 0) ? 0.05 : rawVolatility;
+    const trendStrength = isNaN(rawTrend) ? 0 : Math.abs(rawTrend);
     
     // Mathematical variables based on Markov Chain principles:
     // 1. Transition probability (how likely current state continues)

@@ -169,12 +169,25 @@ export class EnhancedMathematicalIntuition {
       confidenceThreshold = 22;
     }
     
-    const correctedShouldTrade = pairAdaptedConfidence > confidenceThreshold && Math.abs(predictedMove) >= moveThreshold;
-    const correctedReason = correctedShouldTrade 
-      ? `Enhanced confidence: ${pairAdaptedConfidence.toFixed(1)}%, predicted move: ${predictedMove.toFixed(3)}%`
-      : `Insufficient edge: confidence ${pairAdaptedConfidence.toFixed(1)}% or move ${Math.abs(predictedMove).toFixed(3)}% < required ${moveThreshold.toFixed(1)}%`;
+    // 🚨 CRITICAL FIX: In TENSOR_MODE, Enhanced Mathematical Intuition is a MATHEMATICAL VARIABLE only, NOT a decision maker
+    const isTensorMode = process.env.TENSOR_MODE === 'true';
     
-    console.log(`🔧 Trade decision: ${correctedShouldTrade ? 'TRADE' : 'SKIP'} - ${correctedReason}`);
+    let correctedShouldTrade: boolean;
+    let correctedReason: string;
+    
+    if (isTensorMode) {
+      // TENSOR_MODE: Always approve - Tensor Fusion makes ALL decisions
+      correctedShouldTrade = true;
+      correctedReason = `TENSOR_MODE: Mathematical variable only - decision delegated to Tensor Fusion engine`;
+      console.log(`🧠 V₂ Mathematical Intuition: Providing tensor variable (conf: ${pairAdaptedConfidence.toFixed(1)}%, move: ${predictedMove.toFixed(3)}%) - Tensor Fusion decides`);
+    } else {
+      // STANDALONE_MODE: Make independent decisions as before
+      correctedShouldTrade = pairAdaptedConfidence > confidenceThreshold && Math.abs(predictedMove) >= moveThreshold;
+      correctedReason = correctedShouldTrade 
+        ? `Enhanced confidence: ${pairAdaptedConfidence.toFixed(1)}%, predicted move: ${predictedMove.toFixed(3)}%`
+        : `Insufficient edge: confidence ${pairAdaptedConfidence.toFixed(1)}% or move ${Math.abs(predictedMove).toFixed(3)}% < required ${moveThreshold.toFixed(1)}%`;
+      console.log(`🔧 Trade decision: ${correctedShouldTrade ? 'TRADE' : 'SKIP'} - ${correctedReason}`);
+    }
     
     // Calculate dynamic position size using available balance calculator
     let finalPositionSize = intelligentDecision.positionSize;

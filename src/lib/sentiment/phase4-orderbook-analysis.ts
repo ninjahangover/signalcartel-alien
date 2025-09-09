@@ -85,6 +85,7 @@ export class OrderBookAnalyzer extends EventEmitter {
   private readonly symbols = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT'];
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private updateCount = 0; // Track updates for log throttling
   
   // Binance US WebSocket URLs (better for US-based servers)
   private readonly BINANCE_US_WS = 'wss://stream.binance.us:9443/ws';
@@ -156,7 +157,11 @@ export class OrderBookAnalyzer extends EventEmitter {
         }
       } else if (message.lastUpdateId && message.bids && message.asks) {
         // Direct single stream format (what we're actually getting)
-        console.log('📊 Processing order book update for single stream');
+        this.updateCount++;
+        // Only log every 50th update to prevent spam
+        if (this.updateCount % 50 === 0) {
+          console.log('📊 Processing order book update for single stream');
+        }
         this.processDirectDepthUpdate(message);
       }
     } catch (error) {
@@ -231,7 +236,10 @@ export class OrderBookAnalyzer extends EventEmitter {
     // Generate intelligence analysis
     const intelligence = this.generateIntelligence(snapshot);
     
-    console.log(`✅ Generated order book signal for ${symbol}: ${intelligence.signals.positionBias} (${intelligence.signals.entryConfidence}%)`);
+    // Only log signal generation every 25th time to reduce spam
+    if (this.updateCount % 25 === 0) {
+      console.log(`✅ Generated order book signal for ${symbol}: ${intelligence.signals.positionBias} (${intelligence.signals.entryConfidence}%)`);
+    }
     
     this.emit('orderBookUpdate', { snapshot, intelligence });
   }

@@ -17,6 +17,8 @@ import { CRYPTO_TRADING_PAIRS } from './crypto-trading-pairs';
 import { quantumForgeOrderBookAI } from './quantum-forge-orderbook-ai';
 import { UniversalSentimentEnhancer, BaseStrategySignal } from './sentiment/universal-sentiment-enhancer';
 import { mathematicalIntuitionEngine } from './mathematical-intuition-engine';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface ProfitHunt {
   symbol: string;
@@ -109,6 +111,10 @@ export class QuantumForgeProfitPredator {
   private recentHuntResults: HuntResult[] = [];
   private learningMemory: Map<string, any> = new Map();
   
+  // Logging configuration
+  private readonly LOG_DIR = '/tmp/signalcartel-logs';
+  private readonly LOG_FILE = path.join('/tmp/signalcartel-logs', 'profit-predator.log');
+  
   // Aggressive profit hunting parameters
   private maxConcurrentHunts = 12;      // Hunt aggressively across multiple opportunities
   private acceptableLossRate = 0.4;     // Accept 40% losses for bigger wins
@@ -119,15 +125,55 @@ export class QuantumForgeProfitPredator {
     this.prisma = new PrismaClient();
     this.sentimentEnhancer = new UniversalSentimentEnhancer();
     this.evolutionMetrics = this.initializeEvolutionMetrics();
+    
+    // Initialize logging
+    this.initializeLogging();
+  }
+
+  /**
+   * Initialize logging system
+   */
+  private initializeLogging(): void {
+    try {
+      // Ensure log directory exists
+      if (!fs.existsSync(this.LOG_DIR)) {
+        fs.mkdirSync(this.LOG_DIR, { recursive: true });
+      }
+      
+      // Initialize log file with header
+      this.logToFile('🐅 QUANTUM FORGE™ Profit Predator - Logging initialized');
+    } catch (error) {
+      console.error('Failed to initialize profit predator logging:', error.message);
+    }
+  }
+
+  /**
+   * Log message to both console and file
+   */
+  private logToFile(message: string): void {
+    try {
+      const timestamp = new Date().toISOString();
+      const logMessage = `[${timestamp}] ${message}\n`;
+      
+      // Write to file
+      fs.appendFileSync(this.LOG_FILE, logMessage);
+      
+      // Also log to console for immediate visibility
+      console.log(message);
+    } catch (error) {
+      // Fallback to console only if file logging fails
+      console.log(message);
+      console.error('Failed to write to profit predator log file:', error.message);
+    }
   }
 
   /**
    * MAIN PREDATOR: Hunt for profits across all markets
    */
   async huntForProfits(): Promise<ProfitHunt[]> {
-    console.log('🐅 QUANTUM FORGE™ Profit Predator - HUNTING MODE ACTIVATED');
-    console.log('💀 Accepting losses to optimize for maximum expectancy');
-    console.log('🔄 Evolving algorithms in real-time for continuous improvement');
+    this.logToFile('🐅 QUANTUM FORGE™ Profit Predator - HUNTING MODE ACTIVATED');
+    this.logToFile('💀 Accepting losses to optimize for maximum expectancy');
+    this.logToFile('🔄 Evolving algorithms in real-time for continuous improvement');
 
     // Evolution check - evolve if we've learned enough
     if (this.shouldEvolve()) {
@@ -175,12 +221,12 @@ export class QuantumForgeProfitPredator {
       (b.expectancyRatio * b.uniquenessScore) - (a.expectancyRatio * a.uniquenessScore)
     );
 
-    console.log(`🎯 Found ${profitableHunts.length} high-expectancy profit opportunities`);
+    this.logToFile(`🎯 Found ${profitableHunts.length} high-expectancy profit opportunities`);
     
     if (profitableHunts.length > 0) {
-      console.log('\\n🏆 TOP PROFIT HUNTS:');
+      this.logToFile('\\n🏆 TOP PROFIT HUNTS:');
       profitableHunts.slice(0, 8).forEach((hunt, idx) => {
-        console.log(`   ${idx + 1}. ${hunt.symbol} ${hunt.huntType}: ${hunt.expectedReturn.toFixed(1)}% expected (${hunt.expectancyRatio.toFixed(1)}:1 ratio)`);
+        this.logToFile(`   ${idx + 1}. ${hunt.symbol} ${hunt.huntType}: ${hunt.expectedReturn.toFixed(1)}% expected (${hunt.expectancyRatio.toFixed(1)}:1 ratio)`);
       });
     }
 
@@ -711,7 +757,7 @@ export class QuantumForgeProfitPredator {
   }
 
   private async evolveAlgorithms(): Promise<void> {
-    console.log('🧬 EVOLUTION TRIGGERED - Analyzing performance and evolving algorithms');
+    this.logToFile('🧬 EVOLUTION TRIGGERED - Analyzing performance and evolving algorithms');
     
     // Analyze recent performance
     const recentResults = this.recentHuntResults.slice(-this.evolutionThreshold);
@@ -744,10 +790,10 @@ export class QuantumForgeProfitPredator {
       });
     });
 
-    console.log(`✅ Evolution complete - Generation ${this.evolutionMetrics.generationNumber}`);
-    console.log(`   📊 Recent Success Rate: ${(successRate * 100).toFixed(1)}%`);
-    console.log(`   💰 Average Return: ${avgReturn.toFixed(2)}%`);
-    console.log(`   🧬 Adaptation Score: ${this.evolutionMetrics.adaptationScore.toFixed(3)}`);
+    this.logToFile(`✅ Evolution complete - Generation ${this.evolutionMetrics.generationNumber}`);
+    this.logToFile(`   📊 Recent Success Rate: ${(successRate * 100).toFixed(1)}%`);
+    this.logToFile(`   💰 Average Return: ${avgReturn.toFixed(2)}%`);
+    this.logToFile(`   🧬 Adaptation Score: ${this.evolutionMetrics.adaptationScore.toFixed(3)}`);
   }
 
   private calculateLearningVelocity(): number {
