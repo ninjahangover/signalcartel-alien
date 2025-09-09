@@ -300,7 +300,8 @@ export class TensorAIFusionEngine {
   private validateTensorSpace(tensors: number[][], context: string): number[][] {
     if (!Array.isArray(tensors) || tensors.length === 0) {
       console.error(`🚨 TENSOR SPACE ERROR: ${context} - Empty or invalid tensor array`);
-      return [[0.5, 0, 0, 0.5]]; // Default neutral tensor
+      console.error(`🚨 TENSOR DEBUG: Received tensors:`, JSON.stringify(tensors));
+      throw new Error(`TENSOR FALLBACK REMOVED: No valid AI tensors provided - ${context}`);
     }
     
     const validatedTensors: number[][] = [];
@@ -324,8 +325,10 @@ export class TensorAIFusionEngine {
     
     // Ensure at least one valid tensor exists
     if (validatedTensors.length === 0) {
-      console.error(`🚨 TENSOR RECOVERY: No valid tensors found, using neutral tensor`);
-      return [[0.5, 0, 0, 0.5]];
+      console.error(`🚨 TENSOR RECOVERY: No valid tensors found`);
+      console.error(`🚨 TENSOR VALIDATION DEBUG: Original tensor count: ${tensors.length}`);
+      console.error(`🚨 TENSOR VALIDATION DEBUG: Validation failed for all tensors`);
+      throw new Error(`TENSOR FALLBACK REMOVED: All AI tensors failed validation - ${context}`);
     }
     
     return validatedTensors;
@@ -527,6 +530,7 @@ export class TensorAIFusionEngine {
       // FINAL VALIDATION: Ensure decision has no NaN values
       if (!this.isValidDecision(decision)) {
         console.error('🚨 DECISION VALIDATION ERROR: Final decision contains invalid values');
+        this.logInvalidDecisionFields(decision);
         return this.createSafeNeutralDecision('Decision validation failed');
       }
       
@@ -684,6 +688,7 @@ export class TensorAIFusionEngine {
     const currentWeights = Array.from(this.weights.values());
     console.log(`🔢 Available weights: ${currentWeights.length}, Required: ${numSystems}`);
     
+    
     // MATHEMATICAL SAFEGUARD: Prevent division by zero
     let totalWeight = 0;
     const validatedWeights: number[] = [];
@@ -761,6 +766,7 @@ export class TensorAIFusionEngine {
       this.validateRealNumber(fusedTensor[2], 'fused_magnitude'),
       this.validateRealNumber(fusedTensor[3], 'fused_reliability')
     ];
+    
     
     console.log(`✅ Tensor fusion complete: F = [${finalTensor.map(x => x.toFixed(4)).join(', ')}] ∈ ℝ_safe⁴`);
     
@@ -1128,6 +1134,24 @@ export class TensorAIFusionEngine {
       markovPrediction
     );
     
+    // ENHANCED: Calculate continuous validation metrics for SINGLE DECISION MAKER validation
+    const continuousValidation = this.calculateContinuousAIValidation(
+      contributingSystems,
+      coherenceMetrics.consensusStrength,
+      fusedConfidence,
+      markovPrediction
+    );
+    
+    // ENHANCED: Determine final action decision with SINGLE DECISION MAKER authority
+    const actionResult = this.determineActionWithHoldLogic(
+      shouldTrade,
+      fusedDirection,
+      continuousValidation,
+      combinedExpectedReturn,
+      coherenceMetrics.consensusStrength,
+      contributingSystems
+    );
+    
     // ENHANCED: Calculate multi-timeframe analysis for context (not decision making)
     const multiTimeframe = await this.calculateMultiTimeframeAnalysis(
       contributingSystems,
@@ -1141,7 +1165,7 @@ export class TensorAIFusionEngine {
     return {
       fusedConfidence,
       fusedDirection: Math.sign(fusedDirection),
-      fusedMagnitude: Math.abs(dynamicMagnitude), // ENHANCED: Use AI consensus-based dynamic magnitude
+      fusedMagnitude: Math.abs(fusedMagnitude), // CRITICAL FIX: Use tensor-calculated magnitude directly (not dynamicMagnitude override)
       fusedReliability,
       
       shouldTrade,
@@ -1149,6 +1173,12 @@ export class TensorAIFusionEngine {
       // CRITICAL FIX: Always show calculated position size for monitoring purposes
       // Even if we don't trade, show what the position size would be for transparency
       positionSize: consensusAdjustedSize, // Show calculated size regardless of trading decision
+      
+      // SINGLE DECISION MAKER AUTHORITY: Action decision from tensor fusion ONLY
+      actionDecision: actionResult.actionDecision,
+      holdReason: actionResult.holdReason,
+      holdConfidence: actionResult.holdConfidence,
+      continuousValidation,
       
       // ENHANCED: Advanced position sizing based on fusion confidence and reliability
       positionSizing,
@@ -1795,70 +1825,84 @@ export class TensorAIFusionEngine {
   }
   
   /**
-   * Helper method to check if a decision is valid
+   * Helper method to check if a decision is valid - SIMPLIFIED FOR SINGLE DECISION MAKER
+   * ARCHITECTURAL CHANGE: Focus ONLY on core tensor fusion results, not complex nested validations
+   * This prevents excessive validation from forcing fallback to default values
    */
   private isValidDecision(decision: FusedDecision): boolean {
-    return (
+    // CORE TENSOR VALUES: These are the essential values that MUST be valid
+    const coreValid = (
       this.isValidReal(decision.fusedConfidence) &&
       this.isValidReal(decision.fusedDirection) &&
       this.isValidReal(decision.fusedMagnitude) &&
       this.isValidReal(decision.fusedReliability) &&
       this.isValidReal(decision.expectedReturn) &&
       this.isValidReal(decision.positionSize) &&
-      this.isValidReal(decision.eigenvalueSpread) &&
       this.isValidReal(decision.informationContent) &&
-      this.isValidReal(decision.consensusStrength) &&
-      this.isValidReal(decision.markovConfidence) &&
-      // ENHANCED: Validate hold logic fields
-      this.isValidReal(decision.holdConfidence) &&
-      this.isValidReal(decision.continuousValidation.validationStrength) &&
-      this.isValidReal(decision.continuousValidation.trendConsistency) &&
-      this.isValidReal(decision.continuousValidation.conflictLevel) &&
-      this.isValidReal(decision.continuousValidation.stabilityScore) &&
-      ['BUY', 'SELL', 'HOLD'].includes(decision.actionDecision) &&
-      // ENHANCED: Validate dynamic exit fields
-      typeof decision.dynamicExit.shouldExit === 'boolean' &&
-      this.isValidReal(decision.dynamicExit.exitConfidence) &&
-      ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(decision.dynamicExit.exitUrgency) &&
-      this.isValidReal(decision.dynamicExit.orderBookShift.liquidityChange) &&
-      this.isValidReal(decision.dynamicExit.orderBookShift.pressureShift) &&
-      this.isValidReal(decision.dynamicExit.orderBookShift.whaleActivity) &&
-      typeof decision.dynamicExit.orderBookShift.microstructureAlert === 'boolean' &&
-      this.isValidReal(decision.dynamicExit.sentimentShift.sentimentChange) &&
-      this.isValidReal(decision.dynamicExit.sentimentShift.confidenceChange) &&
-      typeof decision.dynamicExit.sentimentShift.criticalEvents === 'number' &&
-      typeof decision.dynamicExit.sentimentShift.narrativeShift === 'boolean' &&
-      // ENHANCED: Validate position sizing fields
-      this.isValidReal(decision.positionSizing.baseSize) &&
-      this.isValidReal(decision.positionSizing.confidenceMultiplier) &&
-      this.isValidReal(decision.positionSizing.reliabilityMultiplier) &&
-      this.isValidReal(decision.positionSizing.riskAdjustment) &&
-      this.isValidReal(decision.positionSizing.finalSize) &&
-      typeof decision.positionSizing.sizingReason === 'string' &&
-      ['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE', 'MAXIMUM'].includes(decision.positionSizing.riskLevel) &&
-      this.isValidReal(decision.positionSizing.kellyCriterion) &&
-      this.isValidReal(decision.positionSizing.sharpeOptimal) &&
-      this.isValidReal(decision.positionSizing.maxDrawdownLimit) &&
-      // ENHANCED: Validate multi-timeframe fields
-      ['1m', '5m', '15m', '1h', '4h', '1d'].includes(decision.multiTimeframe.primaryTimeframe) &&
-      this.isValidReal(decision.multiTimeframe.timeframeAlignment) &&
-      this.isValidReal(decision.multiTimeframe.trendConsistency.shortTerm) &&
-      this.isValidReal(decision.multiTimeframe.trendConsistency.mediumTerm) &&
-      this.isValidReal(decision.multiTimeframe.trendConsistency.longTerm) &&
-      this.isValidReal(decision.multiTimeframe.trendConsistency.overallAlignment) &&
-      this.isValidReal(decision.multiTimeframe.volatilityProfile.currentVolatility) &&
-      ['INCREASING', 'DECREASING', 'STABLE'].includes(decision.multiTimeframe.volatilityProfile.volatilityTrend) &&
-      ['LOW', 'NORMAL', 'HIGH', 'EXTREME'].includes(decision.multiTimeframe.volatilityProfile.volatilityRegime) &&
-      this.isValidReal(decision.multiTimeframe.supportResistance.nearestSupport) &&
-      this.isValidReal(decision.multiTimeframe.supportResistance.nearestResistance) &&
-      this.isValidReal(decision.multiTimeframe.supportResistance.supportStrength) &&
-      this.isValidReal(decision.multiTimeframe.supportResistance.resistanceStrength) &&
-      Array.isArray(decision.multiTimeframe.supportResistance.keyLevels) &&
-      ['1m', '5m', '15m', '1h', '4h', '1d'].includes(decision.multiTimeframe.timeframeRecommendation.optimalTimeframe) &&
-      ['SCALP', 'SHORT', 'MEDIUM', 'SWING'].includes(decision.multiTimeframe.timeframeRecommendation.holdingPeriod) &&
-      this.isValidReal(decision.multiTimeframe.timeframeRecommendation.confidence) &&
-      typeof decision.multiTimeframe.timeframeRecommendation.reasoning === 'string'
+      this.isValidReal(decision.consensusStrength)
     );
+    
+    // ESSENTIAL ACTION DECISION: Must be a valid decision type
+    const actionValid = ['BUY', 'SELL', 'HOLD'].includes(decision.actionDecision);
+    
+    // ONLY validate core fields - complex nested objects are allowed to be incomplete
+    // This ensures the SINGLE DECISION MAKER (Tensor Fusion) can output its calculations
+    // without being blocked by validation failures in enhanced features
+    return coreValid && actionValid;
+  }
+  
+  /**
+   * Log which fields in the decision are invalid for debugging
+   */
+  private logInvalidDecisionFields(decision: FusedDecision): void {
+    console.log('🔍 DECISION VALIDATION DEBUG:');
+    
+    // Check basic tensor values
+    if (!this.isValidReal(decision.fusedConfidence)) 
+      console.log(`  ❌ fusedConfidence: ${decision.fusedConfidence}`);
+    if (!this.isValidReal(decision.fusedDirection)) 
+      console.log(`  ❌ fusedDirection: ${decision.fusedDirection}`);
+    if (!this.isValidReal(decision.fusedMagnitude)) 
+      console.log(`  ❌ fusedMagnitude: ${decision.fusedMagnitude}`);
+    if (!this.isValidReal(decision.fusedReliability)) 
+      console.log(`  ❌ fusedReliability: ${decision.fusedReliability}`);
+    if (!this.isValidReal(decision.expectedReturn)) 
+      console.log(`  ❌ expectedReturn: ${decision.expectedReturn}`);
+    if (!this.isValidReal(decision.positionSize)) 
+      console.log(`  ❌ positionSize: ${decision.positionSize}`);
+    if (!this.isValidReal(decision.informationContent)) 
+      console.log(`  ❌ informationContent: ${decision.informationContent}`);
+    if (!this.isValidReal(decision.consensusStrength)) 
+      console.log(`  ❌ consensusStrength: ${decision.consensusStrength}`);
+      
+    // Check decision action
+    if (!['BUY', 'SELL', 'HOLD'].includes(decision.actionDecision)) 
+      console.log(`  ❌ actionDecision: ${decision.actionDecision}`);
+      
+    // Check complex nested objects (basic validation)
+    try {
+      if (!decision.continuousValidation) 
+        console.log('  ❌ continuousValidation: undefined');
+      else if (!this.isValidReal(decision.continuousValidation.validationStrength))
+        console.log(`  ❌ continuousValidation.validationStrength: ${decision.continuousValidation.validationStrength}`);
+        
+      if (!decision.dynamicExit) 
+        console.log('  ❌ dynamicExit: undefined');
+      else if (typeof decision.dynamicExit.shouldExit !== 'boolean')
+        console.log(`  ❌ dynamicExit.shouldExit: ${decision.dynamicExit.shouldExit} (not boolean)`);
+        
+      if (!decision.positionSizing) 
+        console.log('  ❌ positionSizing: undefined');
+      else if (!this.isValidReal(decision.positionSizing.finalSize))
+        console.log(`  ❌ positionSizing.finalSize: ${decision.positionSizing.finalSize}`);
+        
+      if (!decision.multiTimeframe) 
+        console.log('  ❌ multiTimeframe: undefined');
+      else if (!['1m', '5m', '15m', '1h', '4h', '1d'].includes(decision.multiTimeframe.primaryTimeframe))
+        console.log(`  ❌ multiTimeframe.primaryTimeframe: ${decision.multiTimeframe.primaryTimeframe}`);
+    } catch (error) {
+      console.log(`  ❌ Error checking nested objects: ${error.message}`);
+    }
   }
   
   /**

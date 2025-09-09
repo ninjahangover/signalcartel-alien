@@ -17,6 +17,7 @@ import { CRYPTO_TRADING_PAIRS } from './crypto-trading-pairs';
 import { quantumForgeOrderBookAI } from './quantum-forge-orderbook-ai';
 import { UniversalSentimentEnhancer, BaseStrategySignal } from './sentiment/universal-sentiment-enhancer';
 import { mathematicalIntuitionEngine } from './mathematical-intuition-engine';
+import { gpuService } from './gpu-acceleration-service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -672,20 +673,164 @@ export class QuantumForgeProfitPredator {
   }
 
   /**
-   * Hunt for news reaction opportunities
+   * Hunt for news reaction opportunities - GPU ACCELERATED
+   * Processes multiple symbols simultaneously to avoid API rate limits
    */
   private async huntNewsReactions(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
     
     // Focus on pairs that react strongly to news
-    const newsReactivePairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD'];
+    const newsReactivePairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'AVAXUSD', 'DOTUSD'];
     
-    for (const symbol of newsReactivePairs) {
+    try {
+      // STEP 1: Batch fetch market data to respect API limits
+      console.log(`🐅 PROFIT PREDATOR GPU: Batch fetching market data for ${newsReactivePairs.length} news-reactive pairs`);
+      const marketDataBatch: { [symbol: string]: any } = {};
+      
+      // Fetch market data with rate limiting awareness
+      for (const symbol of newsReactivePairs) {
+        try {
+          const data = await this.getMarketData(symbol);
+          if (data) {
+            marketDataBatch[symbol] = {
+              ...data,
+              momentum: data.change24h || 0,
+              volatility: Math.abs(data.change24h || 0) / 100 // Estimated volatility
+            };
+          }
+        } catch (error) {
+          console.log(`⚠️ Skipping ${symbol} due to API limit or data error`);
+          // Continue with other symbols
+        }
+      }
+
+      const availableSymbols = Object.keys(marketDataBatch);
+      console.log(`📊 PROFIT PREDATOR: Got market data for ${availableSymbols.length}/${newsReactivePairs.length} symbols`);
+
+      if (availableSymbols.length === 0) {
+        console.log(`⏳ PROFIT PREDATOR: No market data available due to API limits, skipping news reactions`);
+        return hunts;
+      }
+
+      // STEP 2: GPU batch processing for opportunity analysis
+      const gpuOpportunities = await gpuService.batchProcessProfitOpportunities(
+        availableSymbols,
+        marketDataBatch,
+        'news_reaction'
+      );
+
+      // STEP 3: Process GPU results and convert to ProfitHunt format
+      for (const opportunity of gpuOpportunities) {
+        try {
+          const symbol = opportunity.symbol;
+          const marketData = marketDataBatch[symbol];
+          
+          // Additional validation using mathematical intuition for high-confidence opportunities
+          if (opportunity.confidence > 0.5) {
+            const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuition({
+              symbol,
+              currentPrice: marketData.price,
+              priceChange: marketData.change24h || 0,
+              volume: marketData.volume24h || 1000000,
+              timestamp: new Date()
+            });
+
+            const intuitionStrength = intuitionResult.overallIntuition || 0.5;
+            const intuitionSignal = Math.abs(intuitionStrength - 0.5) * 2;
+            
+            // Combine GPU analysis with intuition validation
+            const combinedConfidence = (opportunity.confidence + intuitionSignal) / 2;
+            const volume = marketData.volume24h || 1000000;
+            
+            // Look for strong signals with volume confirmation
+            if (combinedConfidence > 0.6 && volume > 10000000) {
+              const direction = opportunity.expectedReturn > 0 ? 1 : -1;
+              const expectedReturn = Math.abs(opportunity.expectedReturn) * 100 * direction; // Convert to percentage
+              const maxDownside = Math.abs(opportunity.expectedReturn) * 40; // 40% of expected return as downside
+              const expectancyRatio = Math.abs(expectedReturn) / maxDownside;
+              
+              if (expectancyRatio >= this.minExpectancy) {
+                hunts.push({
+                  symbol,
+                  huntType: 'NEWS_REACTION',
+                  expectedReturn,
+                  maxDownside,
+                  expectancyRatio,
+                  probabilityOfProfit: 0.35 + combinedConfidence * 0.35,
+                  signalStrength: combinedConfidence,
+                  uniquenessScore: 0.8,
+                  timeDecay: 0.6,
+                  competitorThreat: 0.4,
+                  aggressiveness: 'HIGH',
+                  entrySpeed: 'FAST',
+                  exitSpeed: 'MOMENTUM',
+                  positionRisk: Math.min(0.1, 0.04 + combinedConfidence * 0.04),
+                  maxHoldMinutes: 150,
+                  similarHistoricalTrades: await this.getSimilarTradeCount(symbol, 'NEWS_REACTION'),
+                  historicalSuccessRate: await this.getHistoricalSuccessRate(symbol, 'NEWS_REACTION'),
+                  avgHistoricalReturn: await this.getAvgHistoricalReturn(symbol, 'NEWS_REACTION'),
+                  learningConfidence: 0.7,
+                  marketRegime: this.getCurrentMarketRegime(),
+                  volatilityLevel: 'HIGH',
+                  liquidityLevel: 'HIGH',
+                  newsContext: [
+                    `GPU+Intuition detected news pattern: ${opportunity.opportunity}`,
+                    `Rationale: ${opportunity.rationale}`,
+                    `Combined confidence: ${(combinedConfidence * 100).toFixed(1)}%`
+                  ],
+                  competitiveAdvantage: 'GPU-accelerated news pattern recognition with AI validation',
+                  metadata: {
+                    detectedAt: new Date(),
+                    hunterVersion: '2.1-gpu-predator',
+                    rawSignalData: { 
+                      gpuOpportunity: opportunity,
+                      intuitionStrength, 
+                      intuitionSignal, 
+                      volume,
+                      combinedConfidence 
+                    },
+                    evolutionGeneration: this.evolutionMetrics.generationNumber
+                  }
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.log(`⚠️ Error processing ${opportunity.symbol}:`, error.message);
+          // Continue with other opportunities
+        }
+      }
+
+      if (hunts.length > 0) {
+        console.log(`🎯 PROFIT PREDATOR GPU: Found ${hunts.length} validated news reaction opportunities`);
+        hunts.forEach(hunt => {
+          console.log(`   ${hunt.symbol}: ${hunt.expectedReturn > 0 ? '+' : ''}${hunt.expectedReturn.toFixed(2)}% expected (${(hunt.probabilityOfProfit * 100).toFixed(1)}% prob)`);
+        });
+      } else {
+        console.log(`🔍 PROFIT PREDATOR GPU: No qualifying news reaction opportunities found`);
+      }
+
+    } catch (error) {
+      console.error(`❌ PROFIT PREDATOR GPU: News reaction hunting failed:`, error);
+      // Fall back to traditional sequential processing if GPU fails
+      console.log(`🔄 PROFIT PREDATOR: Falling back to sequential processing...`);
+      return this.huntNewsReactionsSequential(newsReactivePairs.slice(0, 2)); // Limit to avoid API issues
+    }
+    
+    return hunts;
+  }
+
+  /**
+   * Fallback sequential news reaction hunting (limited to avoid API rate limits)
+   */
+  private async huntNewsReactionsSequential(symbols: string[]): Promise<ProfitHunt[]> {
+    const hunts: ProfitHunt[] = [];
+    
+    for (const symbol of symbols) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
 
-        // Use mathematical intuition to detect news-driven patterns
         const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuition({
           symbol,
           currentPrice: marketData.price,
@@ -698,7 +843,6 @@ export class QuantumForgeProfitPredator {
         const intuitionSignal = Math.abs(intuitionStrength - 0.5) * 2;
         const volume = marketData.volume24h || 1000000;
         
-        // Look for high intuition + volume spikes (often indicates news)
         if (intuitionSignal > 0.6 && volume > 15000000) {
           const direction = intuitionStrength > 0.5 ? 1 : -1;
           const expectedReturn = intuitionSignal * 10 * direction;
@@ -714,9 +858,9 @@ export class QuantumForgeProfitPredator {
               expectancyRatio,
               probabilityOfProfit: 0.4 + intuitionSignal * 0.3,
               signalStrength: intuitionSignal,
-              uniquenessScore: 0.8, // News reactions can be unique
+              uniquenessScore: 0.8,
               timeDecay: 0.6,
-              competitorThreat: 0.4, // Depends on news visibility
+              competitorThreat: 0.4,
               aggressiveness: 'HIGH',
               entrySpeed: 'FAST',
               exitSpeed: 'MOMENTUM',
@@ -729,11 +873,11 @@ export class QuantumForgeProfitPredator {
               marketRegime: this.getCurrentMarketRegime(),
               volatilityLevel: 'HIGH',
               liquidityLevel: 'HIGH',
-              newsContext: ['Mathematical intuition detected news-driven pattern'],
+              newsContext: ['Sequential intuition detected news-driven pattern'],
               competitiveAdvantage: 'AI pattern recognition for news events',
               metadata: {
                 detectedAt: new Date(),
-                hunterVersion: '2.0-predator',
+                hunterVersion: '2.0-predator-fallback',
                 rawSignalData: { intuitionStrength, intuitionSignal, volume },
                 evolutionGeneration: this.evolutionMetrics.generationNumber
               }

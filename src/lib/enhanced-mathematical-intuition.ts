@@ -8,6 +8,7 @@
 import { MathematicalIntuitionEngine } from './mathematical-intuition-engine';
 import { getIntelligentPairAdapter, TradingDecision } from './intelligent-pair-adapter';
 import { getAvailableBalanceCalculator, AvailableBalanceResult } from './available-balance-calculator';
+import { gpuService } from './gpu-acceleration-service';
 
 export interface EnhancedIntuitiveAnalysis {
   // Original intuition data
@@ -59,6 +60,168 @@ export class EnhancedMathematicalIntuition {
   constructor() {
     this.baseEngine = MathematicalIntuitionEngine.getInstance();
     this.pairAdapter = getIntelligentPairAdapter();
+  }
+
+  /**
+   * GPU-accelerated batch analysis for multiple symbols
+   * Processes mathematical intuition across multiple symbols in parallel using GPU acceleration
+   */
+  async batchAnalyzeWithGPUAcceleration(
+    symbolBatch: Array<{
+      symbol: string;
+      currentPrice: number;
+      signal: any;
+      marketData: any;
+      positionManager: any;
+    }>
+  ): Promise<Array<{ symbol: string; analysis: EnhancedIntuitiveAnalysis }>> {
+    console.log(`🧠 GPU MATHEMATICAL INTUITION: Batch analyzing ${symbolBatch.length} symbols`);
+    
+    try {
+      // Check if GPU acceleration is available and beneficial (3+ symbols)
+      if (symbolBatch.length >= 3 && process.env.ENABLE_GPU_STRATEGIES === 'true') {
+        console.log(`🔥 Using GPU acceleration for ${symbolBatch.length} symbol batch analysis`);
+        
+        // Prepare batch for GPU processing
+        const gpuBatch = await Promise.all(symbolBatch.map(async (item) => {
+          // Get historical data for volatility calculation
+          let historicalPrices: number[] = [];
+          try {
+            // Try to get some market history if available
+            if (item.marketData && item.marketData.prices) {
+              historicalPrices = item.marketData.prices.slice(-20); // Last 20 prices
+            }
+          } catch (error) {
+            // Historical data optional, continue without it
+          }
+          
+          return {
+            symbol: item.symbol,
+            currentPrice: item.currentPrice,
+            signal: item.signal,
+            marketData: item.marketData,
+            historicalPrices,
+            volume24h: item.marketData?.volume24h || 1000000
+          };
+        }));
+        
+        // Execute GPU batch processing
+        const gpuResults = await gpuService.batchProcessMathematicalIntuition(gpuBatch);
+        
+        // Convert GPU results to full Enhanced Intuitive Analysis format
+        const finalResults = await Promise.all(gpuResults.map(async (gpuResult) => {
+          const originalItem = symbolBatch.find(item => item.symbol === gpuResult.symbol);
+          if (!originalItem) {
+            console.warn(`⚠️ GPU result for ${gpuResult.symbol} has no matching input item`);
+            return null;
+          }
+          
+          // Get available balance info
+          const availableBalanceCalculator = getAvailableBalanceCalculator(originalItem.positionManager);
+          const balanceInfo: AvailableBalanceResult = await availableBalanceCalculator.calculateAvailableBalance(gpuResult.symbol);
+          
+          // Initialize pair characteristics
+          await this.initializeBasicPairCharacteristics(gpuResult.symbol, originalItem.currentPrice);
+          
+          // Get intelligent trading decision
+          const intelligentDecision = this.pairAdapter.calculateCommissionAwareDecision(
+            gpuResult.symbol,
+            gpuResult.pairAdaptedConfidence + balanceInfo.confidenceThresholdAdjustment,
+            gpuResult.predictedMove,
+            originalItem.currentPrice,
+            balanceInfo.availableBalance
+          );
+          
+          // Get intelligent exit thresholds
+          const exitThresholds = this.pairAdapter.getIntelligentExitThresholds(gpuResult.symbol);
+          
+          // Calculate commission costs with dynamic position sizing
+          const finalPositionSize = intelligentDecision.positionSize > 0 ? intelligentDecision.positionSize :
+            availableBalanceCalculator.calculateDynamicPositionSize(
+              balanceInfo.availableBalance,
+              gpuResult.pairAdaptedConfidence + balanceInfo.confidenceThresholdAdjustment,
+              gpuResult.predictedMove,
+              balanceInfo.availableBalance / Math.max(balanceInfo.totalBalance, 1),
+              balanceInfo.totalBalance
+            );
+          
+          const commissionCost = finalPositionSize * 0.0026 * 2; // Round-trip taker fee
+          const expectedProfit = finalPositionSize * (Math.abs(gpuResult.predictedMove) / 100);
+          const netExpectedReturn = expectedProfit - commissionCost;
+          
+          // Store prediction for accuracy tracking
+          this.storePrediction(gpuResult.symbol, gpuResult.pairAdaptedConfidence, gpuResult.predictedMove);
+          
+          // Handle TENSOR_MODE vs STANDALONE_MODE decisions
+          const isTensorMode = process.env.TENSOR_MODE === 'true';
+          let finalShouldTrade: boolean;
+          let finalReason: string;
+          
+          if (isTensorMode) {
+            // TENSOR_MODE: Always approve - Tensor Fusion makes ALL decisions
+            finalShouldTrade = true;
+            finalReason = `TENSOR_MODE: Mathematical variable only - decision delegated to Tensor Fusion engine`;
+          } else {
+            // STANDALONE_MODE: Use GPU-calculated decision
+            finalShouldTrade = gpuResult.shouldTrade;
+            finalReason = finalShouldTrade 
+              ? `GPU Enhanced confidence: ${gpuResult.pairAdaptedConfidence.toFixed(1)}%, predicted move: ${gpuResult.predictedMove.toFixed(3)}%`
+              : `GPU Insufficient edge: confidence ${gpuResult.pairAdaptedConfidence.toFixed(1)}% or move ${Math.abs(gpuResult.predictedMove).toFixed(3)}%`;
+          }
+          
+          const analysis: EnhancedIntuitiveAnalysis = {
+            originalIntuition: gpuResult.originalIntuition,
+            flowField: gpuResult.flowField,
+            patternResonance: gpuResult.patternResonance,
+            pairAdaptedConfidence: gpuResult.pairAdaptedConfidence,
+            commissionAwareThreshold: intelligentDecision.commissionBreakeven,
+            intelligentDecision,
+            shouldTrade: finalShouldTrade,
+            confidence: gpuResult.pairAdaptedConfidence,
+            positionSize: finalPositionSize,
+            reason: finalReason,
+            takeProfit: exitThresholds.takeProfit,
+            stopLoss: exitThresholds.stopLoss,
+            expectedProfit: expectedProfit,
+            commissionCost: commissionCost,
+            netExpectedReturn: netExpectedReturn
+          };
+          
+          return { symbol: gpuResult.symbol, analysis };
+        }));
+        
+        // Filter out null results and log summary
+        const validResults = finalResults.filter(result => result !== null) as Array<{ symbol: string; analysis: EnhancedIntuitiveAnalysis }>;
+        const tradableCount = validResults.filter(r => r.analysis.shouldTrade).length;
+        
+        console.log(`🎯 GPU MATHEMATICAL INTUITION: Processed ${validResults.length} symbols, ${tradableCount} tradable opportunities found`);
+        
+        return validResults;
+      }
+    } catch (error) {
+      console.warn(`⚠️ GPU batch analysis failed, falling back to sequential processing:`, error.message);
+    }
+    
+    // Fallback to sequential processing
+    console.log(`📱 Using sequential CPU processing for ${symbolBatch.length} symbols`);
+    const results = [];
+    
+    for (const item of symbolBatch) {
+      try {
+        const analysis = await this.analyzeWithPairIntelligence(
+          item.symbol,
+          item.currentPrice,
+          item.signal,
+          item.marketData,
+          item.positionManager
+        );
+        results.push({ symbol: item.symbol, analysis });
+      } catch (error) {
+        console.error(`❌ Sequential analysis failed for ${item.symbol}:`, error.message);
+      }
+    }
+    
+    return results;
   }
 
   /**
