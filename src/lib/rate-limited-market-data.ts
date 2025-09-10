@@ -5,6 +5,7 @@
  */
 
 import { alpacaPaperTradingService } from './alpaca-paper-trading-service';
+import GPUAcceleratedQueueManager, { RequestPriority } from './gpu-accelerated-queue-manager';
 
 interface RateLimiter {
   lastRequest: number;
@@ -28,10 +29,11 @@ class RateLimitedMarketDataService {
   private static instance: RateLimitedMarketDataService;
   private rateLimiters: Map<string, RateLimiter> = new Map();
   private cache: Map<string, { data: MarketDataPoint; expiry: number }> = new Map();
+  private gpuQueueManager: GPUAcceleratedQueueManager;
   
   // Rate limits for different APIs
   private readonly RATE_LIMITS = {
-    alpaca: { requests: 200, windowMs: 60000 }, // 200 per minute
+    'kraken-public': { requests: 60, windowMs: 60000 }, // 60 per minute (conservative)
     coingecko: { requests: 10, windowMs: 60000 }, // 10 per minute (conservative)
     binance: { requests: 1200, windowMs: 60000 }, // 1200 per minute
     fallback: { requests: 5, windowMs: 60000 } // Very conservative fallback
@@ -44,6 +46,11 @@ class RateLimitedMarketDataService {
       RateLimitedMarketDataService.instance = new RateLimitedMarketDataService();
     }
     return RateLimitedMarketDataService.instance;
+  }
+
+  constructor() {
+    this.gpuQueueManager = GPUAcceleratedQueueManager.getInstance();
+    console.log('🚀 Market Data Service connected to GPU Queue Manager');
   }
   
   /**
@@ -60,7 +67,8 @@ class RateLimitedMarketDataService {
     }
     
     // Try sources in order of preference and rate limit availability
-    const sources = ['binance', 'coingecko', 'fallback'];
+    // Updated: Use Kraken public first (working), then fallback
+    const sources = ['kraken-public', 'fallback'];
     
     for (const source of sources) {
       if (this.canMakeRequest(source)) {
@@ -131,10 +139,8 @@ class RateLimitedMarketDataService {
   private async fetchFromSource(source: string, symbol: string): Promise<MarketDataPoint | null> {
     try {
       switch (source) {
-        case 'binance':
-          return await this.fetchFromBinance(symbol);
-        case 'coingecko':
-          return await this.fetchFromCoinGecko(symbol);
+        case 'kraken-public':
+          return await this.fetchFromKrakenPublic(symbol);
         case 'fallback':
           // NO FALLBACK - return null if we reached this point
           console.error(`❌ No real data available for ${symbol} - NOT using fallback`);
@@ -157,24 +163,23 @@ class RateLimitedMarketDataService {
       // Convert symbol for Binance
       const binanceSymbol = symbol.replace('USD', 'USDT');
       
-      const response = await fetch(
-        `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
+      // Route through GPU Queue Manager for rate limiting
+      const result = await this.gpuQueueManager.enqueueRequest(
+        `binance-${binanceSymbol}`,
+        'GET',
         {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-          timeout: 5000
-        }
+          url: `https://api.binance.com/api/v3/ticker/24hr?symbol=${binanceSymbol}`,
+          headers: { 'Accept': 'application/json' }
+        },
+        RequestPriority.MEDIUM,
+        5000
       );
       
-      if (response.status === 429) {
-        throw new Error('Rate limited by Binance');
+      if (result.error) {
+        throw new Error(`Binance API error: ${result.error}`);
       }
       
-      if (!response.ok) {
-        throw new Error(`Binance API error: ${response.status}`);
-      }
-      
-      const data = await response.json();
+      const data = result.data;
       
       return {
         symbol,
@@ -205,31 +210,27 @@ class RateLimitedMarketDataService {
       
       const coinId = this.convertToCoinGeckoId(symbol);
       
-      // Add delay to avoid 429
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const response = await fetch(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true`,
+      // Route through GPU Queue Manager for intelligent rate limiting
+      const result = await this.gpuQueueManager.enqueueRequest(
+        `coingecko-${coinId}`,
+        'GET',
         {
-          method: 'GET',
+          url: `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true`,
           headers: { 
             'Accept': 'application/json',
             'User-Agent': 'StratusEngine/1.0'
-          },
-          timeout: 10000
-        }
+          }
+        },
+        RequestPriority.MEDIUM,
+        10000
       );
       
-      if (response.status === 429) {
+      if (result.error) {
         console.log('⚠️ CoinGecko rate limited - will use other sources');
-        throw new Error('Rate limited by CoinGecko');
+        throw new Error(`Rate limited by CoinGecko: ${result.error}`);
       }
       
-      if (!response.ok) {
-        throw new Error(`CoinGecko API error: ${response.status}`);
-      }
-      
-      const data = await response.json();
+      const data = result.data;
       const coinData = data[coinId];
       
       if (!coinData) {
@@ -254,6 +255,70 @@ class RateLimitedMarketDataService {
       console.error('CoinGecko API error:', error);
       return null;
     }
+  }
+  
+  /**
+   * Fetch from Kraken Public API (Secondary source)
+   */
+  private async fetchFromKrakenPublic(symbol: string): Promise<MarketDataPoint | null> {
+    try {
+      // Convert symbol for Kraken (e.g., ETHUSD -> XETHZUSD)
+      const krakenSymbol = this.convertToKrakenSymbol(symbol);
+      
+      const result = await this.gpuQueueManager.enqueueRequest(
+        `kraken-public-${krakenSymbol}`,
+        'GET',
+        {
+          url: `https://api.kraken.com/0/public/Ticker?pair=${krakenSymbol}`,
+          headers: { 'Accept': 'application/json' }
+        },
+        RequestPriority.MEDIUM,
+        5000
+      );
+      
+      if (result.error) {
+        throw new Error(`Kraken Public API error: ${result.error}`);
+      }
+      
+      const data = result.data;
+      if (!data.result || Object.keys(data.result).length === 0) {
+        throw new Error('No data from Kraken');
+      }
+      
+      const pairData = data.result[Object.keys(data.result)[0]];
+      
+      return {
+        symbol,
+        price: parseFloat(pairData.c[0]), // Last trade price
+        volume: parseFloat(pairData.v[1]), // Volume last 24 hours
+        timestamp: new Date(),
+        source: 'kraken-public',
+        high: parseFloat(pairData.h[1]), // High last 24 hours
+        low: parseFloat(pairData.l[1]),   // Low last 24 hours
+        open: parseFloat(pairData.o),     // Opening price
+        close: parseFloat(pairData.c[0])  // Last trade price
+      };
+    } catch (error) {
+      console.error('Kraken Public API error:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Convert symbol to Kraken format
+   */
+  private convertToKrakenSymbol(symbol: string): string {
+    const mapping = {
+      'BTCUSD': 'XXBTZUSD',
+      'ETHUSD': 'XETHZUSD', 
+      'ADAUSD': 'ADAUSD',
+      'DOTUSD': 'DOTUSD',
+      'SOLUSD': 'SOLUSD',
+      'MATICUSD': 'MATICUSD',
+      'AVAXUSD': 'AVAXUSD'
+    };
+    
+    return mapping[symbol] || symbol;
   }
   
   /**
