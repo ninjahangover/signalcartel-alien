@@ -60,7 +60,7 @@ class RateLimitedMarketDataService {
     }
     
     // Try sources in order of preference and rate limit availability
-    const sources = ['alpaca', 'binance', 'coingecko', 'fallback'];
+    const sources = ['binance', 'coingecko', 'fallback'];
     
     for (const source of sources) {
       if (this.canMakeRequest(source)) {
@@ -131,8 +131,6 @@ class RateLimitedMarketDataService {
   private async fetchFromSource(source: string, symbol: string): Promise<MarketDataPoint | null> {
     try {
       switch (source) {
-        case 'alpaca':
-          return await this.fetchFromAlpaca(symbol);
         case 'binance':
           return await this.fetchFromBinance(symbol);
         case 'coingecko':
@@ -150,35 +148,6 @@ class RateLimitedMarketDataService {
     }
   }
   
-  /**
-   * Fetch from Alpaca (primary source since we're already using it)
-   */
-  private async fetchFromAlpaca(symbol: string): Promise<MarketDataPoint | null> {
-    try {
-      // Use existing Alpaca service
-      const marketData = await alpacaPaperTradingService.getMarketData([symbol]);
-      
-      if (marketData && marketData.length > 0) {
-        const data = marketData[0];
-        return {
-          symbol,
-          price: data.latestPrice,
-          volume: data.volume || 1000000, // Fallback volume
-          timestamp: data.latestTime,
-          source: 'alpaca',
-          high: data.high || data.latestPrice * 1.02,
-          low: data.low || data.latestPrice * 0.98,
-          open: data.latestPrice * 0.999,
-          close: data.latestPrice
-        };
-      }
-      
-      return null;
-    } catch (error) {
-      console.error('Alpaca market data error:', error);
-      return null;
-    }
-  }
   
   /**
    * Fetch from Binance with rate limiting

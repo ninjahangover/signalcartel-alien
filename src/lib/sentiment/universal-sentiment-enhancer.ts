@@ -65,12 +65,12 @@ export class UniversalSentimentEnhancer {
     conflictThreshold: 0.3,
     minSentimentConfidence: 0.5, // Lowered from 0.4 to enable real sentiment impact
     maxBoostPercent: 0.35, // Increased max boost for stronger sentiment influence
-    skipOnConflict: true,
+    skipOnConflict: false, // SINGLE DECISION MAKER: Tensor fusion has sole authority, no sentiment overrides
     
     // Order book validation settings
     enableOrderBookValidation: true, // Enable by default for QUANTUM FORGE™
     minOrderBookValidation: 35, // Require 35% validation strength minimum (lowered to allow more trades)
-    skipOnOrderBookConflict: true, // Skip on order book conflicts
+    skipOnOrderBookConflict: false, // SINGLE DECISION MAKER: No order book overrides, tensor has sole authority
     maxOrderBookBoost: 0.25 // Order book can boost confidence by up to 25%
   };
 
@@ -268,14 +268,9 @@ export class UniversalSentimentEnhancer {
           executionReason += ` ❌ Order book conflict: ${orderBookValidation.validationReason}`;
           
         } else if (orderBookValidation.validationStrength < config.minOrderBookValidation) {
-          // Low order book validation - reduce position or skip
-          if (orderBookValidation.recommendedAction === 'SKIP') {
-            finalAction = 'SKIP';
-            shouldExecute = false;
-            executionReason += ` ⚠️ Order book validation failed: ${orderBookValidation.validationReason}`;
-          } else {
-            executionReason += ` 📊 Low order book validation (${orderBookValidation.validationStrength.toFixed(1)}%)`;
-          }
+          // SINGLE DECISION MAKER: Order book provides advisory input but doesn't override tensor authority
+          // Low order book validation - log warning but allow tensor decision to proceed
+          executionReason += ` 📊 Order book advisory: Low validation (${orderBookValidation.validationStrength.toFixed(1)}% < ${config.minOrderBookValidation}%) - tensor authority proceeds`;
           
         } else if (orderBookValidation.isValidated && orderBookValidation.validationStrength > 70) {
           // Strong order book validation - apply boost
@@ -356,22 +351,27 @@ export class UniversalSentimentEnhancer {
    */
   private async storeEnhancedSignal(signal: SentimentEnhancedSignal, sentiment: SimpleSentimentScore): Promise<void> {
     try {
-      await prisma.enhancedTradingSignal.create({
-        data: {
-          symbol: signal.symbol,
-          strategy: signal.strategy,
-          technicalScore: signal.originalConfidence,
-          technicalAction: signal.originalAction,
-          sentimentScore: sentiment.score,
-          sentimentConfidence: sentiment.confidence,
-          sentimentConflict: signal.sentimentConflict,
-          combinedConfidence: signal.confidence,
-          finalAction: signal.finalAction,
-          confidenceBoost: signal.confidenceModifier,
-          executeReason: signal.executionReason,
-          wasExecuted: false // Will be updated when trade executes
-        }
-      });
+      // TEMPORARILY DISABLED: Database storage causing massive validation errors and tensor fusion fallback
+      // These errors cause tensor fusion to fail and return 50% confidence fallback values
+      // await prisma.enhancedTradingSignal.create({
+      //   data: {
+      //     symbol: signal.symbol,
+      //     strategy: signal.strategy,
+      //     technicalScore: signal.originalConfidence,
+      //     technicalAction: signal.originalAction,
+      //     sentimentScore: sentiment.score,
+      //     sentimentConfidence: sentiment.confidence,
+      //     sentimentConflict: signal.sentimentConflict,
+      //     combinedConfidence: signal.confidence,
+      //     finalAction: signal.finalAction,
+      //     confidenceBoost: signal.confidenceModifier,
+      //     executeReason: signal.executionReason,
+      //     wasExecuted: false // Will be updated when trade executes
+      //   }
+      // });
+      
+      // Silent success - no database storage for now
+      console.log(`📊 SIGNAL STORAGE DISABLED: ${signal.symbol} ${signal.strategy} signal (${signal.confidence.toFixed(1)}% confidence)`);
     } catch (error) {
       console.error('Error storing enhanced signal:', error);
     }

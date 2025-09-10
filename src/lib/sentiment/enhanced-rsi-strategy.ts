@@ -142,21 +142,23 @@ export class EnhancedRSIStrategy {
         this.sentimentService.getETHSentiment()
       );
 
-      // Store in database
-      await prisma.sentimentData.create({
-        data: {
-          symbol: sentiment.symbol,
-          source: 'twitter',
-          score: sentiment.score,
-          confidence: sentiment.confidence,
-          tweetCount: sentiment.tweetCount,
-          positiveCount: sentiment.positiveCount,
-          negativeCount: sentiment.negativeCount,
-          neutralCount: sentiment.neutralCount,
-          keywords: JSON.stringify(['simulated']), // TODO: Store actual keywords
-          processingTime: 100 // TODO: Track actual processing time
-        }
-      });
+      // TEMPORARILY DISABLED: Database storage causing massive validation errors and tensor fusion fallback
+      // await prisma.sentimentData.create({
+      //   data: {
+      //     symbol: sentiment.symbol,
+      //     source: 'twitter',
+      //     score: sentiment.score,
+      //     confidence: sentiment.confidence,
+      //     tweetCount: sentiment.tweetCount,
+      //     positiveCount: sentiment.positiveCount,
+      //     negativeCount: sentiment.negativeCount,
+      //     neutralCount: sentiment.neutralCount,
+      //     keywords: JSON.stringify(['simulated']), // TODO: Store actual keywords
+      //     processingTime: 100 // TODO: Track actual processing time
+      //   }
+      // });
+      
+      console.log(`📊 SENTIMENT STORAGE DISABLED: ${sentiment.symbol} sentiment data (${sentiment.confidence.toFixed(1)}% confidence)`);
 
       return sentiment;
       
@@ -232,22 +234,26 @@ export class EnhancedRSIStrategy {
    */
   private async storeEnhancedSignal(signal: EnhancedSignal, sentiment: SimpleSentimentScore): Promise<void> {
     try {
-      await prisma.enhancedTradingSignal.create({
-        data: {
-          symbol: signal.symbol,
-          strategy: signal.strategy,
-          technicalScore: signal.originalConfidence,
-          technicalAction: signal.action,
-          sentimentScore: sentiment.score,
-          sentimentConfidence: sentiment.confidence,
-          sentimentConflict: signal.sentimentConflict,
-          combinedConfidence: signal.confidence,
-          finalAction: signal.finalAction,
-          confidenceBoost: signal.confidenceBoost,
-          executeReason: signal.executeReason,
-          wasExecuted: false // Will be updated when trade executes
-        }
-      });
+      // TEMPORARILY DISABLED: Database storage causing massive validation errors and tensor fusion fallback
+      // await prisma.enhancedTradingSignal.create({
+      //   data: {
+      //     symbol: signal.symbol,
+      //     strategy: signal.strategy,
+      //     technicalScore: signal.originalConfidence,
+      //     technicalAction: signal.action,
+      //     sentimentScore: sentiment.score,
+      //     sentimentConfidence: sentiment.confidence,
+      //     sentimentConflict: signal.sentimentConflict,
+      //     combinedConfidence: signal.confidence,
+      //     finalAction: signal.finalAction,
+      //     confidenceBoost: signal.confidenceBoost,
+      //     executeReason: signal.executeReason,
+      //     wasExecuted: false // Will be updated when trade executes
+      //   }
+      // });
+      
+      // Silent success - no database storage for now
+      console.log(`📊 RSI STORAGE DISABLED: ${signal.symbol} ${signal.strategy} signal (${signal.confidence.toFixed(1)}% confidence)`);
     } catch (error) {
       console.error('Error storing enhanced signal:', error);
     }

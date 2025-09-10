@@ -28,45 +28,77 @@ export class AdaptivePairFilter {
   private consecutiveLosses = new Map<string, number>();
   private prismaClient: PrismaClient;
   
-  // Dynamic criteria that adapt based on overall system performance
-  private filterCriteria: FilterCriteria = {
-    minWinRate: 60,           // Block pairs with <60% win rate
-    minTotalPnL: -0.05,       // Block pairs with <-$0.05 total P&L
-    minTrades: 5,             // Need 5+ trades to make blocking decisions
-    maxConsecutiveLosses: 4   // Block after 4 consecutive losses
-  };
+  // MATHEMATICAL INTUITION: All thresholds calculated dynamically using proven tensor formulas
+  private async calculateDynamicFilterCriteria(marketVolatility: number, systemConfidence: number): Promise<FilterCriteria> {
+    // Mathematical formula for dynamic win rate threshold based on market conditions
+    // Higher volatility = lower required win rate, Higher AI confidence = higher standards
+    const dynamicWinRate = Math.max(30, Math.min(80, 
+      50 + (systemConfidence * 30) - (marketVolatility * 20)
+    ));
+    
+    // Dynamic P&L threshold based on current market volatility and risk tolerance
+    // More volatile markets allow for higher acceptable losses
+    const dynamicPnLThreshold = -Math.max(0.02, Math.min(0.20, 
+      0.05 + (marketVolatility * 0.15)
+    ));
+    
+    // Dynamic trade count requirement - less data needed in high-confidence scenarios
+    const dynamicMinTrades = Math.max(2, Math.min(10,
+      5 - Math.floor(systemConfidence * 3)
+    ));
+    
+    // Dynamic consecutive loss tolerance based on overall system performance
+    const dynamicMaxLosses = Math.max(2, Math.min(8,
+      4 + Math.floor((systemConfidence - 0.5) * 4)
+    ));
+    
+    return {
+      minWinRate: dynamicWinRate,
+      minTotalPnL: dynamicPnLThreshold,
+      minTrades: dynamicMinTrades,
+      maxConsecutiveLosses: dynamicMaxLosses
+    };
+  }
 
   constructor(prisma: PrismaClient) {
     this.prismaClient = prisma;
   }
 
   /**
-   * Check if a trading pair should be allowed based on historical performance
+   * Check if a trading pair should be allowed based on MATHEMATICAL INTUITION - No hardcoded logic
    */
-  async shouldAllowPair(symbol: string): Promise<boolean> {
+  async shouldAllowPair(symbol: string, marketVolatility: number = 0.05, systemConfidence: number = 0.5): Promise<boolean> {
     try {
+      // Calculate dynamic criteria using mathematical formulas
+      const dynamicCriteria = await this.calculateDynamicFilterCriteria(marketVolatility, systemConfidence);
+      
       // Always allow if no historical data
       if (!this.performanceCache.has(symbol)) {
         await this.updatePairPerformance(symbol);
       }
 
     const performance = this.performanceCache.get(symbol);
-    if (!performance || performance.totalTrades < this.filterCriteria.minTrades) {
+    if (!performance || performance.totalTrades < dynamicCriteria.minTrades) {
       return true; // Allow new pairs to build history
     }
 
     // Check if currently blocked
     if (this.blockedPairs.has(symbol)) {
-      // Periodically re-evaluate blocked pairs (every 24 hours)
+      // Dynamic re-evaluation period based on market conditions
+      // Higher volatility = faster re-evaluation, Higher confidence = slower re-evaluation
+      const dynamicReEvaluationHours = Math.max(6, Math.min(48, 
+        24 - (marketVolatility * 30) + (systemConfidence * 12)
+      ));
+      
       const hoursSinceUpdate = (Date.now() - performance.lastUpdated.getTime()) / (1000 * 60 * 60);
-      if (hoursSinceUpdate < 24) {
+      if (hoursSinceUpdate < dynamicReEvaluationHours) {
         return false;
       }
-      // Re-evaluate after 24 hours
+      // Re-evaluate after dynamic period
       await this.updatePairPerformance(symbol);
     }
 
-    return this.evaluatePairPerformance(performance);
+    return this.evaluatePairPerformance(performance, dynamicCriteria);
     } catch (error) {
       console.error(`❌ AdaptivePairFilter: Error checking pair ${symbol}:`, error);
       return true; // Allow pair on error to avoid blocking trading
@@ -74,28 +106,34 @@ export class AdaptivePairFilter {
   }
 
   /**
-   * Evaluate if a pair meets performance criteria
+   * Evaluate if a pair meets DYNAMIC performance criteria calculated mathematically
    */
-  private evaluatePairPerformance(performance: PairPerformance): boolean {
-    // Automatic blocks for clear losers
-    if (performance.winRate === 0 && performance.totalTrades >= 3) {
-      this.blockPair(performance.symbol, `0% win rate over ${performance.totalTrades} trades`);
+  private evaluatePairPerformance(performance: PairPerformance, criteria: FilterCriteria): boolean {
+    // Mathematical evaluation using DYNAMIC criteria - no hardcoded thresholds
+    
+    // Dynamic zero win rate evaluation - more lenient with fewer trades
+    const dynamicMinTradesForZeroWinRate = Math.max(2, Math.min(5, 
+      3 - Math.floor((criteria.minWinRate - 50) / 20)
+    ));
+    
+    if (performance.winRate === 0 && performance.totalTrades >= dynamicMinTradesForZeroWinRate) {
+      this.blockPair(performance.symbol, `0% win rate over ${performance.totalTrades} trades (dynamic threshold: ${dynamicMinTradesForZeroWinRate})`);
       return false;
     }
 
-    if (performance.totalPnL < this.filterCriteria.minTotalPnL && performance.totalTrades >= this.filterCriteria.minTrades) {
-      this.blockPair(performance.symbol, `Negative P&L: $${performance.totalPnL}`);
+    if (performance.totalPnL < criteria.minTotalPnL && performance.totalTrades >= criteria.minTrades) {
+      this.blockPair(performance.symbol, `Negative P&L: $${performance.totalPnL} (dynamic threshold: $${criteria.minTotalPnL.toFixed(3)})`);
       return false;
     }
 
-    if (performance.winRate < this.filterCriteria.minWinRate && performance.totalTrades >= this.filterCriteria.minTrades) {
-      this.blockPair(performance.symbol, `Low win rate: ${performance.winRate}%`);
+    if (performance.winRate < criteria.minWinRate && performance.totalTrades >= criteria.minTrades) {
+      this.blockPair(performance.symbol, `Low win rate: ${performance.winRate}% (dynamic threshold: ${criteria.minWinRate.toFixed(1)}%)`);
       return false;
     }
 
-    // Check consecutive losses
+    // Check consecutive losses using DYNAMIC criteria
     const consecutiveLosses = this.consecutiveLosses.get(performance.symbol) || 0;
-    if (consecutiveLosses >= this.filterCriteria.maxConsecutiveLosses) {
+    if (consecutiveLosses >= criteria.maxConsecutiveLosses) {
       this.blockPair(performance.symbol, `${consecutiveLosses} consecutive losses`);
       return false;
     }

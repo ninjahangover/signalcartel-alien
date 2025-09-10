@@ -3,7 +3,10 @@
  * 
  * ONLY fetches REAL prices from REAL APIs
  * NO MOCK DATA - if APIs fail, we show that clearly
+ * Uses rate-limited service to prevent API errors
  */
+
+import RateLimitedMarketDataService from './rate-limited-market-data';
 
 export interface RealPriceData {
   symbol: string;
@@ -237,9 +240,30 @@ class RealTimePriceFetcher {
       }
     }
 
-    console.log(`📊 Fetching REAL price data for ${symbol} with circuit breaker protection...`);
+    console.log(`📊 Fetching REAL price data for ${symbol} with rate-limited service...`);
     
-    // Try APIs with circuit breaker protection
+    // Use rate-limited market data service instead of direct API calls
+    try {
+      const rateLimitedService = RateLimitedMarketDataService.getInstance();
+      const marketData = await rateLimitedService.getMarketData(symbol);
+      
+      if (marketData) {
+        const result: RealPriceData = {
+          symbol,
+          price: marketData.price,
+          timestamp: marketData.timestamp,
+          source: marketData.source,
+          success: true
+        };
+        
+        this.cache.set(symbol, { price: marketData.price, timestamp: marketData.timestamp });
+        return result;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Rate-limited service failed for ${symbol}:`, error.message);
+    }
+    
+    // Fallback to original APIs with circuit breaker protection
     const apis = [
       { name: 'coingecko', fetch: () => this.fetchFromCoinGecko(symbol) },
       { name: 'binance', fetch: () => this.fetchFromBinance(symbol) },

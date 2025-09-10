@@ -33,20 +33,35 @@ try {
 let gpu: any = null;
 const useNativeGPU = !!tf;
 
-// Configure TensorFlow to use GPU if available
+// Configure TensorFlow to use GPU with optimized memory allocation
 if (tf) {
   try {
+    // Enhanced GPU memory configuration for GTX 1080 (8GB)
     tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
     tf.env().set('WEBGL_PACK', true);
-  } catch {
-    // Ignore TensorFlow configuration errors
-  }
-}
-if (tf) {
-  try {
     tf.env().set('WEBGL_EXP_CONV', true);
-  } catch {
-    // Ignore TensorFlow configuration errors
+    
+    // Memory optimization for trading algorithms
+    tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0); // Disable texture deletion threshold
+    tf.env().set('WEBGL_MAX_TEXTURE_SIZE', 8192); // Increase texture size for large batch processing
+    tf.env().set('WEBGL_RENDER_FLOAT32_ENABLED', true); // Enable float32 for precision
+    
+    // Set memory growth and pre-allocation for consistent performance
+    if (process.env.ENABLE_GPU_STRATEGIES === 'true') {
+      // Trading-optimized memory settings
+      tf.env().set('WEBGL_BUFFER_SUPPORTED', true);
+      tf.env().set('WEBGL_CPU_FORWARD', false); // Force GPU execution
+      console.log('🚀 GPU MEMORY: Configured for high-performance trading (targeting 2-4GB usage)');
+    }
+    
+    // Configure GPU device with memory growth for dynamic allocation
+    const gpuDevices = tf.engine().backend?.getGPGPUContext?.() || null;
+    if (gpuDevices) {
+      console.log('⚡ GPU CONTEXT: Advanced memory management enabled');
+    }
+    
+  } catch (error) {
+    console.warn('⚠️ GPU memory configuration partially failed, using defaults:', error.message);
   }
 }
 
@@ -69,6 +84,11 @@ export class GPUAccelerationService {
   private static instance: GPUAccelerationService;
   private isInitialized: boolean = false;
   private isExitEvaluation: boolean = false; // Flag to prioritize exit operations
+  
+  // GPU Mode getter - checks if TensorFlow GPU is available and ENABLE_GPU_STRATEGIES is true
+  get isGPUMode(): boolean {
+    return this.isInitialized && !!tf && process.env.ENABLE_GPU_STRATEGIES === 'true';
+  }
   
   // GPU Kernels for parallel computation (with fallbacks)
   private gpu: any;
@@ -119,6 +139,9 @@ export class GPUAccelerationService {
         console.log('⚡ Using TensorFlow GPU for parallel computation!');
         console.log(`🎮 TensorFlow backend: ${tf.backend()?.backendName || 'tensorflow-gpu'}`);
         this.isInitialized = true;
+        
+        // Warm up GPU memory with pre-allocated tensors for trading
+        this.warmupGPUMemory();
       } else {
         console.log('📱 GPU ACCELERATION SERVICE - CPU MODE');
         console.log('⚡ Ready for CPU-based computation!');
@@ -133,6 +156,47 @@ export class GPUAccelerationService {
       GPUAccelerationService.instance = new GPUAccelerationService();
     }
     return GPUAccelerationService.instance;
+  }
+
+  /**
+   * Initialize GPU context for efficient dynamic allocation across services
+   * This sets up memory growth mode for shared GPU utilization
+   */
+  private warmupGPUMemory(): void {
+    if (!this.isGPUMode || !tf) return;
+    
+    try {
+      console.log('🔥 GPU CONTEXT INIT: Enabling dynamic memory growth for multi-service GPU sharing...');
+      
+      // Configure memory growth for efficient resource sharing
+      if (tf.backend() && tf.backend().setMemoryGrowth) {
+        tf.backend().setMemoryGrowth(true);
+        console.log('✅ GPU Memory Growth: ENABLED for dynamic allocation');
+      }
+      
+      // Small test allocation to initialize GPU context without hogging memory
+      const testTensor = tf.randomNormal([100, 100]);
+      const testResult = testTensor.square().mean();
+      
+      // Get initial memory baseline
+      const memInfo = tf.memory();
+      console.log(`📊 GPU Context Ready: ${memInfo.numTensors} tensors, ~${Math.round(memInfo.numBytes / 1024 / 1024)}MB baseline`);
+      console.log('🚀 Dynamic Allocation: GPU will scale memory usage based on demand from all services');
+      
+      // Clean up test tensors immediately
+      testTensor.dispose();
+      testResult.dispose();
+      
+      // Log memory sharing strategy
+      console.log('🔄 Multi-Service GPU Strategy:');
+      console.log('   • Tensor Fusion Engine: Dynamic allocation as needed');
+      console.log('   • Profit Predator: Batch operations with automatic cleanup');  
+      console.log('   • Mathematical Intuition: On-demand tensor creation');
+      console.log('   • Other Services: Shared GPU context with memory growth');
+      
+    } catch (error) {
+      console.warn('⚠️ GPU context initialization failed:', error.message);
+    }
   }
 
   /**

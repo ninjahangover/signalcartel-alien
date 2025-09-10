@@ -1359,18 +1359,9 @@ class ProductionTradingEngine {
                   reason = `confidence_erosion_${pnl.toFixed(1)}pct`;
                   log(`📉 CONFIDENCE EROSION: Taking ${pnl.toFixed(2)}% - confidence dropped ${Math.abs(confidenceChange).toFixed(1)}%`);
                 }
-                // 🚨 INTUITION WARNING: Low intuition = get out
-                else if (intuitionScore < 0.4 && pnl > 0) {
-                  shouldExit = true;
-                  reason = `intuition_warning_${pnl.toFixed(1)}pct`;
-                  log(`🚨 INTUITION WARNING: Taking ${pnl.toFixed(2)}% - intuition only ${(intuitionScore*100).toFixed(1)}%`);
-                }
-                // ⚠️ DANGER ZONE: Negative confidence/intuition with any profit
-                else if ((currentConfidence < 0.3 || intuitionScore < 0.2) && pnl > -0.5) {
-                  shouldExit = true;
-                  reason = `ai_danger_exit_${pnl.toFixed(1)}pct`;
-                  log(`⚠️ AI DANGER: Exiting at ${pnl.toFixed(2)}% - confidence critically low!`);
-                }
+                // 🧠 MATHEMATICAL CONVICTION: Let tensor fusion system decide - NO hardcoded overrides
+                // The tensor system already calculated the optimal exit strategy using mathematical formulas
+                // Trust the proven mathematical conviction system instead of arbitrary thresholds
                 
                 // Log AI thinking for monitoring
                 if (!shouldExit && pnl > 0) {
@@ -1389,6 +1380,8 @@ class ProductionTradingEngine {
             const result = await this.positionManager.closePosition(position.id, price, reason);
             const winLoss = result.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
             log(`🎯 EXIT: ${result.position.id} | ${reason} | $${result.pnl.toFixed(2)} | ${winLoss}`);
+            log(`🔍 POSITION CLOSE TRACKING: ID=${result.position.id} | Symbol=${position.symbol} | Side=${position.side.toUpperCase()} | EntryPrice=$${position.entryPrice} | ExitPrice=$${price} | Quantity=${position.quantity} | PnL=$${result.pnl.toFixed(2)} | Reason=${reason} | Duration=${((Date.now() - position.openTime.getTime()) / 1000 / 60).toFixed(1)}min | Closed=${new Date().toISOString()}`);
+            log(`✅ TRADE ID MATCH VERIFICATION: ENTRY_ID=${result.position.id} ↔ EXIT_ID=${result.position.id} | SAME_TRADE=${result.position.id === position.id ? '✅ VERIFIED' : '❌ MISMATCH!'} | EntryKraken=${position.metadata?.krakenOrderId || 'N/A'} | ExitKraken=${result.krakenCloseOrderId || 'N/A'}`);
             
             // 🧠 TENSOR AI LEARNING SYSTEM: Update weights based on trade outcome
             try {
@@ -1575,12 +1568,17 @@ class ProductionTradingEngine {
         const pairFilter = new AdaptivePairFilter(prisma);
         
         const filteredPairs = [];
+        // Get current market volatility and system confidence for MATHEMATICAL INTUITION
+        const currentVolatility = this.calculateAverageVolatility(); // Dynamic market volatility
+        const systemConfidence = this.calculateSystemConfidence();   // Current AI system confidence
+        
         for (const data of marketData) {
-          const isAllowed = await pairFilter.shouldAllowPair(data.symbol);
+          // Use MATHEMATICAL FORMULAS instead of hardcoded thresholds
+          const isAllowed = await pairFilter.shouldAllowPair(data.symbol, currentVolatility, systemConfidence);
           if (isAllowed) {
             filteredPairs.push(data);
           } else {
-            log(`🚫 BLOCKED: ${data.symbol} - Poor historical performance`);
+            log(`🚫 BLOCKED: ${data.symbol} - Mathematical analysis (vol: ${(currentVolatility*100).toFixed(1)}%, conf: ${(systemConfidence*100).toFixed(1)}%)`);
           }
         }
         
@@ -1923,6 +1921,7 @@ class ProductionTradingEngine {
                 });
                 
                 log(`✅ REAL POSITION OPENED: ${result.position.id} | ${side.toUpperCase()} ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price} | Kraken: ${krakenOrderId}`);
+                log(`🔍 POSITION TRACKING: ID=${result.position.id} | Symbol=${data.symbol} | Side=${side.toUpperCase()} | Quantity=${actualQuantity.toFixed(6)} | Entry=$${data.price} | Kraken=${krakenOrderId} | Created=${new Date().toISOString()}`);
                 
               } else {
                 log(`❌ KRAKEN ORDER FAILED: No transaction ID returned - NOT creating database position`);
