@@ -566,7 +566,7 @@ model ManagedPosition {
   side          String
   entryPrice    Float
   quantity      Float
-  entryTradeId  String
+  entryTradeId  String?
   entryTime     DateTime
   exitPrice     Float?
   exitTradeId   String?
@@ -579,7 +579,7 @@ model ManagedPosition {
   maxHoldTime   Int?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
-  entryTrade    ManagedTrade  @relation("EntryTrade", fields: [entryTradeId], references: [id])
+  entryTrade    ManagedTrade? @relation("EntryTrade", fields: [entryTradeId], references: [id])
   exitTrade     ManagedTrade? @relation("ExitTrade", fields: [exitTradeId], references: [id])
 
   @@index([strategy, symbol])
@@ -607,6 +607,34 @@ model ManagedTrade {
   @@index([strategy, symbol])
   @@index([executedAt])
   @@index([isEntry])
+}
+
+model BayesianAnalysis {
+  id                   String   @id @default(cuid())
+  symbol               String
+  sessionId            String
+  priorProbability     Float
+  posteriorProbability Float
+  likelihood           Float
+  evidence             Float
+  confidence           Float
+  marketRegime         String
+  mostLikelyRegime     String
+  originalConfidence   Float
+  expectancyScore      Float
+  winRateProjection    Float
+  riskRewardRatio      Float
+  recommendation       String
+  performanceGap       Float
+  confidenceGap        Float
+  learningWeight       Float
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([symbol])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@index([marketRegime])
 }
 
 model ExitStrategy {

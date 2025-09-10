@@ -440,10 +440,31 @@ class GPUAcceleratedQueueManager extends EventEmitter {
   }
 
   /**
-   * Execute the actual API request - returns immediately for proxy integration
+   * Execute the actual API request - handles both proxy and direct HTTP calls
    */
   private async executeRequest(request: APIRequest): Promise<any> {
     console.log(`🔄 GPU Queue: Processing ${request.method} ${request.endpoint}`);
+    
+    // Check if this is a direct HTTP request (has url parameter)
+    if (request.params && request.params.url) {
+      try {
+        const fetch = (await import('node-fetch')).default;
+        const response = await fetch(request.params.url, {
+          method: request.method,
+          headers: request.params.headers || {},
+          timeout: request.timeout
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        return { data, success: true };
+      } catch (error) {
+        throw new Error(`HTTP request failed: ${error.message}`);
+      }
+    }
     
     // For proxy integration, we just return the request data
     // The actual API call is handled by the proxy server after dequeuing

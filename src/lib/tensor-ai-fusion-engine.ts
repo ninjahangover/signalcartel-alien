@@ -525,7 +525,8 @@ export class TensorAIFusionEngine {
         validatedPrice,
         validatedOutputs,
         tensors, // Pass tensors array for V₈ enhancement
-        markovPrediction
+        markovPrediction,
+        marketData // Fix: Add missing marketData parameter
       );
       
       // FINAL VALIDATION: Ensure decision has no NaN values
@@ -987,7 +988,8 @@ export class TensorAIFusionEngine {
     currentPrice: number,
     contributingSystems: AISystemOutput[],
     tensors: number[][], // Add tensors parameter for V₈ enhancement
-    markovPrediction?: any
+    markovPrediction?: any,
+    marketData?: any // Fix: Add missing marketData parameter
   ): Promise<FusedDecision> {
     
     const [fusedConfidence, fusedDirection, fusedMagnitude, fusedReliability] = fusedTensor;
@@ -1097,9 +1099,15 @@ export class TensorAIFusionEngine {
     
     console.log(`🎯 USING 6-SYSTEM FUSION: Maintaining consistent weight array for mathematical-intuition system`);
     
-    // 🚀 PREDICTIVE OVERRIDE: Tensor fusion is the single decision maker (no external P&L filter)
-    // Use original tensor result for consistency with position sizing
-    const tensorConfidenceThreshold = 0.20; // Standard threshold for 6-system fusion
+    console.log('🔧 DEBUG: About to call calculateDynamicThreshold...');
+    // 🧠 DYNAMIC MATHEMATICAL THRESHOLD: Calculated based on market conditions
+    const tensorConfidenceThreshold = this.calculateDynamicThreshold(
+      fusedConfidence,
+      contributingSystems,
+      marketData,
+      combinedExpectedReturn
+    );
+    console.log(`🔧 DEBUG: calculateDynamicThreshold returned: ${tensorConfidenceThreshold}`);
     const shouldTrade = fusedConfidence >= tensorConfidenceThreshold;
     
     console.log(`🎯 TENSOR DECISION THRESHOLD: ${(fusedConfidence * 100).toFixed(1)}% >= ${(tensorConfidenceThreshold * 100).toFixed(1)}% required`);
@@ -3898,6 +3906,100 @@ export class TensorAIFusionEngine {
       maxDrawdownRisk,
       profitProbability
     };
+  }
+
+  /**
+   * 🧠 DYNAMIC MATHEMATICAL THRESHOLD: Calculate confidence threshold based on market conditions
+   * This replaces the static 55% threshold with intelligent, adaptive requirements
+   */
+  private calculateDynamicThreshold(
+    fusedConfidence: number,
+    contributingSystems: AISystemOutput[],
+    marketData: any,
+    expectedMove: number
+  ): number {
+    console.log('🔧 DEBUG: calculateDynamicThreshold method called!');
+    console.log(`🔧 DEBUG: Parameters - fusedConfidence: ${fusedConfidence}, contributingSystems: ${contributingSystems ? contributingSystems.length : 'undefined'}, marketData: ${marketData ? 'defined' : 'undefined'}, expectedMove: ${expectedMove}`);
+    
+    // Handle undefined contributingSystems gracefully
+    if (!contributingSystems || !Array.isArray(contributingSystems)) {
+      console.log('⚠️ contributingSystems is undefined or not array, using conservative threshold');
+      return 0.30; // Conservative 30% threshold when data is missing
+    }
+    
+    // 🎯 BASE THRESHOLD: Start with market regime-dependent base
+    let baseThreshold = 0.25; // 25% base for normal conditions
+    
+    // 📊 FACTOR 1: Market Volatility Adjustment
+    // Higher volatility = Lower threshold needed (more opportunities)
+    const volatility = Math.abs(expectedMove) || 0.02;
+    const volatilityAdjustment = Math.max(-0.15, Math.min(0.10, (volatility - 0.03) * -2));
+    
+    // 🤝 FACTOR 2: AI System Consensus
+    // More systems agreeing = Lower threshold needed
+    const validSystems = contributingSystems.filter(system => system && system.confidence > 0);
+    const consensusStrength = validSystems.length >= 4 ? -0.05 : 0.05; // 4+ systems = easier threshold
+    
+    // 📈 FACTOR 3: Historical Performance (simulated for now)
+    // Recent success rate affects confidence requirements
+    const recentWinRate = 0.65; // TODO: Get from actual performance tracking
+    const performanceAdjustment = (recentWinRate - 0.5) * 0.2; // ±10% based on win rate
+    
+    // 🌊 FACTOR 4: Market Regime Detection
+    // Trending markets = Lower threshold, Ranging = Higher threshold
+    const regimeAdjustment = this.getMarketRegimeAdjustment(contributingSystems);
+    
+    // 💪 FACTOR 5: Confidence Quality
+    // Spread of AI system confidences (consistency bonus)
+    const confidences = validSystems.map(s => s.confidence || 0.5);
+    const confidenceSpread = confidences.length > 1 ? 
+      Math.max(...confidences) - Math.min(...confidences) : 0.2;
+    const consistencyBonus = confidenceSpread < 0.15 ? -0.03 : 0.02; // Consistent systems = lower threshold
+    
+    // 🧮 MATHEMATICAL COMBINATION
+    const dynamicThreshold = Math.max(0.15, Math.min(0.45, 
+      baseThreshold + 
+      volatilityAdjustment + 
+      consensusStrength + 
+      performanceAdjustment + 
+      regimeAdjustment + 
+      consistencyBonus
+    ));
+    
+    // 📝 LOGGING: Show calculation breakdown
+    console.log(`🧠 DYNAMIC THRESHOLD CALCULATION:`);
+    console.log(`   Base: ${(baseThreshold * 100).toFixed(1)}%`);
+    console.log(`   Volatility (${(volatility * 100).toFixed(1)}%): ${(volatilityAdjustment * 100).toFixed(1)}%`);
+    console.log(`   Consensus (${validSystems.length} systems): ${(consensusStrength * 100).toFixed(1)}%`);
+    console.log(`   Performance: ${(performanceAdjustment * 100).toFixed(1)}%`);
+    console.log(`   Regime: ${(regimeAdjustment * 100).toFixed(1)}%`);
+    console.log(`   Consistency: ${(consistencyBonus * 100).toFixed(1)}%`);
+    console.log(`   Final Threshold: ${(dynamicThreshold * 100).toFixed(1)}%`);
+    
+    return dynamicThreshold;
+  }
+  
+  /**
+   * 🌊 Market Regime Detection for Threshold Adjustment
+   */
+  private getMarketRegimeAdjustment(contributingSystems: AISystemOutput[]): number {
+    // Look for trend indicators from AI systems
+    const trendSignals = contributingSystems.filter(system => 
+      system && (system.trend === 'BULLISH' || system.trend === 'BEARISH' || 
+                 system.marketRegime === 'TRENDING' || system.directionBias !== 'NEUTRAL')
+    );
+    
+    const rangingSignals = contributingSystems.filter(system =>
+      system && (system.marketRegime === 'RANGING' || system.marketPressure === 'NEUTRAL')
+    );
+    
+    if (trendSignals.length > rangingSignals.length) {
+      return -0.05; // Trending market = Lower threshold (easier to predict)
+    } else if (rangingSignals.length > trendSignals.length) {
+      return 0.03;  // Ranging market = Higher threshold (harder to predict)  
+    }
+    
+    return 0; // Neutral
   }
 }
 

@@ -157,7 +157,8 @@ class SystemGuardian {
    */
   private async isProcessRunning(): Promise<boolean> {
     try {
-      const { stdout } = await execAsync('ps aux | grep -E "production-trading.*npx tsx" | grep -v grep');
+      // Check for the actual process pattern that matches running trading system
+      const { stdout } = await execAsync('ps aux | grep "production-trading-multi-pair.ts" | grep -v grep');
       return stdout.trim().length > 0;
     } catch (error) {
       return false;

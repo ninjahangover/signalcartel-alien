@@ -51,46 +51,51 @@ async function syncKrakenPositions() {
         continue;
       }
       
-      // Create managed position first to get ID
-      const newPosition = await prisma.managedPosition.create({
-        data: {
-          symbol: position.symbol,
-          strategy: 'tensor-ai-fusion',
-          side: 'long',
-          entryPrice: position.estimatedEntryPrice,
-          quantity: position.quantity,
-          entryTradeId: `temp-${Date.now()}`,  // Temporary ID
-          entryTime: new Date(),
-          status: 'open',
-          stopLoss: null,
-          takeProfit: null,
-          maxHoldTime: null
-        }
+      // 🧠 V2.7 ATOMIC TRANSACTION: Resolve circular foreign key constraint with nullable entryTradeId
+      const result = await prisma.$transaction(async (tx) => {
+        // Step 1: Create position with null entryTradeId (now allowed by schema)
+        const tempPosition = await tx.managedPosition.create({
+          data: {
+            symbol: position.symbol,
+            strategy: 'tensor-ai-fusion',
+            side: 'long',
+            entryPrice: position.estimatedEntryPrice,
+            quantity: position.quantity,
+            entryTradeId: null,  // Now nullable in schema
+            entryTime: new Date(),
+            status: 'open',
+            stopLoss: null,
+            takeProfit: null,
+            maxHoldTime: null
+          }
+        });
+        
+        // Step 2: Create trade with correct positionId
+        const entryTrade = await tx.managedTrade.create({
+          data: {
+            positionId: tempPosition.id,
+            side: 'buy',
+            symbol: position.symbol,
+            quantity: position.quantity,
+            price: position.estimatedEntryPrice,
+            value: position.quantity * position.estimatedEntryPrice,
+            strategy: 'tensor-ai-fusion',
+            executedAt: new Date(),
+            pnl: null,
+            isEntry: true
+          }
+        });
+        
+        // Step 3: Update position with correct entryTradeId
+        const finalPosition = await tx.managedPosition.update({
+          where: { id: tempPosition.id },
+          data: { entryTradeId: entryTrade.id }
+        });
+        
+        return { position: finalPosition, trade: entryTrade };
       });
       
-      // Create the ManagedTrade for the entry with proper schema
-      const entryTrade = await prisma.managedTrade.create({
-        data: {
-          positionId: newPosition.id,
-          side: 'buy',
-          symbol: position.symbol,
-          quantity: position.quantity,
-          price: position.estimatedEntryPrice,
-          value: position.quantity * position.estimatedEntryPrice,
-          strategy: 'tensor-ai-fusion',
-          executedAt: new Date(),
-          pnl: null,
-          isEntry: true
-        }
-      });
-      
-      // Update position with correct entryTradeId
-      await prisma.managedPosition.update({
-        where: { id: newPosition.id },
-        data: { entryTradeId: entryTrade.id }
-      });
-      
-      console.log(`   ✅ Synced to database: ${newPosition.id}`);
+      console.log(`   ✅ Synced to database: ${result.position.id}`);
       console.log(`   🧠 Mathematical Conviction: Ready for AI monitoring`);
       
     } catch (error) {

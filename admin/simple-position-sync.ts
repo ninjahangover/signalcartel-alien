@@ -27,27 +27,48 @@ async function simplePositionSync() {
     }
     
     // Direct SQL insertion to bypass complex constraints
+    // User has 2 ETH positions and 1 SOLUSD position to track
     const positions = [
-      { symbol: 'DOTUSD', quantity: 12.1951219500, entryPrice: 8.50 },
-      { symbol: 'ETHUSD', quantity: 0.0231811200, entryPrice: 4200.00 },
-      { symbol: 'BTCUSD', quantity: 0.0004473200, entryPrice: 110000.00 },
-      { symbol: 'SOLUSD', quantity: 0.0003838800, entryPrice: 220.00 },
-      { symbol: 'AVAXUSD', quantity: 0.0000065800, entryPrice: 45.00 }
+      { symbol: 'ETHUSD', quantity: 0.01152073732718894, entryPrice: 4340.00 },
+      { symbol: 'ETHUSD', quantity: 0.01152073732718894, entryPrice: 4340.00 },
+      { symbol: 'SOLUSD', quantity: 0.2244265900623906, entryPrice: 222.79 }
     ];
     
     for (const pos of positions) {
-      const result = await prisma.$executeRaw`
+      const tradeId = `trade-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      
+      // Step 1: Create the entry trade first (using tradeId as positionId too)
+      await prisma.$executeRaw`
+        INSERT INTO "ManagedTrade" (
+          id, "positionId", symbol, side, quantity, price, value, 
+          "isEntry", strategy, "executedAt"
+        ) VALUES (
+          ${tradeId},
+          ${tradeId},
+          ${pos.symbol},
+          'buy',
+          ${pos.quantity},
+          ${pos.entryPrice},
+          ${pos.quantity * pos.entryPrice},
+          true,
+          'tensor-ai-fusion',
+          now()
+        )
+      `;
+      
+      // Step 2: Create the position (using tradeId as both position ID and entryTradeId)
+      await prisma.$executeRaw`
         INSERT INTO "ManagedPosition" (
           id, symbol, strategy, side, "entryPrice", quantity, 
           "entryTradeId", "entryTime", status, "createdAt", "updatedAt"
         ) VALUES (
-          gen_random_uuid()::text,
+          ${tradeId},
           ${pos.symbol},
           'tensor-ai-fusion',
           'long',
           ${pos.entryPrice},
           ${pos.quantity},
-          concat('sync-', extract(epoch from now())::text),
+          ${tradeId},
           now(),
           'open',
           now(),
@@ -55,7 +76,7 @@ async function simplePositionSync() {
         )
       `;
       
-      console.log(`✅ ${pos.symbol}: ${pos.quantity} units @ $${pos.entryPrice}`);
+      console.log(`✅ ${pos.symbol}: ${pos.quantity} units @ $${pos.entryPrice} (ID: ${tradeId})`);
     }
     
     const finalCount = await prisma.managedPosition.count({

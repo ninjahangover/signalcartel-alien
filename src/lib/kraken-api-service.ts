@@ -302,6 +302,30 @@ class KrakenApiService {
 
     console.log(`🔥 Kraken API: Placing ${params.validate ? 'TEST' : 'LIVE'} order:`, params);
 
+    // 💰 CASH VALIDATION: Check USD availability for buy orders
+    if (params.type === 'buy' && !params.validate) {
+      try {
+        const balance = await this.getAccountBalance();
+        const usdCash = parseFloat(balance?.result?.ZUSD || '0') + parseFloat(balance?.result?.USDT || '0');
+        const estimatedOrderValue = parseFloat(params.volume) * (parseFloat(params.price || '0') || 50); // Conservative estimate
+        
+        console.log(`💰 USD Cash Check: Available $${usdCash.toFixed(2)}, Order needs ~$${estimatedOrderValue.toFixed(2)}`);
+        
+        if (usdCash < estimatedOrderValue) {
+          const error = new Error(`Insufficient USD cash: $${usdCash.toFixed(2)} available, $${estimatedOrderValue.toFixed(2)} required`);
+          console.error(`❌ ${error.message}`);
+          throw error;
+        }
+        
+        console.log(`✅ Cash validation passed: Sufficient USD for buy order`);
+      } catch (error) {
+        if (error.message.includes('Insufficient USD')) {
+          throw error; // Re-throw cash validation errors
+        }
+        console.log(`⚠️ Cash validation failed (API error), proceeding: ${error.message}`);
+      }
+    }
+
     const orderParams: Record<string, string> = {
       pair: params.pair,
       type: params.type,

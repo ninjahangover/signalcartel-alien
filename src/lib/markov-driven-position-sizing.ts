@@ -8,10 +8,10 @@
 import { markovPredictor } from './enhanced-markov-trading-predictor';
 
 export interface PositionSizingParams {
-  baseSize: number;          // Base position size ($)
-  maxSize: number;           // Maximum position size ($)
   availableBalance: number;  // Total available balance
   riskTolerance: number;     // 0-1 risk tolerance
+  // REMOVED baseSize - position size is now purely mathematical
+  // REMOVED maxSize - using mathematical Kelly Criterion instead
 }
 
 export interface MarkovPositionDecision {
@@ -33,7 +33,8 @@ export interface MarkovPositionDecision {
 export class MarkovDrivenPositionSizing {
   private readonly MIN_TRADE_PROBABILITY = 0.52; // Need >52% edge to trade
   private readonly MIN_CONFIDENCE_THRESHOLD = 0.3;
-  private readonly MAX_RISK_PER_TRADE = 0.02; // 2% max risk per trade
+  private readonly MAX_RISK_PER_TRADE = 0.05; // 5% max risk per trade (increased for conviction)
+  private readonly KELLY_FRACTION = 0.25; // Use 25% Kelly for safety
   
   // GPU acceleration for parallel calculations
   private gpuService: any;

@@ -928,15 +928,13 @@ class AIFocusedTradingEngine {
         setTimeout(() => reject(new Error('Signal generation timeout after 3s')), 3000)
       );
       
-      const signalGeneration = quantumForgeSignalGenerator.generateTechnicalSignal(symbol, currentPrice, true);
+      // 🚀 PINE SCRIPT DISABLED: Using pure Mathematical Conviction for maximum profit potential
+      // quantumForgeSignalGenerator calls disabled to prevent premature exits
+      // Mathematical Conviction system will hold positions until optimal exit conditions
+      this.log(`🧠 PINE SCRIPT DISABLED: Using pure Mathematical Conviction for ${symbol}`);
       
-      let signalResponse;
-      try {
-        signalResponse = await Promise.race([signalGeneration, signalTimeout]);
-      } catch (signalError) {
-        this.log(`⚠️ Signal generation timeout for ${symbol}: ${signalError.message}`);
-        return { score: 0, recommendation: 'HOLD' };
-      }
+      let signalResponse = { action: 'HOLD', confidence: 0.5, reason: 'pine_script_disabled' };
+      // No timeout needed since we're not calling external signal generation
       
       if (!signalResponse || !signalResponse.action || signalResponse.confidence < 0.4) {
         return { score: 0, recommendation: 'HOLD' };

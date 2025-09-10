@@ -257,32 +257,22 @@ export class PositionManager {
     this.positions.set(positionId, position);
     
     // 🔧 V2.7 TRANSACTION FIX: Create position and trade atomically to resolve foreign key constraints
+    console.log(`🔧 DEBUG: About to start database transaction for position ${position.id}`);
+    console.log(`🔧 DEBUG: this.prisma is ${this.prisma ? 'defined' : 'undefined'}`);
+    
+    if (!this.prisma) {
+      console.error(`❌ CRITICAL ERROR: Prisma client is undefined in PositionManager`);
+      console.log(`📈 OPENED ${position.side.toUpperCase()} position: ${params.quantity} ${params.symbol} @ $${params.price} (IN-MEMORY ONLY - DATABASE FAILED)`);
+      return { action: 'opened', position, trade: entryTrade };
+    }
+    
     try {
       await this.prisma.$transaction(async (tx) => {
-        // Step 1: Create position with temporary entryTradeId
-        const tempPosition = await tx.managedPosition.create({
-          data: {
-            id: position.id,
-            strategy: position.strategy,
-            symbol: position.symbol,
-            side: position.side,
-            entryPrice: position.entryPrice,
-            quantity: position.quantity,
-            entryTradeId: 'temp-' + tradeId, // Temporary value
-            entryTime: position.entryTime,
-            status: position.status,
-            stopLoss: position.stopLoss,
-            takeProfit: position.takeProfit,
-            maxHoldTime: position.maxHoldTime,
-            metadata: position.metadata || {}
-          }
-        });
-        
-        // Step 2: Create trade with correct positionId
+        // Step 1: Create trade first (no circular dependency)
         await tx.managedTrade.create({
           data: {
             id: entryTrade.id,
-            positionId: entryTrade.positionId,
+            positionId: position.id, // Reference the position we're about to create
             side: entryTrade.side,
             symbol: entryTrade.symbol,
             quantity: entryTrade.quantity,
@@ -295,17 +285,73 @@ export class PositionManager {
           }
         });
         
-        // Step 3: Update position with correct entryTradeId
-        await tx.managedPosition.update({
-          where: { id: position.id },
-          data: { entryTradeId: entryTrade.id }
+        // Step 2: Create position with correct entryTradeId
+        await tx.managedPosition.create({
+          data: {
+            id: position.id,
+            strategy: position.strategy,
+            symbol: position.symbol,
+            side: position.side,
+            entryPrice: position.entryPrice,
+            quantity: position.quantity,
+            entryTradeId: entryTrade.id, // Now we have the real trade ID
+            entryTime: position.entryTime,
+            status: position.status,
+            stopLoss: position.stopLoss,
+            takeProfit: position.takeProfit,
+            maxHoldTime: position.maxHoldTime
+            // Removed metadata field - not in database schema
+          }
         });
+        
+        // Step 3: DASHBOARD FIX - Also create LiveTrade for dashboard visibility
+        try {
+          const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
+          await tx.liveTrade.create({
+            data: {
+              id: `live-${entryTrade.id}`,
+              sessionId: sessionId,
+              positionId: null, // No LivePosition equivalent
+              exchangeOrderId: `kraken-${entryTrade.id}`,
+              exchangeTradeId: entryTrade.id,
+              symbol: entryTrade.symbol,
+              side: entryTrade.side,
+              type: 'market',
+              quantity: entryTrade.quantity,
+              price: entryTrade.price,
+              value: entryTrade.value,
+              commission: 0.0,
+              fees: 0.0,
+              netValue: entryTrade.value,
+              purpose: entryTrade.isEntry ? 'open' : 'close',
+              isEntry: entryTrade.isEntry,
+              strategy: entryTrade.strategy,
+              signalConfidence: params.metadata?.confidence || 0.5,
+              signalSource: 'tensor-ai-fusion',
+              requestedAt: entryTrade.executedAt,
+              submittedAt: entryTrade.executedAt,
+              executedAt: entryTrade.executedAt,
+              acknowledgedAt: entryTrade.executedAt,
+              orderStatus: 'filled',
+              fillStatus: 'filled',
+              filledQuantity: entryTrade.quantity,
+              remainingQuantity: 0.0,
+              pnl: entryTrade.pnl || 0.0,
+              pnlPercent: 0.0,
+              tradeNotes: 'Automated Tensor AI Fusion trade',
+              updatedAt: entryTrade.executedAt
+            }
+          });
+        } catch (liveTradeError) {
+          console.log(`⚠️ LiveTrade creation failed (non-critical): ${liveTradeError.message}`);
+        }
       });
       
       console.log(`✅ DATABASE: Successfully created position ${position.id} and trade ${entryTrade.id}`);
       
     } catch (error) {
       console.log(`❌ DATABASE TRANSACTION FAILED: ${error.message}`);
+      console.error(`❌ POSITION MANAGER ERROR: ${error.message}`, error.stack);
       // Don't throw - keep in-memory position for mathematical conviction to work
       // but log the error for debugging
       console.log(`⚠️ Position ${position.id} exists in-memory but not in database`);
@@ -388,6 +434,49 @@ export class PositionManager {
             realizedPnL: pnl
           }
         });
+        
+        // Step 3: DASHBOARD FIX - Also create LiveTrade for exit/close for dashboard visibility
+        try {
+          const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
+          await tx.liveTrade.create({
+            data: {
+              id: `live-exit-${exitTrade.id}`,
+              sessionId: sessionId,
+              positionId: null, // No LivePosition equivalent
+              exchangeOrderId: `kraken-exit-${exitTrade.id}`,
+              exchangeTradeId: exitTrade.id,
+              symbol: exitTrade.symbol,
+              side: exitTrade.side,
+              type: 'market',
+              quantity: exitTrade.quantity,
+              price: exitTrade.price,
+              value: exitTrade.value,
+              commission: 0.0,
+              fees: 0.0,
+              netValue: exitTrade.value,
+              purpose: 'close', // Mark as close for dashboard
+              isEntry: false,
+              strategy: exitTrade.strategy,
+              signalConfidence: 0.8, // Use default confidence for exits
+              signalSource: 'tensor-ai-fusion',
+              requestedAt: exitTrade.executedAt,
+              submittedAt: exitTrade.executedAt,
+              executedAt: exitTrade.executedAt,
+              acknowledgedAt: exitTrade.executedAt,
+              orderStatus: 'filled',
+              fillStatus: 'filled',
+              filledQuantity: exitTrade.quantity,
+              remainingQuantity: 0.0,
+              pnl: exitTrade.pnl || 0.0,
+              pnlPercent: ((exitTrade.pnl || 0) / exitTrade.value) * 100,
+              tradeNotes: `Automated exit: ${reason}`,
+              updatedAt: exitTrade.executedAt
+            }
+          });
+          console.log(`✅ DASHBOARD: Created LiveTrade exit record for ${exitTrade.symbol}`);
+        } catch (liveTradeExitError) {
+          console.log(`⚠️ LiveTrade exit creation failed (non-critical): ${liveTradeExitError.message}`);
+        }
       });
       
       console.log(`✅ DATABASE: Successfully closed position ${positionId} and created exit trade ${exitTrade.id}`);
