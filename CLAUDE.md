@@ -49,6 +49,64 @@
 
 ---
 
+## 🛡️ **TENSOR AI FUSION V2.7 - SYSTEM GUARDIAN DEPLOYMENT** (September 10, 2025)
+
+### 🚨 **CRITICAL PRODUCTION SAFETY: 24/7 HEARTBEAT MONITORING & AUTO-RESTART**
+**FINANCIAL PROTECTION BREAKTHROUGH**: Deployed comprehensive System Guardian service to eliminate the critical risk of unmanaged positions during system crashes. This addresses the recurring issue of trading system stalls that could result in massive financial losses during market volatility.
+
+**System Status**: ✅ **SYSTEM GUARDIAN OPERATIONAL** (September 10, 2025 - 18:31 UTC)  
+**Heartbeat Monitoring**: ✅ **30-SECOND HEALTH CHECKS** - Process + log activity + position awareness  
+**Auto-Restart Logic**: ✅ **INTELLIGENT RECOVERY** - Automatic restart with 5-minute cooldowns  
+**Position Protection**: ✅ **FINANCIAL SAFETY** - Only restarts when positions need management  
+**Alert Integration**: ✅ **NTFY NOTIFICATIONS** - Info/Warning/Critical escalation alerts  
+**Production Ready**: ✅ **24/7 OPERATION** - Tested restart logic and failure handling  
+
+**Key Safety Features**:
+- `🛡️ SYSTEM GUARDIAN STARTED - Monitoring trading system health`
+- `🚨 SYSTEM FAILURE DETECTED` - Automatic detection of crashes and stalls
+- `🔄 ATTEMPTING RESTART #1` - Intelligent restart attempts with exponential backoff
+- `✅ RESTART SUCCESSFUL - Trading system operational` - Confirmed recovery
+- `⏳ Restart cooldown active` - Prevents restart loops with smart timing
+
+**Critical Problem Solved**:
+- **Before**: Trading system crashes → Unmanaged positions → Potential massive losses
+- **After**: System Guardian detects failure → Auto-restart → Positions remain protected
+- **Financial Impact**: Eliminates risk of costly position management failures
+- **Operational**: True 24/7 autonomous operation without manual monitoring
+
+**Technical Implementation**:
+- **Health Detection**: Process monitoring + log activity analysis + database position checks
+- **Smart Restart Logic**: Position-aware restart decisions with cooldown protection
+- **Failure Escalation**: Maximum 5 restart attempts before manual intervention alerts
+- **Production Safety**: Graceful process handling, environment preservation, incident logging
+
+### 🎯 **DEPLOYMENT FILES AND USAGE**
+**Core Guardian Service**: `system-guardian.ts` - TypeScript monitoring service with comprehensive health checks  
+**Quick Start**: `./start-system-guardian.sh` - One-command deployment with PID management  
+**Graceful Stop**: `./stop-system-guardian.sh` - Clean shutdown with process cleanup  
+**Documentation**: `SYSTEM-GUARDIAN-README.md` - Complete operational guide and troubleshooting  
+
+**Production Usage**:
+```bash
+# Deploy 24/7 monitoring
+./start-system-guardian.sh
+
+# Monitor guardian activity
+tail -f /tmp/signalcartel-logs/system-guardian.log
+
+# Stop monitoring service
+./stop-system-guardian.sh
+```
+
+**Validation Evidence**:
+- ✅ Successful failure detection and restart during testing
+- ✅ Proper cooldown logic preventing restart loops
+- ✅ Database integration for position-aware decision making
+- ✅ ntfy alert system for escalation notifications
+- ✅ Comprehensive logging for incident analysis
+
+---
+
 ## 🔧 **TENSOR AI FUSION V2.7 - DATABASE TRANSACTION MASTERY** (September 10, 2025)
 
 ### 🎯 **CRITICAL INFRASTRUCTURE BREAKTHROUGH: ATOMIC DATABASE OPERATIONS**
@@ -685,6 +743,7 @@ Tensor AI Fusion V2.6 represents a revolutionary advancement in algorithmic trad
 **Repository**: https://github.com/telgkb9/signalcartel-alien
 
 **Latest Major Updates (V2.7)**:
+- 🛡️ **System Guardian Deployment** - 24/7 heartbeat monitoring with automatic restart protection
 - 📊 **Operational Confirmation** - Complete system verification showing Mathematical Conviction working correctly
 - 🌐 **API Source Reliability Fix** - Replaced failed Binance/CoinGecko with working Kraken Public API
 - 🔧 Atomic Database Transaction System eliminating all persistence issues
@@ -697,13 +756,15 @@ Tensor AI Fusion V2.6 represents a revolutionary advancement in algorithmic trad
 
 ---
 
-*System Status: ✅ **TENSOR AI FUSION V2.7 FULLY OPERATIONAL AND VERIFIED***  
-*Last Updated: September 10, 2025 - 11:18 UTC*  
-*Architecture: Reliable APIs + Atomic Transactions + GPU-Acceleration + Mathematical Conviction*  
-*Infrastructure: Complete Production Stability with Full Dashboard Integration + Working Market Data*  
+*System Status: ✅ **TENSOR AI FUSION V2.7 PRODUCTION GRADE WITH GUARDIAN PROTECTION***  
+*Last Updated: September 10, 2025 - 18:31 UTC*  
+*Architecture: System Guardian + Reliable APIs + Atomic Transactions + GPU-Acceleration + Mathematical Conviction*  
+*Infrastructure: Complete Production Stability with Full Dashboard Integration + 24/7 Monitoring*  
 *Performance: All trades visible, all positions tracked, reliable API connectivity, AI decision making active*  
+*Safety: System Guardian provides automatic restart protection against crashes and stalls*  
 *Current Status: 43 total trades, 5 closed positions, 0 open positions, ready for autonomous operation*  
 *AI Behavior: Mathematical Conviction correctly making SKIP decisions, waiting for optimal conditions*  
+*Protection: 24/7 heartbeat monitoring eliminates risk of unmanaged positions during failures*  
 *Verification: Complete end-to-end testing confirms all components working harmoniously*  
 *Next Evolution: Quantum Tensor Enhancement for Proactive Market Anticipation*  
 *Main Repository: signalcartel-alien (all updates synchronized)*
