@@ -3576,7 +3576,7 @@ export class TensorAIFusionEngine {
   /**
    * 🧠 MATHEMATICAL CONVICTION: Calculate if mathematical thesis has changed (hold until ALL validations align for exit)
    */
-  private calculateProfitProtectionExit(
+  public calculateProfitProtectionExit(
     contributingSystems: any[],
     consensusStrength: number
   ): {
