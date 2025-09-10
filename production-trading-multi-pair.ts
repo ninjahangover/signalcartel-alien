@@ -1151,10 +1151,12 @@ class ProductionTradingEngine {
           }
         }
         
-        // Emergency exits (reduced from 60 to 15 minutes = 3 candles)
-        if (!shouldExit && (ageMinutes > 15 || Math.abs(pnl) > 5.0)) {
+        // 🧠 MATHEMATICAL CONVICTION: Only exit on mathematical catastrophe, not arbitrary time limits
+        // REMOVED 15-minute limit to match manual trading approach: "hold for hours until validations align"
+        if (!shouldExit && Math.abs(pnl) > 10.0) { // Only catastrophic losses (increased from 5% to 10%)
           shouldExit = true;
-          reason = 'emergency_exit';
+          reason = 'catastrophic_loss_protection';
+          log(`🚨 CATASTROPHIC LOSS: ${pnl.toFixed(2)}% loss - emergency mathematical breakdown`);
         }
         
         // AI-enhanced exit logic if basic conditions not met
@@ -1635,20 +1637,31 @@ class ProductionTradingEngine {
             Math.min(70, tensorConfidencePercent * 0.6) // Adaptive to tensor's confidence
           );
           
-          if (tensorReturnPercent >= dynamicReturnThreshold && tensorConfidencePercent >= dynamicConfidenceThreshold) {
+          // 🎯 COMPLEMENTARY POSITION SIZING: Mathematical proof enhances position size instead of blocking
+          // SINGLE DECISION MAKER: Tensor decides to trade, mathematical proof determines position size boost
+          const mathematicalProofMet = tensorReturnPercent >= dynamicReturnThreshold && tensorConfidencePercent >= dynamicConfidenceThreshold;
+          
+          if (mathematicalProofMet) {
             log(`🧮 TENSOR MATHEMATICAL PROOF: ${data.symbol} - ${tensorReturnPercent.toFixed(2)}% expected return, ${tensorConfidencePercent.toFixed(1)}% confidence`);
             log(`📊 Market Analysis: Return threshold ${dynamicReturnThreshold.toFixed(2)}%, Confidence threshold ${dynamicConfidenceThreshold.toFixed(1)}% (volatility: ${marketVolatility.toFixed(2)}%)`);
-            
-            // 🎯 TENSOR INCLUDES ALL AI INTELLIGENCE - V₂-V₇ systems already integrated
             log(`🧠 AI Systems Consensus: ${aiAnalysis.tensorDecision.aiSystemsUsed.join(', ')} - Mathematical proof validated`);
             
-            // Tensor fusion already incorporates adaptive learning, so proceed with integrated decision
-            aiAnalysis.shouldTrade = true;
+            // Calculate consensus position size multiplier (1.2x to 2.0x boost when both systems agree)
+            const returnStrength = Math.min(2.0, tensorReturnPercent / dynamicReturnThreshold); // How much return exceeds threshold
+            const confidenceStrength = Math.min(2.0, tensorConfidencePercent / dynamicConfidenceThreshold); // How much confidence exceeds threshold
+            const consensusMultiplier = 1.0 + (returnStrength * confidenceStrength * 0.3); // 1.0x to 1.6x boost
             
+            // Store for position sizing logic below
+            aiAnalysis.consensusMultiplier = Math.max(1.2, Math.min(2.0, consensusMultiplier));
+            log(`🚀 CONSENSUS BOOST: ${(aiAnalysis.consensusMultiplier * 100 - 100).toFixed(0)}% position size increase (Tensor + Mathematical Proof agreement)`);
           } else {
-            log(`📊 TENSOR ANALYSIS: ${data.symbol} - Mathematical proof insufficient (Return: ${tensorReturnPercent.toFixed(2)}%, Confidence: ${tensorConfidencePercent.toFixed(1)}%)`);
-            continue; // Mathematical proof requires higher standards
+            log(`📊 TENSOR ANALYSIS: ${data.symbol} - Mathematical proof not met (Return: ${tensorReturnPercent.toFixed(2)}%, Confidence: ${tensorConfidencePercent.toFixed(1)}%)`);
+            log(`🎯 SINGLE DECISION MAKER: Tensor authority proceeds with base position size`);
+            aiAnalysis.consensusMultiplier = 1.0; // Base position size, no boost
           }
+          
+          // ALWAYS allow tensor decisions to proceed (single decision maker authority)
+          aiAnalysis.shouldTrade = true;
         } else if (!aiAnalysis.tensorDecision) {
           log(`⚠️ No tensor fusion available for ${data.symbol} - falling back to individual AI systems`);
           // Continue to individual AI system evaluation below
@@ -1704,6 +1717,9 @@ class ProductionTradingEngine {
           // SELL signal = Market going DOWN = Open SHORT position (profit when price falls)
           const side = signal.action === 'BUY' ? 'long' : 'short';
           
+          // 🐛 V2.5 DEBUG: Log signal processing details
+          log(`🔍 V2.5 DEBUG: ${data.symbol} signal.action="${signal.action}" -> side="${side}"`);
+          
           // 🚨 SPOT MARKET RESTRICTION: Can only go LONG on Kraken spot
           // Skip SHORT positions as we can't sell assets we don't own
           if (side === 'short') {
@@ -1720,7 +1736,49 @@ class ProductionTradingEngine {
             log(`📊 Enhanced analysis received: positionSize=$${aiAnalysis.enhancedAnalysis.positionSize?.toFixed(2) || 'undefined'}, shouldTrade=${aiAnalysis.enhancedAnalysis.shouldTrade}`);
           }
           
-          if (aiAnalysis.enhancedAnalysis && aiAnalysis.enhancedAnalysis.positionSize > 0) {
+          // 🎯 SINGLE DECISION MAKER ARCHITECTURE: If tensor says TRADE, we EXECUTE regardless of validators
+          // ONE NECK TO CHOKE: No committee decisions, no overrides, no second-guessing
+          const tensorDecidesToTrade = aiAnalysis.tensorDecision && aiAnalysis.tensorDecision.shouldTrade;
+          
+          // 🐛 DEBUG: Log tensor decision object to find the issue
+          if (aiAnalysis.tensorDecision) {
+            log(`🔍 TENSOR DEBUG: shouldTrade=${aiAnalysis.tensorDecision.shouldTrade}, positionSize=${aiAnalysis.tensorDecision.positionSize}, confidence=${aiAnalysis.tensorDecision.confidence}`);
+          } else {
+            log(`🔍 TENSOR DEBUG: aiAnalysis.tensorDecision is null/undefined`);
+          }
+          log(`🔍 TENSOR DEBUG: tensorDecidesToTrade=${tensorDecidesToTrade}`);
+          
+          if (tensorDecidesToTrade) {
+            // TENSOR AUTHORITY: When mathematical proof says YES, we execute with consensus-adjusted size
+            const minimumViableSize = 50; // $50 minimum trade
+            
+            // 🔥 CRITICAL FIX: Convert tensor position size from percentage to dollars
+            const tensorPositionPercent = aiAnalysis.tensorDecision?.positionSize || 0; // This is a decimal (e.g., 0.044 for 4.4%)
+            
+            // Get current account balance to convert percentage to dollar amount
+            let tensorRecommendedSize = minimumViableSize; // fallback to minimum
+            try {
+              const balanceInfo = await this.balanceCalculator.calculateAvailableBalance();
+              tensorRecommendedSize = tensorPositionPercent * balanceInfo.availableBalance;
+              log(`🔢 TENSOR POSITION CONVERSION: ${(tensorPositionPercent * 100).toFixed(1)}% of $${balanceInfo.availableBalance.toFixed(2)} = $${tensorRecommendedSize.toFixed(2)}`);
+            } catch (balanceError) {
+              log(`⚠️ Could not get balance for tensor position sizing, using minimum: ${balanceError.message}`);
+              tensorRecommendedSize = minimumViableSize;
+            }
+            
+            const baseQuantity = Math.max(minimumViableSize, tensorRecommendedSize);
+            
+            // Apply consensus multiplier (1.0x base, up to 2.0x with mathematical proof agreement)
+            const consensusMultiplier = aiAnalysis.consensusMultiplier || 1.0;
+            quantity = baseQuantity * consensusMultiplier;
+            
+            // Use tensor profit/loss targets if available
+            adjustedTakeProfit = 3.0 / 100;  // Default 3% take profit for tensor trades
+            adjustedStopLoss = 2.0 / 100;    // Default 2% stop loss for tensor trades
+            
+            log(`🚀 TENSOR AUTHORITY: Executing with $${quantity.toFixed(2)} (base: $${baseQuantity.toFixed(2)} × ${consensusMultiplier.toFixed(1)}x consensus) | TP: ${(adjustedTakeProfit*100).toFixed(1)}% SL: ${(adjustedStopLoss*100).toFixed(1)}%`);
+            log(`🎯 SINGLE DECISION MAKER: Tensor confidence ${(aiAnalysis.tensorDecision.confidence*100).toFixed(1)}% ${consensusMultiplier > 1.0 ? '+ Mathematical Proof boost' : '(base size)'} - NO COMMITTEE OVERRIDES`);
+          } else if (aiAnalysis.enhancedAnalysis && aiAnalysis.enhancedAnalysis.positionSize > 0) {
             // Use commission-aware position sizing from enhanced analysis
             quantity = aiAnalysis.enhancedAnalysis.positionSize;
             adjustedTakeProfit = aiAnalysis.enhancedAnalysis.takeProfit / 100;
@@ -2027,11 +2085,11 @@ class ProductionTradingEngine {
   
   /**
    * Execute Pure AI Tensor Fusion Following Mathematical Proof
-   * T(t) = W₂⊗V₂ + W₃⊗V₃ + W₄⊗V₄ + W₅⊗V₅ + W₆⊗V₆ + W₇⊗V₇
+   * T(t) = W₂⊗V₂ + W₃⊗V₃ + W₄⊗V₄ + W₅⊗V₅ + W₆⊗V₆ + W₇⊗V₇ + W₈⊗V₈
    */
   private async executePureAITensorFusion(marketData: MarketDataPoint, phase: any) {
     try {
-      log(`🧮 PURE AI TENSOR FUSION: Collecting V₂-V₇ systems for ${marketData.symbol}`);
+      log(`🧮 PURE AI TENSOR FUSION: Collecting V₂-V₈ systems for ${marketData.symbol}`);
       
       // BULLETPROOF: Ensure all market data is safe
       const safeSymbol = typeof marketData.symbol === 'string' ? marketData.symbol : 
@@ -2465,11 +2523,31 @@ class ProductionTradingEngine {
       log(`   AI Systems: ${tensorDecision.aiSystemsUsed.join(', ')}`);
       log(`   Mathematical Proof: T(t) = W₂⊗V₂ + W₃⊗V₃ + W₄⊗V₄ + W₅⊗V₅ + W₆⊗V₆ + W₇⊗V₇ ✅`);
       
-      // BULLETPROOF: Return validated tensor fusion results
+      // BULLETPROOF: Return validated tensor fusion results with properly mapped signal
+      // 🔥 V2.5 FIX: Map tensor direction to signal action for proper trade execution
+      console.log(`🔍 V2.5 TENSOR DEBUG: direction="${tensorDecision?.direction}", shouldTrade=${tensorDecision?.shouldTrade}`);
+      
+      let signalAction = 'HOLD';
+      if (tensorDecision?.shouldTrade && tensorDecision?.direction === 'LONG') {
+        signalAction = 'BUY';
+      } else if (tensorDecision?.shouldTrade && tensorDecision?.direction === 'SHORT') {
+        signalAction = 'SELL';
+      } else if (tensorDecision?.shouldTrade) {
+        // 🔥 EMERGENCY FIX: If tensor says TRADE but direction is unclear, assume BUY for spot markets
+        signalAction = 'BUY';
+        console.log(`🚨 V2.5 EMERGENCY: Tensor says TRADE but direction="${tensorDecision?.direction}" - defaulting to BUY for spot market`);
+      }
+      
       const safeDecision = {
         shouldTrade: Boolean(tensorDecision?.shouldTrade) || false,
         confidence: typeof tensorDecision?.confidence === 'number' ? tensorDecision.confidence : 0,
-        signal: tensorDecision || { shouldTrade: false, confidence: 0, direction: 'NEUTRAL', expectedReturn: 0 },
+        signal: {
+          action: signalAction, // 🔥 CRITICAL FIX: Map LONG -> BUY, SHORT -> SELL
+          direction: tensorDecision?.direction || 'NEUTRAL',
+          confidence: tensorDecision?.confidence || 0,
+          expectedReturn: tensorDecision?.expectedReturn || 0,
+          shouldTrade: tensorDecision?.shouldTrade || false
+        },
         aiSystems: Array.isArray(tensorDecision?.aiSystemsUsed) ? tensorDecision.aiSystemsUsed : ['error-fallback'],
         enhancedAnalysis: tensorDecision || { confidence: 0, direction: 'NEUTRAL', expectedReturn: 0 },
         tensorDecision: tensorDecision || { shouldTrade: false, confidence: 0, direction: 'NEUTRAL', expectedReturn: 0, reasoning: 'Error fallback' }
@@ -2483,7 +2561,13 @@ class ProductionTradingEngine {
       return {
         shouldTrade: false,
         confidence: 0,
-        signal: null,
+        signal: {
+          action: 'HOLD', // 🔥 V2.5 FIX: Ensure signal has action property even in error case
+          direction: 'NEUTRAL',
+          confidence: 0,
+          expectedReturn: 0,
+          shouldTrade: false
+        },
         aiSystems: ['tensor-fusion-error'],
         enhancedAnalysis: null,
         tensorDecision: null

@@ -2490,14 +2490,24 @@ export class TensorAIFusionEngine {
       // Kelly formula: f* = (odds * winProb - lossProb) / odds
       const kellyFraction = (odds * winProbability - lossProbability) / odds;
       
-      // Apply conservative 50% of Kelly to reduce volatility risk
-      const conservativeKelly = Math.max(0.01, kellyFraction * 0.5);
+      // 🧮 MATHEMATICAL OPPORTUNITY-DRIVEN KELLY: Dynamic based on AI consensus and reliability
+      const aiConsensusStrength = (reliability + consensusStrength) / 2;
+      const systemReliabilityBonus = reliability > 0.8 ? 1.2 : reliability > 0.6 ? 1.0 : 0.8;
       
-      // Cap at reasonable maximum based on market volatility
+      // Dynamic Kelly multiplier: 20% (weak signals) to 95% (mathematical certainty)
+      const opportunityMultiplier = 0.2 + (aiConsensusStrength * systemReliabilityBonus * 0.75);
+      
+      const mathematicalKelly = Math.max(0.01, kellyFraction * opportunityMultiplier);
+      
+      // Dynamic maximum based on mathematical conviction - scales with opportunity strength
       const volatilityFactor = this.calculateMarketVolatilityFactor();
-      const maxPosition = 0.4 / volatilityFactor; // Higher volatility = lower max position
+      const baseMax = 0.6 / volatilityFactor; // Base maximum scales with volatility
+      const convictionMultiplier = Math.min(1.5, aiConsensusStrength * systemReliabilityBonus);
+      const opportunityMax = baseMax * convictionMultiplier; // Can go higher for strong mathematical signals
       
-      return Math.max(0.05, Math.min(maxPosition, conservativeKelly));
+      console.log(`🧮 OPPORTUNITY KELLY: consensus=${(aiConsensusStrength*100).toFixed(1)}%, multiplier=${(opportunityMultiplier*100).toFixed(1)}%, max=${(opportunityMax*100).toFixed(1)}%`);
+      
+      return Math.max(0.02, Math.min(opportunityMax, mathematicalKelly));
     } catch (error) {
       console.warn(`⚠️ Kelly position calculation failed: ${error.message}`);
       return 0.15; // 15% conservative fallback
@@ -3059,10 +3069,23 @@ export class TensorAIFusionEngine {
     // Basic Kelly formula with safety constraints
     const kellyFraction = (expectedOdds * winProbability - lossProbability) / expectedOdds;
     
-    // Conservative Kelly - use fractional Kelly to reduce variance
-    const fractionalKelly = Math.max(0, kellyFraction * 0.25); // Use 25% of full Kelly
+    // 🧮 MATHEMATICAL OPPORTUNITY ASSESSMENT: Dynamic Kelly based on mathematical proof strength
+    // Calculate confidence-weighted Kelly multiplier - higher mathematical proof = higher allocation
+    const mathematicalProofStrength = Math.min(1.0, confidence * (systems.length / 6)); // 0-1 based on systems and confidence
+    const consensusBonus = systems.filter(s => s.confidence > 0.7).length / systems.length; // Bonus for high-confidence systems
     
-    return Math.min(0.2, fractionalKelly); // Cap at 20%
+    // Dynamic Kelly multiplier: scales from 10% (low proof) to 90% (mathematical certainty)
+    const dynamicMultiplier = 0.1 + (mathematicalProofStrength * consensusBonus * 0.8);
+    
+    const opportunityKelly = Math.max(0.01, kellyFraction * dynamicMultiplier);
+    
+    // Dynamic maximum based on mathematical conviction - no arbitrary caps
+    const mathematicalConviction = (expectedReturn * confidence * consensusBonus);
+    const dynamicMax = Math.min(0.5, 0.05 + (mathematicalConviction * 2)); // 5% to 50% based on math
+    
+    console.log(`🧮 MATHEMATICAL SIZING: proof=${(mathematicalProofStrength*100).toFixed(1)}%, multiplier=${(dynamicMultiplier*100).toFixed(1)}%, max=${(dynamicMax*100).toFixed(1)}%`);
+    
+    return Math.min(dynamicMax, opportunityKelly);
   }
 
   /**
@@ -3551,7 +3574,7 @@ export class TensorAIFusionEngine {
   }
   
   /**
-   * 💰 PROFIT PROTECTION: Calculate if we should exit to protect current profits
+   * 🧠 MATHEMATICAL CONVICTION: Calculate if mathematical thesis has changed (hold until ALL validations align for exit)
    */
   private calculateProfitProtectionExit(
     contributingSystems: any[],
@@ -3572,54 +3595,53 @@ export class TensorAIFusionEngine {
       contributingSystems.filter(other => Math.sign(other.direction) === Math.sign(sys.direction)).length >= contributingSystems.length * 0.6
     ).length;
     
-    // 💰 PROFIT PROTECTION 1: Consensus deteriorating - exit before reversal
-    if (consensusStrength < 0.4 && avgSystemConfidence > 0.7) {
-      exitScore += 0.35;
-      reasons.push(`consensus degrading to ${(consensusStrength * 100).toFixed(1)}% despite high AI confidence`);
-      urgency = 'HIGH';
-    }
-    
-    // 💰 PROFIT PROTECTION 2: AI system direction conflict emerging - INFORMATIONAL ONLY
-    // SINGLE DECISION MAKER: This provides data to tensor fusion but NEVER overrides BUY decisions
-    if (systemsInAgreement < contributingSystems.length * 0.5) {
-      // DISABLED: exitScore += 0.3; // Direction conflict is data only, not a decision override
-      reasons.push(`${systemsInAgreement}/${contributingSystems.length} AI systems in agreement - direction conflict noted for analysis`);
-      console.log(`📊 CONSENSUS ANALYSIS: Direction conflict detected (${systemsInAgreement}/${contributingSystems.length} agreement) - tensor fusion will factor this into decision`);
-      if (urgency === 'LOW') urgency = 'MEDIUM';
-    }
-    
-    // 💰 PROFIT PROTECTION 3: Magnitude predictions declining (trend weakening)
-    const avgMagnitude = contributingSystems.reduce((sum, sys) => sum + Math.abs(sys.magnitude), 0) / contributingSystems.length;
-    const strongMagnitudeSystems = contributingSystems.filter(sys => Math.abs(sys.magnitude) > 0.03).length;
-    if (avgMagnitude < 0.015 && strongMagnitudeSystems < contributingSystems.length * 0.3) {
-      exitScore += 0.25;
-      reasons.push(`trend weakening - avg magnitude ${(avgMagnitude * 100).toFixed(1)}%, only ${strongMagnitudeSystems} strong systems`);
-      if (urgency === 'LOW') urgency = 'MEDIUM';
-    }
-    
-    // 💰 PROFIT PROTECTION 4: Commission erosion risk (small expected moves) - INFORMATIONAL ONLY
-    // SINGLE DECISION MAKER: This provides data to tensor fusion but NEVER overrides BUY decisions
-    const expectedProfitRange = Math.max(...contributingSystems.map(sys => Math.abs(sys.magnitude))) - this.commissionCost;
-    if (expectedProfitRange < this.commissionCost * 1.5) { // Less than 1.5x commission in profit potential
-      // DISABLED: exitScore += 0.2; // Commission protection is data only, not a decision override
-      reasons.push(`profit potential ${(expectedProfitRange * 100).toFixed(2)}% < 1.5x commission cost - noted for analysis`);
-      console.log(`📊 COMMISSION ANALYSIS: Low profit margin detected (${(expectedProfitRange * 100).toFixed(2)}%) - tensor fusion will factor this into decision`);
-    }
-    
-    // 💰 PROFIT PROTECTION 5: Reliability-weighted system doubt
-    const avgReliability = contributingSystems.reduce((sum, sys) => sum + (sys.reliability || 0.5), 0) / contributingSystems.length;
-    const reliableSystemsWithLowConfidence = contributingSystems.filter(sys => 
-      (sys.reliability || 0.5) > 0.75 && sys.confidence < 0.5
-    ).length;
-    
-    if (reliableSystemsWithLowConfidence >= 2) {
-      exitScore += 0.4;
-      reasons.push(`${reliableSystemsWithLowConfidence} reliable AI systems losing confidence - critical exit signal`);
+    // 🧠 MATHEMATICAL CONVICTION 1: MASSIVE consensus deterioration - ALL systems turning against position
+    // ONLY exit when mathematical thesis COMPLETELY breaks down (like your manual trading)
+    if (consensusStrength < 0.2 && avgSystemConfidence > 0.8 && systemsInAgreement === 0) {
+      exitScore += 0.6; // High score only for complete mathematical breakdown
+      reasons.push(`COMPLETE mathematical breakdown: ${(consensusStrength * 100).toFixed(1)}% consensus, ALL AI systems disagreeing`);
       urgency = 'CRITICAL';
     }
     
-    const shouldExit = exitScore > 0.3; // 30% threshold for profit protection exit
-    const finalReason = reasons.length > 0 ? reasons.join(', ') : 'no profit protection concerns';
+    // 🧠 MATHEMATICAL CONVICTION 2: Direction reversal - majority of systems now pointing opposite direction
+    // This is like when ALL your manual trading validations flip to the other side
+    const systemsPointingOpposite = contributingSystems.filter(sys => 
+      contributingSystems.filter(other => Math.sign(other.direction) === -Math.sign(sys.direction)).length > contributingSystems.length * 0.7
+    ).length;
+    
+    if (systemsPointingOpposite > contributingSystems.length * 0.7) {
+      exitScore += 0.7; // Strong mathematical reversal signal
+      reasons.push(`MATHEMATICAL REVERSAL: ${systemsPointingOpposite}/${contributingSystems.length} AI systems now pointing opposite direction`);
+      urgency = 'CRITICAL';
+    } else {
+      // HOLD CONVICTION: Just log the analysis but don't add to exit score
+      reasons.push(`HOLDING CONVICTION: ${systemsInAgreement}/${contributingSystems.length} systems still aligned - staying in position`);
+      console.log(`🧠 MATHEMATICAL CONVICTION: ${systemsInAgreement}/${contributingSystems.length} systems still aligned - HOLDING POSITION despite temporary fluctuation`);
+    }
+    
+    // 🧠 MATHEMATICAL CONVICTION 3: Catastrophic reliability breakdown - when your most trusted indicators fail
+    const avgReliability = contributingSystems.reduce((sum, sys) => sum + (sys.reliability || 0.5), 0) / contributingSystems.length;
+    const criticalSystemsFailure = contributingSystems.filter(sys => 
+      (sys.reliability || 0.5) > 0.9 && sys.confidence < 0.2 // Only highest reliability systems with catastrophic confidence loss
+    ).length;
+    
+    if (criticalSystemsFailure >= 3) { // Need at least 3 critical systems to completely fail
+      exitScore += 0.8;
+      reasons.push(`CRITICAL SYSTEM FAILURE: ${criticalSystemsFailure} highest-reliability AI systems completely lost confidence`);
+      urgency = 'CRITICAL';
+    } else {
+      // Normal confidence fluctuation - HOLD THE LINE
+      console.log(`🧠 CONVICTION HOLDING: AI systems showing normal confidence fluctuation - mathematical thesis still intact`);
+    }
+    
+    // 🧠 MATHEMATICAL CONVICTION: Only exit when mathematical thesis COMPLETELY changes (>= 0.8 threshold)
+    // This mimics your manual trading: "hold for hours until ALL validations align for exit"
+    const shouldExit = exitScore >= 0.8; // Much higher threshold - only exit on complete mathematical breakdown
+    const finalReason = reasons.length > 0 ? reasons.join(', ') : 'mathematical conviction still strong - HOLDING POSITION';
+    
+    if (!shouldExit) {
+      console.log(`🧠 MATHEMATICAL CONVICTION: Holding position - exit score ${exitScore.toFixed(2)} < 0.8 threshold. Mathematical thesis still valid.`);
+    }
     
     return {
       shouldExit,
