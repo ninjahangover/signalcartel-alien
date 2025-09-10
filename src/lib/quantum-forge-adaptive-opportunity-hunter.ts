@@ -303,7 +303,7 @@ export class QuantumForgeAdaptiveOpportunityHunter {
   private async getIntuitionSignal(symbol: string, marketData: any): Promise<number> {
     try {
       // Use mathematical intuition for pattern recognition
-      const result = await mathematicalIntuitionEngine.analyzeIntuition({
+      const result = await mathematicalIntuitionEngine.analyzeIntuitively({
         symbol,
         currentPrice: marketData.price,
         priceChange: marketData.change24h || 0,

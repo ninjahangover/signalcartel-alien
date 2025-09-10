@@ -727,7 +727,7 @@ export class QuantumForgeProfitPredator {
           
           // Additional validation using mathematical intuition for high-confidence opportunities
           if (opportunity.confidence > 0.5) {
-            const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuition({
+            const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuitively({
               symbol,
               currentPrice: marketData.price,
               priceChange: marketData.change24h || 0,
@@ -831,7 +831,7 @@ export class QuantumForgeProfitPredator {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
 
-        const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuition({
+        const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuitively({
           symbol,
           currentPrice: marketData.price,
           priceChange: marketData.change24h || 0,

@@ -90,6 +90,44 @@ export class PositionManager {
   private exitStrategies = new Map<string, ExitStrategy>();
   
   constructor(private prisma: any) {}
+
+  /**
+   * Sync in-memory positions with database on startup
+   */
+  async syncPositionsFromDatabase() {
+    try {
+      const dbPositions = await this.prisma.managedPosition.findMany({
+        where: { status: 'open' }
+      });
+      
+      this.positions.clear(); // Clear in-memory positions
+      
+      for (const dbPosition of dbPositions) {
+        const position: Position = {
+          id: dbPosition.id,
+          symbol: dbPosition.symbol,
+          strategy: dbPosition.strategy,
+          side: dbPosition.side,
+          entryPrice: dbPosition.entryPrice,
+          quantity: dbPosition.quantity,
+          entryTradeId: dbPosition.entryTradeId,
+          entryTime: dbPosition.entryTime,
+          status: dbPosition.status,
+          stopLoss: dbPosition.stopLoss,
+          takeProfit: dbPosition.takeProfit,
+          maxHoldTime: dbPosition.maxHoldTime,
+          metadata: dbPosition.metadata || {}
+        };
+        this.positions.set(position.id, position);
+      }
+      
+      console.log(`📊 Synced ${dbPositions.length} positions from database`);
+    } catch (error) {
+      console.log(`⚠️ Failed to sync positions from database: ${error.message}`);
+      // Clear positions to ensure clean state
+      this.positions.clear();
+    }
+  }
   
   /**
    * Register exit strategy for a trading strategy
@@ -218,26 +256,60 @@ export class PositionManager {
     
     this.positions.set(positionId, position);
     
-    // Save entry trade to database first (required by foreign key)
-    await this.savePositionTrade(entryTrade);
-    
-    // Save position to database
-    await this.prisma.managedPosition.create({
-      data: {
-        id: position.id,
-        strategy: position.strategy,
-        symbol: position.symbol,
-        side: position.side,
-        entryPrice: position.entryPrice,
-        quantity: position.quantity,
-        entryTradeId: position.entryTradeId,
-        entryTime: position.entryTime,
-        status: position.status,
-        stopLoss: position.stopLoss,
-        takeProfit: position.takeProfit,
-        maxHoldTime: position.maxHoldTime
-      }
-    });
+    // 🔧 V2.7 TRANSACTION FIX: Create position and trade atomically to resolve foreign key constraints
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Step 1: Create position with temporary entryTradeId
+        const tempPosition = await tx.managedPosition.create({
+          data: {
+            id: position.id,
+            strategy: position.strategy,
+            symbol: position.symbol,
+            side: position.side,
+            entryPrice: position.entryPrice,
+            quantity: position.quantity,
+            entryTradeId: 'temp-' + tradeId, // Temporary value
+            entryTime: position.entryTime,
+            status: position.status,
+            stopLoss: position.stopLoss,
+            takeProfit: position.takeProfit,
+            maxHoldTime: position.maxHoldTime,
+            metadata: position.metadata || {}
+          }
+        });
+        
+        // Step 2: Create trade with correct positionId
+        await tx.managedTrade.create({
+          data: {
+            id: entryTrade.id,
+            positionId: entryTrade.positionId,
+            side: entryTrade.side,
+            symbol: entryTrade.symbol,
+            quantity: entryTrade.quantity,
+            price: entryTrade.price,
+            value: entryTrade.value,
+            strategy: entryTrade.strategy,
+            executedAt: entryTrade.executedAt,
+            pnl: entryTrade.pnl,
+            isEntry: entryTrade.isEntry
+          }
+        });
+        
+        // Step 3: Update position with correct entryTradeId
+        await tx.managedPosition.update({
+          where: { id: position.id },
+          data: { entryTradeId: entryTrade.id }
+        });
+      });
+      
+      console.log(`✅ DATABASE: Successfully created position ${position.id} and trade ${entryTrade.id}`);
+      
+    } catch (error) {
+      console.log(`❌ DATABASE TRANSACTION FAILED: ${error.message}`);
+      // Don't throw - keep in-memory position for mathematical conviction to work
+      // but log the error for debugging
+      console.log(`⚠️ Position ${position.id} exists in-memory but not in database`);
+    }
     
     console.log(`📈 OPENED ${position.side.toUpperCase()} position: ${params.quantity} ${params.symbol} @ $${params.price}`);
     
@@ -278,27 +350,53 @@ export class PositionManager {
       isEntry: false
     };
     
-    // Save exit trade to database first (before updating position to avoid FK constraint issues)
-    await this.savePositionTrade(exitTrade);
-    
-    // Update position
+    // Update position in-memory first
     position.exitPrice = exitPrice;
     position.exitTradeId = tradeId;
     position.exitTime = new Date();
     position.status = 'closed';
     position.realizedPnL = pnl;
     
-    // Update position in database
-    await this.prisma.managedPosition.update({
-      where: { id: positionId },
-      data: {
-        exitPrice: exitPrice,
-        exitTradeId: tradeId,
-        exitTime: position.exitTime,
-        status: 'closed',
-        realizedPnL: pnl
-      }
-    });
+    // 🔧 V2.7 TRANSACTION FIX: Update position and create exit trade atomically
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Step 1: Create exit trade
+        await tx.managedTrade.create({
+          data: {
+            id: exitTrade.id,
+            positionId: exitTrade.positionId,
+            side: exitTrade.side,
+            symbol: exitTrade.symbol,
+            quantity: exitTrade.quantity,
+            price: exitTrade.price,
+            value: exitTrade.value,
+            strategy: exitTrade.strategy,
+            executedAt: exitTrade.executedAt,
+            pnl: exitTrade.pnl,
+            isEntry: exitTrade.isEntry
+          }
+        });
+        
+        // Step 2: Update position with exit information
+        await tx.managedPosition.update({
+          where: { id: positionId },
+          data: {
+            exitPrice: exitPrice,
+            exitTradeId: tradeId,
+            exitTime: position.exitTime,
+            status: 'closed',
+            realizedPnL: pnl
+          }
+        });
+      });
+      
+      console.log(`✅ DATABASE: Successfully closed position ${positionId} and created exit trade ${exitTrade.id}`);
+      
+    } catch (error) {
+      console.log(`❌ DATABASE EXIT TRANSACTION FAILED: ${error.message}`);
+      // Keep in-memory position updated for mathematical conviction
+      console.log(`⚠️ Position ${positionId} closed in-memory but database update failed`);
+    }
     
     console.log(`📉 CLOSED ${position.side.toUpperCase()} position: ${position.quantity} ${position.symbol} @ $${exitPrice} | P&L: $${pnl.toFixed(2)} (${reason})`);
     

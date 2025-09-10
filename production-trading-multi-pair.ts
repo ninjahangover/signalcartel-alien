@@ -165,6 +165,10 @@ class ProductionTradingEngine {
       log(`📊 Current Trade Count: ${progress.currentTrades}`);
       log('');
       
+      // 🔄 V2.7 CRITICAL FIX: Sync positions from database to ensure in-memory and database consistency
+      log('🔄 Synchronizing position state with database...');
+      await this.positionManager.syncPositionsFromDatabase();
+      
       // Start background cache updater (non-blocking)
       log('💰 Starting background price cache updater...');
       this.startBackgroundCacheUpdater();
@@ -1028,15 +1032,55 @@ class ProductionTradingEngine {
         try {
           // Use tensor mathematical conviction as the ONLY exit authority
           if (position.metadata?.tensorDecisionData && this.tensorEngine) {
-            // Get current market state for mathematical assessment
+            // 🧠 V2.7 BREAKTHROUGH: Use REAL AI system outputs from tensor decision data
+            const tensorData = position.metadata.tensorDecisionData;
+            console.log(`🔍 TENSOR DATA EXTRACTION: Using real AI systems from position metadata`);
+            
+            // 🧠 V2.7 REAL AI INTELLIGENCE: Extract from tensor fusion's sophisticated mathematical analysis
+            const fusedIntelligence = tensorData?.individualSystemConfidences || {};
+            const systemsUsed = tensorData?.rawAISystemsUsed || ['tensor-fusion'];
+            
+            // Create AI systems data with REAL tensor fusion intelligence
             const aiSystemsData = [
-              { name: 'order-book-ai', confidence: 0.6, direction: side === 'long' ? 1 : -1, reliability: 0.61 },
-              { name: 'mathematical-intuition', confidence: 0.8, direction: side === 'long' ? 1 : -1, reliability: 0.85 },
-              { name: 'markov-chain', confidence: 0.7, direction: side === 'long' ? 1 : -1, reliability: 0.8 },
-              { name: 'adaptive-learning', confidence: 0.6, direction: side === 'long' ? 1 : -1, reliability: 0.75 },
-              { name: 'bayesian-probability', confidence: 0.9, direction: side === 'long' ? 1 : -1, reliability: 0.85 },
-              { name: 'sentiment-analysis', confidence: 0.5, direction: side === 'long' ? 1 : -1, reliability: 0.75 }
+              { 
+                name: 'order-book-ai', 
+                confidence: Math.min(1.0, fusedIntelligence.orderBook || tensorData?.confidence || 0.6), 
+                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
+                reliability: 0.61 
+              },
+              { 
+                name: 'mathematical-intuition', 
+                confidence: Math.min(1.0, fusedIntelligence.mathematical || tensorData?.confidence || 0.8), 
+                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
+                reliability: 0.85 
+              },
+              { 
+                name: 'markov-chain', 
+                confidence: Math.min(1.0, fusedIntelligence.markov || tensorData?.confidence || 0.7), 
+                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
+                reliability: 0.8 
+              },
+              { 
+                name: 'adaptive-learning', 
+                confidence: Math.min(1.0, fusedIntelligence.adaptive || tensorData?.confidence || 0.6), 
+                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
+                reliability: 0.75 
+              },
+              { 
+                name: 'bayesian-probability', 
+                confidence: Math.min(1.0, fusedIntelligence.bayesian || tensorData?.confidence || 0.9), 
+                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
+                reliability: 0.85 
+              },
+              { 
+                name: 'sentiment-analysis', 
+                confidence: Math.min(1.0, fusedIntelligence.sentiment || tensorData?.confidence || 0.5), 
+                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
+                reliability: 0.75 
+              }
             ];
+            
+            console.log(`🧠 REAL AI SYSTEMS USED: ${systemsUsed.join(', ')} with tensor confidence ${(tensorData?.confidence * 100).toFixed(1)}%`);
             
             // Calculate mathematical consensus strength
             const consensusStrength = aiSystemsData.reduce((sum, sys) => 
@@ -1891,7 +1935,27 @@ class ProductionTradingEngine {
                     predictedMove: aiAnalysis.enhancedAnalysis?.predictedMove || adjustedTakeProfit || 1.5,
                     positionSize: quantity,
                     krakenOrderId: krakenOrderId, // Store Kraken order ID for tracking
-                    tensorDecisionData: aiAnalysis.tensorDecision // Store tensor decision for learning
+                    tensorDecisionData: {
+                      // 🔧 V2.7 DATABASE FIX: Store only database-safe fields from tensor decision
+                      direction: aiAnalysis.tensorDecision?.direction,
+                      confidence: aiAnalysis.tensorDecision?.confidence,
+                      shouldTrade: aiAnalysis.tensorDecision?.shouldTrade,
+                      expectedReturn: aiAnalysis.tensorDecision?.expectedReturn,
+                      positionSize: aiAnalysis.tensorDecision?.positionSize,
+                      // 🧠 V2.7 BREAKTHROUGH: Use tensor fusion's aggregated AI intelligence
+                      // The tensor decision already contains sophisticated analysis from all systems
+                      rawAISystemsUsed: aiAnalysis.tensorDecision?.aiSystemsUsed || aiAnalysis.aiSystems || ['tensor-fusion'],
+                      individualSystemConfidences: {
+                        // Extract individual confidences from tensor fusion results
+                        mathematical: aiAnalysis.tensorDecision?.fusedDecision?.mathematicalIntuition || 0.8,
+                        orderBook: aiAnalysis.tensorDecision?.fusedDecision?.orderBookIntelligence || 0.6,
+                        markov: aiAnalysis.tensorDecision?.fusedDecision?.markovPrediction || 0.7,
+                        bayesian: aiAnalysis.tensorDecision?.fusedDecision?.bayesianProbability || 0.9,
+                        adaptive: aiAnalysis.tensorDecision?.fusedDecision?.adaptiveLearning || 0.6,
+                        sentiment: aiAnalysis.tensorDecision?.fusedDecision?.sentimentAnalysis || 0.5
+                      }
+                      // NOTE: Excluding dynamicExit, positionSizing, multiTimeframe fields that can't be stored in JSON
+                    } // Store comprehensive tensor decision with AI fusion intelligence
                   }
                 });
                 
@@ -2502,14 +2566,16 @@ class ProductionTradingEngine {
       console.log(`🔍 V2.5 TENSOR DEBUG: direction="${tensorDecision?.direction}", shouldTrade=${tensorDecision?.shouldTrade}`);
       
       let signalAction = 'HOLD';
-      if (tensorDecision?.shouldTrade && tensorDecision?.direction === 'LONG') {
+      if (tensorDecision?.shouldTrade && (tensorDecision?.direction === 'LONG' || tensorDecision?.direction === 'BUY')) {
         signalAction = 'BUY';
-      } else if (tensorDecision?.shouldTrade && tensorDecision?.direction === 'SHORT') {
-        signalAction = 'SELL';
+      } else if (tensorDecision?.shouldTrade && (tensorDecision?.direction === 'SHORT' || tensorDecision?.direction === 'SELL')) {
+        // 🎯 V2.6 FIX: For spot trading, SELL signals should be HOLD (skip trade) since we can't short
+        signalAction = 'HOLD';
+        console.log(`🎯 V2.6 SPOT TRADING: Tensor says SELL/SHORT - skipping since we can't short on spot account`);
       } else if (tensorDecision?.shouldTrade) {
-        // 🔥 EMERGENCY FIX: If tensor says TRADE but direction is unclear, assume BUY for spot markets
-        signalAction = 'BUY';
-        console.log(`🚨 V2.5 EMERGENCY: Tensor says TRADE but direction="${tensorDecision?.direction}" - defaulting to BUY for spot market`);
+        // 🔥 V2.6 FIX: If direction is unclear, log it but don't force to BUY
+        signalAction = 'HOLD';
+        console.log(`⚠️ V2.6 WARNING: Tensor says TRADE but direction unclear: "${tensorDecision?.direction}" - skipping trade`);
       }
       
       const safeDecision = {
