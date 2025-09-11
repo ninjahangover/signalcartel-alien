@@ -8,6 +8,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum PositionStatus {
+  open
+  closed
+  limit_buy
+  limit_sell
+  stop_loss
+}
+
 model Account {
   id                String  @id @default(cuid())
   userId            String
@@ -571,7 +579,7 @@ model ManagedPosition {
   exitPrice     Float?
   exitTradeId   String?
   exitTime      DateTime?
-  status        String        @default("open")
+  status        PositionStatus @default(open)
   realizedPnL   Float?
   unrealizedPnL Float?
   stopLoss      Float?
@@ -706,7 +714,7 @@ model LivePosition {
   entryValue         Float
   entryTime          DateTime
   entryTradeIds      String
-  status             String             @default("open")
+  status             PositionStatus     @default(open)
   currentPrice       Float?
   unrealizedPnL      Float              @default(0.0)
   exitPrice          Float?

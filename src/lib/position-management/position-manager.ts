@@ -97,7 +97,11 @@ export class PositionManager {
   async syncPositionsFromDatabase() {
     try {
       const dbPositions = await this.prisma.managedPosition.findMany({
-        where: { status: 'open' }
+        where: { 
+          status: { 
+            in: ['open', 'limit_buy', 'limit_sell', 'stop_loss'] 
+          } 
+        }
       });
       
       this.positions.clear(); // Clear in-memory positions
