@@ -24,11 +24,14 @@ const execAsync = promisify(exec);
 
 interface SystemHealth {
   processRunning: boolean;
+  dashboardRunning: boolean;
   logActivity: boolean;
   lastLogTime: Date | null;
   positionsNeedManagement: boolean;
   consecutiveFailures: number;
+  consecutiveDashboardFailures: number;
   lastRestartTime: Date | null;
+  lastDashboardRestartTime: Date | null;
 }
 
 interface GuardianConfig {
@@ -60,11 +63,14 @@ class SystemGuardian {
 
     this.health = {
       processRunning: false,
+      dashboardRunning: false,
       logActivity: false,
       lastLogTime: null,
       positionsNeedManagement: false,
       consecutiveFailures: 0,
-      lastRestartTime: null
+      consecutiveDashboardFailures: 0,
+      lastRestartTime: null,
+      lastDashboardRestartTime: null
     };
 
     this.logIncident('🚀 SYSTEM GUARDIAN INITIALIZED - Trading System Protection Active');
@@ -123,18 +129,23 @@ class SystemGuardian {
       // Check 1: Is the main process running?
       this.health.processRunning = await this.isProcessRunning();
       
-      // Check 2: Is the log showing recent activity?
+      // Check 2: Is the dashboard running?
+      this.health.dashboardRunning = await this.isDashboardRunning();
+      
+      // Check 3: Is the log showing recent activity?
       this.health.logActivity = await this.checkLogActivity();
       
-      // Check 3: Are there open positions that need management?
+      // Check 4: Are there open positions that need management?
       this.health.positionsNeedManagement = await this.checkOpenPositions();
       
       // Determine if system needs intervention
       const needsRestart = this.determineRestartNeed();
+      const dashboardNeedsRestart = !this.health.dashboardRunning;
       
       if (needsRestart) {
         this.logIncident(`🚨 SYSTEM FAILURE DETECTED at ${timestamp}:`);
         this.logIncident(`   Process Running: ${this.health.processRunning}`);
+        this.logIncident(`   Dashboard Running: ${this.health.dashboardRunning}`);
         this.logIncident(`   Log Activity: ${this.health.logActivity} (last: ${this.health.lastLogTime})`);
         this.logIncident(`   Open Positions: ${this.health.positionsNeedManagement}`);
         
@@ -144,6 +155,17 @@ class SystemGuardian {
         if (this.health.consecutiveFailures > 0) {
           this.logIncident(`✅ SYSTEM RECOVERED - Resetting failure count (was ${this.health.consecutiveFailures})`);
           this.health.consecutiveFailures = 0;
+        }
+      }
+      
+      // Check dashboard separately
+      if (dashboardNeedsRestart) {
+        await this.handleDashboardFailure();
+      } else {
+        // Dashboard is healthy - reset failure counter
+        if (this.health.consecutiveDashboardFailures > 0) {
+          this.logIncident(`📊 DASHBOARD RECOVERED - Resetting failure count (was ${this.health.consecutiveDashboardFailures})`);
+          this.health.consecutiveDashboardFailures = 0;
         }
       }
       
@@ -160,6 +182,23 @@ class SystemGuardian {
       // Check for the actual process pattern that matches running trading system
       const { stdout } = await execAsync('ps aux | grep "production-trading-multi-pair.ts" | grep -v grep');
       return stdout.trim().length > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Check if the P&L dashboard is running
+   */
+  private async isDashboardRunning(): Promise<boolean> {
+    try {
+      // Check if dashboard process is running
+      const { stdout } = await execAsync('ps aux | grep "pretty-pnl-dashboard.ts" | grep -v grep');
+      if (stdout.trim().length > 0) return true;
+      
+      // Also check if port 3004 is listening
+      const { stdout: portCheck } = await execAsync('netstat -tuln | grep :3004 || true');
+      return portCheck.trim().length > 0;
     } catch (error) {
       return false;
     }
@@ -342,6 +381,86 @@ class SystemGuardian {
         }
       }, 3000);
     });
+  }
+
+  /**
+   * Handle dashboard failure with automatic restart
+   */
+  private async handleDashboardFailure(): Promise<void> {
+    this.health.consecutiveDashboardFailures++;
+    
+    // Check if we're in cooldown period
+    if (this.health.lastDashboardRestartTime) {
+      const timeSinceRestart = Date.now() - this.health.lastDashboardRestartTime.getTime();
+      if (timeSinceRestart < 60000) { // 1 minute cooldown for dashboard
+        const remainingCooldown = Math.ceil((60000 - timeSinceRestart) / 1000);
+        this.logIncident(`⏳ Dashboard restart cooldown active - waiting ${remainingCooldown}s`);
+        return;
+      }
+    }
+    
+    // Check if we've exceeded max attempts
+    if (this.health.consecutiveDashboardFailures > 3) {
+      this.logIncident(`📊 Dashboard has failed ${this.health.consecutiveDashboardFailures} times - sending alert`);
+      await this.sendAlert('📊 DASHBOARD DOWN', 
+        `P&L Dashboard on port 3004 has failed ${this.health.consecutiveDashboardFailures} times. Dashboard monitoring disabled for 30 minutes.`, 
+        'warning');
+      
+      // Reset counter and wait 30 minutes before trying again
+      this.health.consecutiveDashboardFailures = 0;
+      setTimeout(() => {
+        this.logIncident('📊 Re-enabling dashboard monitoring');
+      }, 1800000); // 30 minutes
+      return;
+    }
+    
+    // Attempt restart
+    await this.restartDashboard();
+  }
+  
+  /**
+   * Restart the P&L dashboard
+   */
+  private async restartDashboard(): Promise<void> {
+    this.logIncident(`📊 RESTARTING DASHBOARD (attempt #${this.health.consecutiveDashboardFailures})`);
+    
+    try {
+      // Kill any existing dashboard process
+      await execAsync('pkill -f "pretty-pnl-dashboard.ts" || true');
+      
+      // Wait a moment
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Start new dashboard process
+      const env = {
+        ...process.env,
+        DATABASE_URL: 'postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public'
+      };
+      
+      const child = spawn('npx', ['tsx', 'pretty-pnl-dashboard.ts'], {
+        detached: true,
+        stdio: 'ignore',
+        env,
+        cwd: process.cwd()
+      });
+      
+      child.on('spawn', () => {
+        child.unref();
+        this.health.lastDashboardRestartTime = new Date();
+        this.logIncident(`✅ DASHBOARD RESTARTED - P&L monitoring available at http://localhost:3004`);
+        
+        this.sendAlert('📊 DASHBOARD RESTARTED', 
+          `P&L Dashboard automatically restarted and available at http://localhost:3004`, 
+          'info');
+      });
+      
+      child.on('error', (error) => {
+        this.logIncident(`❌ Dashboard restart failed: ${error.message}`);
+      });
+      
+    } catch (error) {
+      this.logIncident(`❌ Dashboard restart error: ${error.message}`);
+    }
   }
 
   /**

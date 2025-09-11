@@ -201,28 +201,24 @@ class IntelligentPairAdapter {
   }
 
   /**
-   * Get intelligent exit thresholds based on pair characteristics
+   * TENSOR AI MODE: Return algorithmic variables only - NO exit decisions
+   * The advanced mathematical conviction system handles all exit timing
    */
-  getIntelligentExitThresholds(symbol: string): { takeProfit: number; stopLoss: number } {
+  getIntelligentExitThresholds(symbol: string, confidence?: number, predictedMove?: number): { takeProfit: number; stopLoss: number } {
+    // In TENSOR_MODE, these are just mathematical variables for the algorithms
+    // NOT actual exit triggers - the Tensor AI system decides everything
+    
     const characteristics = this.pairCharacteristics.get(symbol);
     
-    if (!characteristics) {
-      return { takeProfit: 2.0, stopLoss: 1.0 }; // Default conservative
-    }
+    // Pure mathematical variables - not limits, just data for the algorithms
+    const mathematicalTarget = predictedMove || (characteristics?.avgProfitableMove || 1.0);
+    const mathematicalRisk = characteristics?.volatility || 1.0;
     
-    // Set take profit based on average profitable moves
-    const takeProfit = Math.max(
-      characteristics.avgProfitableMove * 0.8, // 80% of average profitable move
-      this.commissionProfile.taker * 200 * 1.5 // At least 1.5x commission cost
-    );
-    
-    // Set stop loss based on average losses but tighter to preserve capital
-    const stopLoss = Math.min(
-      characteristics.avgLossMove * 0.6, // 60% of average loss (cut losses earlier)
-      takeProfit * 0.5 // Risk-reward ratio of at least 1:2
-    );
-    
-    return { takeProfit, stopLoss };
+    // These are INPUTS to the advanced algorithms, not hardcoded exits
+    return { 
+      takeProfit: mathematicalTarget, // Mathematical variable for Tensor AI
+      stopLoss: mathematicalRisk      // Mathematical variable for Tensor AI
+    };
   }
 
   /**

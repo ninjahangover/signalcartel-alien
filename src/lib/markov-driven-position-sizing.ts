@@ -285,22 +285,27 @@ export class MarkovDrivenPositionSizing {
       stopLoss = 0.02; // Increase to 2% if high risk of big loss
     }
     
-    // Dynamic take profit based on win probability and big win potential
-    let takeProfit = 0.02; // Base 2% (2:1 risk reward)
-    if (bigWinProb > 0.15) {
-      takeProfit = 0.04; // Increase to 4% if good chance of big win
+    // PURE ALGORITHMIC DECISION MAKING - NO HARDCODED LIMITS
+    // Let mathematical domains calculate optimal targets without interference
+    let takeProfit = 0; // No default limit - algorithm decides everything
+    
+    // Only provide input to algorithms, never override their decisions
+    const algorithmicInput = {
+      bigWinProbability: bigWinProb,
+      confidence: prediction.confidence,
+      marketIntelligence: intelligence,
+      volatility: safeVolatility
+    };
+    
+    // Trust pure mathematical calculation - no human imposed limits
+    if (prediction.expectedReturn && prediction.expectedReturn > 0) {
+      takeProfit = prediction.expectedReturn; // Use pure mathematical expectation
     }
     
-    // Adjust based on confidence
-    if (prediction.confidence > 0.8) {
-      takeProfit *= 1.3; // Higher confidence = let winners run
-    }
-    
-    // Ensure minimum risk-reward ratio
-    const riskReward = takeProfit / stopLoss;
-    if (riskReward < 1.5) {
-      takeProfit = stopLoss * 1.5; // Maintain at least 1.5:1
-    }
+    // PURE MATHEMATICAL DECISION MAKING - No arbitrary risk-reward enforcement
+    // Let algorithms determine optimal risk-reward based on market intelligence
+    const riskReward = takeProfit > 0 && stopLoss > 0 ? takeProfit / stopLoss : 0;
+    // Trust mathematical domains completely - no overrides
     
     return {
       stopLoss,

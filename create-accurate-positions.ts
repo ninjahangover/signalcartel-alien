@@ -11,14 +11,12 @@ async function createAccuratePositions() {
   const userId = 'user-production';
   const now = new Date();
   
-  // Actual positions from user's Kraken account (updated with deposit)
+  // ACTUAL positions from user's REAL Kraken account (as stated by user)
   const actualPositions = [
-    { symbol: 'BNBUSDT', value: 100.20, price: 650 }, // BNB major position
-    { symbol: 'ETHUSD', value: 50.25, price: 4200 },  // ETH position  
-    { symbol: 'SOLUSD', value: 49.81, price: 220 },   // SOL position
-    { symbol: 'BTCUSD', value: 0.17, price: 113000 }, // BTC dust position (but still needs tracking)
-    // Ignoring: AVAX <$0.01, USDT $42.38 (stablecoin - not a trading position)
-    // Available USD cash: $295.82 (after deposit)
+    { symbol: 'AVAXUSD', value: 50.02, price: 29.00 },  // Avalanche $50.02
+    { symbol: 'BTCUSD', value: 50.00, price: 114000 },  // Bitcoin $50.00
+    // Note: BND $49.91 is not a standard crypto pair - may be bond or special asset
+    // Available cash: USD $370.98 + USDT $19.52 = $390.50 total liquidity
   ];
   
   try {
@@ -109,8 +107,11 @@ async function createAccuratePositions() {
     
     console.log(`\n💰 BALANCE SUMMARY:`);
     console.log(`   Total crypto positions: $${actualPositions.reduce((sum, p) => sum + p.value, 0).toFixed(2)}`);
-    console.log(`   Available USD cash: $295.82 (after deposit)`);
-    console.log(`   System ready for realistic position sizing!`);
+    console.log(`   BND position: $49.91 (special asset)`);
+    console.log(`   Available USD cash: $370.98`);
+    console.log(`   Available USDT: $19.52`);
+    console.log(`   Total Portfolio Value: ~$540.43`);
+    console.log(`   System ready for accurate position tracking!`);
     
   } catch (error) {
     console.error('❌ Failed to create accurate positions:', error.message);

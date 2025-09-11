@@ -316,21 +316,14 @@ export class EnhancedMathematicalIntuition {
     // Store prediction for accuracy tracking
     this.storePrediction(symbol, pairAdaptedConfidence, predictedMove);
     
-    // 🚀 PROACTIVE TENSOR PREDICTIONS: Leverage mathematical prediction strength
-    // Enable worthwhile risk-taking when tensor mathematics shows strong signals
-    let moveThreshold = 0.2; // Base 0.2% minimum move
-    let confidenceThreshold = 25; // Base confidence threshold
+    // 🚀 DYNAMIC MATHEMATICAL THRESHOLDS: Remove hardcoded limits, use pure calculations
+    // Calculate thresholds based on mathematical relationships rather than fixed values
+    const volatilityFactor = Math.sqrt(Math.abs(predictedMove)); // Higher volatility = lower threshold needed
+    const confidenceFactor = Math.pow(pairAdaptedConfidence / 100, 2); // Exponential confidence scaling
     
-    // BREAKTHROUGH: Lower thresholds for high-quality mathematical predictions
-    if (pairAdaptedConfidence > 60) {
-      // Strong mathematical confidence - be more aggressive
-      moveThreshold *= 0.6; // Reduce to 0.12% for high-confidence predictions
-      confidenceThreshold = 20; // Lower confidence requirement
-    } else if (pairAdaptedConfidence > 45) {
-      // Moderate confidence - somewhat more aggressive
-      moveThreshold *= 0.8; // Reduce to 0.16% for moderate-confidence predictions
-      confidenceThreshold = 22;
-    }
+    // PURE ALGORITHMIC CALCULATION - NO HARDCODED MINIMUMS
+    let moveThreshold = 0.3 / (1 + volatilityFactor); // Pure mathematical volatility relationship
+    let confidenceThreshold = 35 * (1 - confidenceFactor); // Pure confidence scaling - no artificial floors
     
     // 🚨 CRITICAL FIX: In TENSOR_MODE, Enhanced Mathematical Intuition is a MATHEMATICAL VARIABLE only, NOT a decision maker
     const isTensorMode = process.env.TENSOR_MODE === 'true';
@@ -494,10 +487,10 @@ export class EnhancedMathematicalIntuition {
     
     // Apply pair-specific volatility adjustment
     const pairParams = this.pairAdapter.getPairParameters(symbol);
-    const volatilityAdjustment = Math.max(0.5, Math.min(2.0, pairParams.riskReward / 2));
-    predictedMove *= volatilityAdjustment;
+    const moveVolatilityAdjustment = Math.max(0.5, Math.min(2.0, pairParams.riskReward / 2));
+    predictedMove *= moveVolatilityAdjustment;
     
-    console.log(`🎯 Final predicted move for ${symbol}: ${predictedMove.toFixed(3)}% (volatility adj: ${volatilityAdjustment.toFixed(2)}x)`);
+    console.log(`🎯 Final predicted move for ${symbol}: ${predictedMove.toFixed(3)}% (volatility adj: ${moveVolatilityAdjustment.toFixed(2)}x)`);
     
     return predictedMove;
   }
@@ -839,13 +832,16 @@ export class EnhancedMathematicalIntuition {
     originalConfidence: number,
     predictedMove: number
   ): void {
-    // Only use trailing stops for high-confidence trades (85%+)
-    if (originalConfidence < 0.85) {
+    // Dynamic confidence threshold calculation - remove hardcoded 85% limit
+    const dynamicConfidenceThreshold = 0.5 + (Math.abs(predictedMove) / 10); // Higher predicted moves allow lower confidence
+    if (originalConfidence < dynamicConfidenceThreshold) {
       return;
     }
 
-    // Calculate initial stop loss (1.5% default)
-    const initialStopLossPercent = 1.5;
+    // Dynamic initial stop loss calculation based on confidence, volatility, and predicted move
+    const riskTolerance = (1 - originalConfidence) * 2; // Lower confidence = higher risk tolerance needed
+    const stopLossVolatilityFactor = Math.abs(predictedMove) / 5; // Scale with predicted move size
+    const initialStopLossPercent = Math.max(0.5, riskTolerance + stopLossVolatilityFactor); // Fully dynamic calculation
     let initialStopLoss: number;
     
     if (side === 'LONG') {
@@ -854,19 +850,14 @@ export class EnhancedMathematicalIntuition {
       initialStopLoss = initialPrice * (1 + initialStopLossPercent / 100);
     }
 
-    // Trailing distance based on confidence and predicted move
-    let trailingDistance = 0.5; // Base 0.5% trailing distance
-    
-    if (originalConfidence >= 0.95) {
-      trailingDistance = 0.3; // Tighter trailing for ultra-high confidence
-    } else if (originalConfidence >= 0.90) {
-      trailingDistance = 0.4; // Medium trailing for very high confidence
-    }
+    // Dynamic trailing distance calculation based on mathematical confidence - no fixed thresholds
+    const confidenceFactor = Math.pow(originalConfidence, 1.5); // Exponential scaling
+    const trailingVolatilityFactor = Math.abs(predictedMove) / 100; // Scale with predicted move size
+    let trailingDistance = Math.max(0.8, 2.0 * (1 - confidenceFactor) + trailingVolatilityFactor); // Mathematical formula instead of fixed values
 
-    // Adjust trailing distance based on predicted move size
-    if (Math.abs(predictedMove) > 2.0) {
-      trailingDistance *= 1.2; // Give more room for large predicted moves
-    }
+    // Dynamic trailing distance adjustment - no hardcoded thresholds
+    const moveImpactFactor = Math.log(1 + Math.abs(predictedMove) / 2); // Logarithmic scaling
+    trailingDistance *= (1 + moveImpactFactor * 0.15); // Continuous scaling instead of step function
 
     this.trailingStops.set(positionId, {
       initialStopLoss,
@@ -894,8 +885,9 @@ export class EnhancedMathematicalIntuition {
     if (currentPnL > trailingStop.highWaterMark) {
       trailingStop.highWaterMark = currentPnL;
       
-      // Only move trailing stop in profitable direction
-      if (currentPnL > 0.5) { // Only start trailing after 0.5% profit
+      // Dynamic trailing threshold based on mathematical confidence - no hardcoded limits
+      const dynamicTrailingThreshold = Math.max(0.1, (1.0 - trailingStop.trailingDistance) * 0.3);
+      if (currentPnL > dynamicTrailingThreshold) { // Mathematical calculation instead of fixed 0.5%
         const trailingPercent = trailingStop.trailingDistance;
         
         if (side === 'LONG') {
