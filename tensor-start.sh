@@ -47,8 +47,9 @@ fi
 # Step 5: Start System Guardian with ntfy alerts
 echo "🛡️ STEP 5: Starting System Guardian with critical failure alerts..."
 nohup env \
+  DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
   NTFY_TOPIC="signal-cartel" \
-  npx tsx system-guardian.ts > /tmp/signalcartel-logs/system-guardian.log 2>&1 &
+  npx tsx admin/quantum-forge-live-monitor.ts > /tmp/signalcartel-logs/system-guardian.log 2>&1 &
 GUARDIAN_PID=$!
 sleep 2
 
@@ -57,6 +58,25 @@ if ps -p $GUARDIAN_PID > /dev/null; then
     echo "✅ System Guardian running (PID: $GUARDIAN_PID) - ntfy alerts enabled"
 else
     echo "⚠️  System Guardian startup failed"
+fi
+
+# Step 5.5: Start Profit Predator Engine
+echo "🐅 STEP 5.5: Starting QUANTUM FORGE™ Profit Predator Engine..."
+nohup env \
+  DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
+  ENABLE_GPU_STRATEGIES=true \
+  NTFY_TOPIC="signal-cartel" \
+  NODE_OPTIONS="--max-old-space-size=4096" \
+  TRADING_MODE="LIVE" \
+  npx tsx production-trading-profit-predator.ts > /tmp/signalcartel-logs/profit-predator.log 2>&1 &
+PREDATOR_PID=$!
+sleep 3
+
+# Verify profit predator is running
+if ps -p $PREDATOR_PID > /dev/null; then
+    echo "✅ Profit Predator running (PID: $PREDATOR_PID) - hunting for opportunities"
+else
+    echo "⚠️  Profit Predator startup failed"
 fi
 
 # Step 6: Start Main Tensor AI Fusion V2.7 System
@@ -108,6 +128,12 @@ else
     echo "⏳ System Guardian: Initializing..."
 fi
 
+if grep -q "PROFIT PREDATOR ENGINE" /tmp/signalcartel-logs/profit-predator.log 2>/dev/null; then
+    echo "✅ Profit Predator: HUNTING (opportunity scanning active)"
+else
+    echo "⏳ Profit Predator: Initializing..."
+fi
+
 # Step 8: Display monitoring commands
 echo ""
 echo "📊 STEP 8: MONITORING COMMANDS"
@@ -118,6 +144,9 @@ echo ""
 echo "🚀 Tensor Decisions:" 
 echo "   tail -f /tmp/signalcartel-logs/production-trading.log | grep 'TENSOR.*DECISION'"
 echo ""
+echo "🐅 Profit Predator Hunts:"
+echo "   tail -f /tmp/signalcartel-logs/profit-predator.log | grep 'HUNT'"
+echo ""
 echo "⚡ GPU Queue Stats:"
 echo "   curl http://127.0.0.1:3002/api/queue-stats"
 echo ""
@@ -126,6 +155,9 @@ echo "   tail -f /tmp/signalcartel-logs/production-trading.log"
 echo ""
 echo "🔧 Kraken Proxy Log:"
 echo "   tail -f /tmp/signalcartel-logs/kraken-proxy.log"
+echo ""
+echo "🐅 Profit Predator Log:"
+echo "   tail -f /tmp/signalcartel-logs/profit-predator.log"
 echo ""
 echo "🛡️ System Guardian Log:"
 echo "   tail -f /tmp/signalcartel-logs/system-guardian.log"
@@ -136,6 +168,7 @@ echo "🔧 STEP 9: PROCESS INFORMATION"
 echo "=============================================="
 echo "Kraken Proxy PID: $PROXY_PID"
 echo "System Guardian PID: $GUARDIAN_PID"
+echo "Profit Predator PID: $PREDATOR_PID"
 echo "Trading System PID: $TRADING_PID"
 echo ""
 echo "Emergency stop command:"

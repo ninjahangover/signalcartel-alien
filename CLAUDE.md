@@ -64,11 +64,24 @@ const limitOrders = await fetchLimitOrders();
 
 ---
 
-## 🔧 **QUICK START - V3.1 COMPLETE SYSTEM**
+## 🔧 **QUICK START - V3.1 COMPLETE ECOSYSTEM**
 
-### **Current Production Command**
+### **Automated Complete System Startup**
 ```bash
-# Start the V3.1 system with full Kraken integration
+# 🚀 ONE COMMAND COMPLETE ECOSYSTEM LAUNCH
+./tensor-start.sh
+
+# Complete quartet includes:
+#   1. Kraken Proxy Server (API rate limiting)
+#   2. System Guardian (crash monitoring + ntfy alerts) 
+#   3. 🐅 Profit Predator Engine (opportunity hunting)
+#   4. Tensor Trading System (mathematical conviction)
+#   5. Dashboard (monitoring at http://localhost:3004)
+```
+
+### **Individual Component Commands (if needed)**
+```bash
+# Manual trading system start
 TENSOR_MODE=true \
 DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
 ENABLE_GPU_STRATEGIES=true \
@@ -77,9 +90,23 @@ NODE_OPTIONS="--max-old-space-size=4096" \
 TRADING_MODE="LIVE" \
 npx tsx production-trading-multi-pair.ts
 
-# Monitor with full visibility dashboard
+# Manual dashboard start
 DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
 npx tsx pretty-pnl-dashboard.ts
+
+# Manual profit predator start
+DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
+ENABLE_GPU_STRATEGIES=true \
+NTFY_TOPIC="signal-cartel" \
+NODE_OPTIONS="--max-old-space-size=4096" \
+TRADING_MODE="LIVE" \
+npx tsx production-trading-profit-predator.ts
+```
+
+### **System Shutdown**
+```bash
+# 🛑 GRACEFUL COMPLETE SYSTEM SHUTDOWN
+./tensor-stop.sh
 ```
 
 ### **Success Validation**
@@ -115,19 +142,22 @@ npx tsx pretty-pnl-dashboard.ts
 ## 🚀 **DEPLOYMENT STATUS**
 
 **Current Version**: ✅ **V3.1 COMPLETE TRADING VISIBILITY**  
-**Last Updated**: September 11, 2025 - 10:00 UTC  
-**System State**: Full production with complete Kraken API integration  
+**Last Updated**: September 11, 2025 - 13:15 UTC  
+**System State**: Complete automated ecosystem with profit predator integration  
 **Dashboard**: Terminal-style interface at http://localhost:3004  
 **Trading Philosophy**: Mathematical conviction with hockey stick capture positioning  
+**Automation**: One-command startup/shutdown with complete system monitoring  
+**Guardian System**: Crash detection + ntfy alerting for autonomous operation  
 **RTX 5090 Goal**: Every profitable trade brings us closer to the ultimate GPU upgrade!  
-**Repository**: signalcartel-alien (all V3.1 features synchronized)  
+**Repository**: signalcartel-alien (all V3.1 features + automated ecosystem)  
 
 **Key Achievement**: Complete transparency into every aspect of the trading system - positions, orders, P&L, and mathematical decision-making process.
 
 **V3.1 Files Enhanced**:
 - `pretty-pnl-dashboard.ts` - Complete Kraken API integration with limit orders
-- `restart-dashboard-clean.sh` - Clean dashboard restart script
-- `add-bnb-position.ts` - Position synchronization utilities
+- `tensor-start.sh` - Complete ecosystem startup with profit predator integration
+- `tensor-stop.sh` - Graceful shutdown of all system components
+- `admin/quantum-forge-live-monitor.ts` - System guardian with ntfy alerting
 - Enhanced mathematical conviction in core trading engine
 
 ---
