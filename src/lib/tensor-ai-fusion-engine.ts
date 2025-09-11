@@ -1484,6 +1484,12 @@ export class TensorAIFusionEngine {
   ): void {
     console.log(`📚 Enhanced Learning from trade outcome: PnL ${actualPnL.toFixed(4)}, Direction: ${actualDirection > 0 ? 'UP' : 'DOWN'}`);
     
+    // DEFENSIVE CHECK: Ensure contributingSystems is valid array
+    if (!decision.contributingSystems || !Array.isArray(decision.contributingSystems)) {
+      console.log(`⚠️ TENSOR LEARNING ERROR: decision.contributingSystems is not iterable - Trade learning skipped`);
+      return;
+    }
+    
     const tradeProfitable = actualPnL > 0;
     
     // Update performance for each contributing system with enhanced metrics
