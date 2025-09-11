@@ -1094,8 +1094,9 @@ class ProductionTradingEngine {
             ) / aiSystemsData.length;
             
             // PURE MATHEMATICAL CONVICTION: Only exit when mathematical thesis completely breaks down
+            // 🕐 TIME-WEIGHTED: Pass position age to enable golden ratio time weighting
             const convictionResult = this.tensorEngine.calculateProfitProtectionExit ? 
-              this.tensorEngine.calculateProfitProtectionExit(aiSystemsData, consensusStrength) :
+              this.tensorEngine.calculateProfitProtectionExit(aiSystemsData, consensusStrength, ageMinutes) :
               { shouldExit: false, reason: 'Mathematical conviction holding strong', exitScore: 0 };
             
             shouldExit = convictionResult.shouldExit;

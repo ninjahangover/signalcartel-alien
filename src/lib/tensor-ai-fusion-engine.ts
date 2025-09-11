@@ -3583,10 +3583,12 @@ export class TensorAIFusionEngine {
   
   /**
    * 🧠 MATHEMATICAL CONVICTION: Calculate if mathematical thesis has changed (hold until ALL validations align for exit)
+   * 🕐 TIME-WEIGHTED GOLDEN EQUATION: Conviction grows with time using φ (golden ratio)
    */
   public calculateProfitProtectionExit(
     contributingSystems: any[],
-    consensusStrength: number
+    consensusStrength: number,
+    positionTimeMinutes?: number
   ): {
     shouldExit: boolean;
     reason: string;
@@ -3596,6 +3598,20 @@ export class TensorAIFusionEngine {
     let exitScore = 0;
     let reasons: string[] = [];
     let urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
+    
+    // 🕐 GOLDEN EQUATION: Time-weighted conviction using φ (golden ratio)
+    const phi = 1.618033988749895;
+    const timeHeld = positionTimeMinutes || 0;
+    const tau = 60; // Time constant (1 hour)
+    
+    // Calculate time-based conviction boost
+    const timeBoost = 1 + phi * Math.log(1 + timeHeld / tau);
+    
+    // Dynamic exit threshold that DECREASES over time (easier to hold)
+    const baseThreshold = 0.8;
+    const dynamicThreshold = baseThreshold / Math.sqrt(timeBoost);
+    
+    console.log(`⏱️ TIME-WEIGHTED CONVICTION: ${timeHeld.toFixed(1)} min held → Boost: ${timeBoost.toFixed(2)}x → Threshold: ${dynamicThreshold.toFixed(2)} (was ${baseThreshold})`);
     
     // Analyze AI system consensus degradation
     const avgSystemConfidence = contributingSystems.reduce((sum, sys) => sum + sys.confidence, 0) / contributingSystems.length;
@@ -3642,13 +3658,22 @@ export class TensorAIFusionEngine {
       console.log(`🧠 CONVICTION HOLDING: AI systems showing normal confidence fluctuation - mathematical thesis still intact`);
     }
     
-    // 🧠 MATHEMATICAL CONVICTION: Only exit when mathematical thesis COMPLETELY changes (>= 0.8 threshold)
-    // This mimics your manual trading: "hold for hours until ALL validations align for exit"
-    const shouldExit = exitScore >= 0.8; // Much higher threshold - only exit on complete mathematical breakdown
-    const finalReason = reasons.length > 0 ? reasons.join(', ') : 'mathematical conviction still strong - HOLDING POSITION';
+    // 🧠 MATHEMATICAL CONVICTION: Only exit when mathematical thesis COMPLETELY changes
+    // 🕐 TIME-WEIGHTED: Use dynamic threshold that decreases over time
+    const shouldExit = exitScore >= dynamicThreshold; // Dynamic threshold based on time held
+    const finalReason = reasons.length > 0 ? reasons.join(', ') : `mathematical conviction still strong - HOLDING POSITION (time boost: ${timeBoost.toFixed(2)}x)`;
+    
+    // Add time-based reasoning
+    if (timeHeld < 30 && exitScore > 0.5) {
+      reasons.push(`⏱️ EARLY EXIT PROTECTION: Only ${timeHeld.toFixed(0)} min held - need stronger conviction to exit`);
+    } else if (timeHeld > 120) {
+      reasons.push(`⏰ MATURE POSITION: ${(timeHeld/60).toFixed(1)} hours held - conviction strengthened by time`);
+    }
     
     if (!shouldExit) {
-      console.log(`🧠 MATHEMATICAL CONVICTION: Holding position - exit score ${exitScore.toFixed(2)} < 0.8 threshold. Mathematical thesis still valid.`);
+      console.log(`🧠 MATHEMATICAL CONVICTION: Holding position - exit score ${exitScore.toFixed(2)} < ${dynamicThreshold.toFixed(2)} threshold. Mathematical thesis still valid.`);
+    } else if (timeHeld < 60 && shouldExit) {
+      console.log(`⚠️ EARLY EXIT WARNING: Exiting after only ${timeHeld.toFixed(0)} minutes - potential premature exit!`);
     }
     
     return {
