@@ -1389,7 +1389,11 @@ class ProductionTradingEngine {
             const result = await this.positionManager.closePosition(position.id, price, reason);
             const winLoss = result.pnl > 0 ? '🟢 WIN' : '🔴 LOSS';
             log(`🎯 EXIT: ${result.position.id} | ${reason} | $${result.pnl.toFixed(2)} | ${winLoss}`);
-            log(`🔍 POSITION CLOSE TRACKING: ID=${result.position.id} | Symbol=${position.symbol} | Side=${position.side.toUpperCase()} | EntryPrice=$${position.entryPrice} | ExitPrice=$${price} | Quantity=${position.quantity} | PnL=$${result.pnl.toFixed(2)} | Reason=${reason} | Duration=${((Date.now() - position.openTime.getTime()) / 1000 / 60).toFixed(1)}min | Closed=${new Date().toISOString()}`);
+            // DEFENSIVE CHECK: Handle undefined position.openTime to prevent getTime() crashes
+            const duration = position.openTime && position.openTime.getTime 
+              ? ((Date.now() - position.openTime.getTime()) / 1000 / 60).toFixed(1) + 'min'
+              : 'Unknown';
+            log(`🔍 POSITION CLOSE TRACKING: ID=${result.position.id} | Symbol=${position.symbol} | Side=${position.side.toUpperCase()} | EntryPrice=$${position.entryPrice} | ExitPrice=$${price} | Quantity=${position.quantity} | PnL=$${result.pnl.toFixed(2)} | Reason=${reason} | Duration=${duration} | Closed=${new Date().toISOString()}`);
             log(`✅ TRADE ID MATCH VERIFICATION: ENTRY_ID=${result.position.id} ↔ EXIT_ID=${result.position.id} | SAME_TRADE=${result.position.id === position.id ? '✅ VERIFIED' : '❌ MISMATCH!'} | EntryKraken=${position.metadata?.krakenOrderId || 'N/A'} | ExitKraken=${result.krakenCloseOrderId || 'N/A'}`);
             
             // 🧠 TENSOR AI LEARNING SYSTEM: Update weights based on trade outcome
