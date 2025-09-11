@@ -5,13 +5,14 @@
 # Author: Tensor AI Fusion V2.7 Database Transaction Mastery
 # Date: September 10, 2025
 
-echo "🚀 TENSOR AI FUSION V2.7 - STARTUP SEQUENCE INITIATED"
+echo "🚀 TENSOR AI FUSION V2.9 - COMPLETE ECOSYSTEM STARTUP"
 echo "=============================================="
 
 # Step 1: Clean shutdown of existing processes
 echo "🧹 STEP 1: Cleaning up existing processes..."
 pkill -f "npx tsx production-trading" 2>/dev/null || true
 pkill -f "kraken-proxy-server" 2>/dev/null || true
+pkill -f "system-guardian" 2>/dev/null || true
 pkill -f "tail.*signalcartel" 2>/dev/null || true
 sleep 2
 echo "✅ Process cleanup completed"
@@ -43,8 +44,23 @@ else
     echo "⚠️  Kraken Proxy startup in progress..."
 fi
 
-# Step 5: Start Main Tensor AI Fusion V2.7 System
-echo "🧮 STEP 5: Launching Tensor AI Fusion V2.7..."
+# Step 5: Start System Guardian with ntfy alerts
+echo "🛡️ STEP 5: Starting System Guardian with critical failure alerts..."
+nohup env \
+  NTFY_TOPIC="signal-cartel" \
+  npx tsx system-guardian.ts > /tmp/signalcartel-logs/system-guardian.log 2>&1 &
+GUARDIAN_PID=$!
+sleep 2
+
+# Verify guardian is running
+if ps -p $GUARDIAN_PID > /dev/null; then
+    echo "✅ System Guardian running (PID: $GUARDIAN_PID) - ntfy alerts enabled"
+else
+    echo "⚠️  System Guardian startup failed"
+fi
+
+# Step 6: Start Main Tensor AI Fusion V2.7 System
+echo "🧮 STEP 6: Launching Tensor AI Fusion V2.7..."
 echo "🔧 Environment Variables:"
 echo "   • TENSOR_MODE=true"
 echo "   • TRADING_MODE=LIVE" 
@@ -64,8 +80,8 @@ nohup env \
 TRADING_PID=$!
 sleep 5
 
-# Step 6: System validation
-echo "🔍 STEP 6: Validating system startup..."
+# Step 7: System validation
+echo "🔍 STEP 7: Validating system startup..."
 
 # Check for key success indicators in logs
 if grep -q "TENSOR FUSION: FULLY ENABLED" /tmp/signalcartel-logs/production-trading.log 2>/dev/null; then
@@ -86,9 +102,15 @@ else
     echo "⏳ Kraken Authentication: In progress..."
 fi
 
-# Step 7: Display monitoring commands
+if grep -q "SYSTEM GUARDIAN STARTED" /tmp/signalcartel-logs/system-guardian.log 2>/dev/null; then
+    echo "✅ System Guardian: MONITORING (ntfy alerts active)"
+else
+    echo "⏳ System Guardian: Initializing..."
+fi
+
+# Step 8: Display monitoring commands
 echo ""
-echo "📊 STEP 7: MONITORING COMMANDS"
+echo "📊 STEP 8: MONITORING COMMANDS"
 echo "=============================================="
 echo "🧠 Mathematical Conviction:"
 echo "   tail -f /tmp/signalcartel-logs/production-trading.log | grep 'MATHEMATICAL.*CONVICTION'"
@@ -104,25 +126,30 @@ echo "   tail -f /tmp/signalcartel-logs/production-trading.log"
 echo ""
 echo "🔧 Kraken Proxy Log:"
 echo "   tail -f /tmp/signalcartel-logs/kraken-proxy.log"
-
-# Step 8: Process information
 echo ""
-echo "🔧 STEP 8: PROCESS INFORMATION" 
+echo "🛡️ System Guardian Log:"
+echo "   tail -f /tmp/signalcartel-logs/system-guardian.log"
+
+# Step 9: Process information
+echo ""
+echo "🔧 STEP 9: PROCESS INFORMATION" 
 echo "=============================================="
 echo "Kraken Proxy PID: $PROXY_PID"
+echo "System Guardian PID: $GUARDIAN_PID"
 echo "Trading System PID: $TRADING_PID"
 echo ""
 echo "Emergency stop command:"
 echo "   pkill -f 'npx tsx'"
 echo ""
 
-# Step 9: Final status
-echo "🎯 TENSOR AI FUSION V2.7 STARTUP COMPLETE"
+# Step 10: Final status
+echo "🎯 TENSOR AI FUSION V2.9 STARTUP COMPLETE"
 echo "=============================================="
-echo "Status: 🟢 SYSTEMS OPERATIONAL"
-echo "Architecture: GPU-Accelerated + Mathematical Conviction"
+echo "Status: 🟢 COMPLETE ECOSYSTEM OPERATIONAL"
+echo "Architecture: GPU-Accelerated + Mathematical Conviction + System Guardian"
 echo "Mode: LIVE TRADING ENABLED"
-echo "Infrastructure: V2.7 Database Transaction Mastery"
+echo "Infrastructure: V2.9 Dashboard Synchronization + V2.7 Database Mastery"
+echo "Protection: 24/7 System Guardian with ntfy critical failure alerts"
 echo ""
 echo "System will continue running in background."
 echo "Use monitoring commands above to track performance."

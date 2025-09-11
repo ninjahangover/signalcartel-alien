@@ -305,13 +305,16 @@ export class PositionManager {
         });
         
         // Step 3: DASHBOARD FIX - Also create LiveTrade for dashboard visibility
+        let livePositionId: string;
         try {
           const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
+          livePositionId = `live-pos-${position.id}`;
+          
           await tx.liveTrade.create({
             data: {
               id: `live-${entryTrade.id}`,
               sessionId: sessionId,
-              positionId: null, // No LivePosition equivalent
+              positionId: livePositionId, // Link to LivePosition
               exchangeOrderId: `kraken-${entryTrade.id}`,
               exchangeTradeId: entryTrade.id,
               symbol: entryTrade.symbol,
@@ -344,6 +347,34 @@ export class PositionManager {
           });
         } catch (liveTradeError) {
           console.log(`⚠️ LiveTrade creation failed (non-critical): ${liveTradeError.message}`);
+        }
+        
+        // Step 4: DASHBOARD POSITION FIX - Create LivePosition for dashboard position visibility
+        try {
+          const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
+          await tx.livePosition.create({
+            data: {
+              id: livePositionId,
+              sessionId: sessionId,
+              symbol: position.symbol,
+              strategy: position.strategy,
+              side: position.side,
+              quantity: position.quantity,
+              entryPrice: position.entryPrice,
+              entryValue: position.quantity * position.entryPrice,
+              entryTime: position.entryTime,
+              entryTradeIds: entryTrade.id,
+              status: 'open',
+              unrealizedPnL: 0.0,
+              totalCommissions: 0.0,
+              totalFees: 0.0,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }
+          });
+          console.log(`✅ DASHBOARD: Created LivePosition ${livePositionId} for ${position.symbol}`);
+        } catch (livePositionError) {
+          console.log(`⚠️ LivePosition creation failed (non-critical): ${livePositionError.message}`);
         }
       });
       
@@ -436,13 +467,14 @@ export class PositionManager {
         });
         
         // Step 3: DASHBOARD FIX - Also create LiveTrade for exit/close for dashboard visibility
+        const livePositionId = `live-pos-${positionId}`;
         try {
           const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
           await tx.liveTrade.create({
             data: {
               id: `live-exit-${exitTrade.id}`,
               sessionId: sessionId,
-              positionId: null, // No LivePosition equivalent
+              positionId: livePositionId, // Link to LivePosition
               exchangeOrderId: `kraken-exit-${exitTrade.id}`,
               exchangeTradeId: exitTrade.id,
               symbol: exitTrade.symbol,
@@ -476,6 +508,26 @@ export class PositionManager {
           console.log(`✅ DASHBOARD: Created LiveTrade exit record for ${exitTrade.symbol}`);
         } catch (liveTradeExitError) {
           console.log(`⚠️ LiveTrade exit creation failed (non-critical): ${liveTradeExitError.message}`);
+        }
+        
+        // Step 4: DASHBOARD POSITION FIX - Update LivePosition to closed status
+        try {
+          await tx.livePosition.update({
+            where: { id: livePositionId },
+            data: {
+              status: 'closed',
+              exitPrice: exitPrice,
+              exitValue: exitTrade.value,
+              exitTime: exitTrade.executedAt,
+              exitTradeIds: exitTrade.id,
+              realizedPnL: pnl,
+              netPnL: pnl, // Same as realized for simplicity
+              updatedAt: new Date()
+            }
+          });
+          console.log(`✅ DASHBOARD: Updated LivePosition ${livePositionId} to closed`);
+        } catch (livePositionUpdateError) {
+          console.log(`⚠️ LivePosition update failed (non-critical): ${livePositionUpdateError.message}`);
         }
       });
       
