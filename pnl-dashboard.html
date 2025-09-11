@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SignalCartel P&L Dashboard</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #00ff00;
+            margin: 0;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            border: 2px solid #00ff00;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .status {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .status-box {
+            border: 1px solid #00ff00;
+            padding: 10px;
+            width: 30%;
+            text-align: center;
+        }
+        .profit { color: #00ff00; }
+        .loss { color: #ff0000; }
+        .neutral { color: #ffff00; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #00ff00;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background: #003300;
+        }
+        .refresh-btn {
+            background: #003300;
+            color: #00ff00;
+            border: 2px solid #00ff00;
+            padding: 10px 20px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        .refresh-btn:hover {
+            background: #006600;
+        }
+        .error {
+            color: #ff0000;
+            border: 1px solid #ff0000;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .loading {
+            color: #ffff00;
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 SIGNALCARTEL QUANTUM FORGE™ P&L DASHBOARD</h1>
+        <h2>REAL-TIME KRAKEN TRADING PERFORMANCE</h2>
+    </div>
+
+    <div class="status">
+        <div class="status-box">
+            <h3>TOTAL P&L</h3>
+            <div id="totalPnL" class="neutral">Loading...</div>
+        </div>
+        <div class="status-box">
+            <h3>TODAY'S TRADES</h3>
+            <div id="todayTrades" class="neutral">Loading...</div>
+        </div>
+        <div class="status-box">
+            <h3>WIN RATE</h3>
+            <div id="winRate" class="neutral">Loading...</div>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="refreshData()">🔄 REFRESH DATA</button>
+    <button class="refresh-btn" onclick="toggleAutoRefresh()">⏱️ AUTO-REFRESH: <span id="autoStatus">OFF</span></button>
+
+    <h3>📊 RECENT TRADING ACTIVITY</h3>
+    <div id="tradesTable">
+        <div class="loading">🔄 Loading trading data from Kraken...</div>
+    </div>
+
+    <h3>📈 POSITION SUMMARY</h3>
+    <div id="positionsTable">
+        <div class="loading">🔄 Loading position data...</div>
+    </div>
+
+    <div id="lastUpdate" style="text-align: center; margin-top: 20px; color: #666;">
+        Last updated: Never
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+        let autoRefreshEnabled = false;
+
+        async function fetchPnLData() {
+            try {
+                // This will call our backend P&L extraction service
+                const response = await fetch('/api/pnl-data');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Failed to fetch P&L data:', error);
+                return {
+                    error: `Failed to fetch data: ${error.message}`,
+                    totalPnL: 0,
+                    trades: [],
+                    positions: [],
+                    stats: { todayTrades: 0, winRate: 0 }
+                };
+            }
+        }
+
+        function formatCurrency(amount) {
+            const num = parseFloat(amount);
+            if (isNaN(num)) return '$0.00';
+            return '$' + num.toFixed(2);
+        }
+
+        function formatPercent(rate) {
+            const num = parseFloat(rate);
+            if (isNaN(num)) return '0.0%';
+            return num.toFixed(1) + '%';
+        }
+
+        function getPnLClass(amount) {
+            const num = parseFloat(amount);
+            if (num > 0) return 'profit';
+            if (num < 0) return 'loss';
+            return 'neutral';
+        }
+
+        function updateDashboard(data) {
+            if (data.error) {
+                document.getElementById('totalPnL').innerHTML = `<div class="error">${data.error}</div>`;
+                document.getElementById('tradesTable').innerHTML = `<div class="error">${data.error}</div>`;
+                document.getElementById('positionsTable').innerHTML = `<div class="error">${data.error}</div>`;
+                return;
+            }
+
+            // Update summary stats
+            document.getElementById('totalPnL').className = getPnLClass(data.totalPnL);
+            document.getElementById('totalPnL').textContent = formatCurrency(data.totalPnL);
+            
+            document.getElementById('todayTrades').textContent = data.stats.todayTrades;
+            document.getElementById('winRate').textContent = formatPercent(data.stats.winRate);
+
+            // Update trades table
+            let tradesHtml = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Quantity</th>
+                            <th>Price</th>
+                            <th>P&L</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            if (data.trades.length === 0) {
+                tradesHtml += '<tr><td colspan="7" style="text-align: center;">No recent trades found</td></tr>';
+            } else {
+                data.trades.forEach(trade => {
+                    tradesHtml += `
+                        <tr>
+                            <td>${new Date(trade.time).toLocaleString()}</td>
+                            <td>${trade.symbol}</td>
+                            <td>${trade.side}</td>
+                            <td>${trade.quantity}</td>
+                            <td>${formatCurrency(trade.price)}</td>
+                            <td class="${getPnLClass(trade.pnl)}">${formatCurrency(trade.pnl)}</td>
+                            <td>${trade.status}</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            tradesHtml += '</tbody></table>';
+            document.getElementById('tradesTable').innerHTML = tradesHtml;
+
+            // Update positions table
+            let positionsHtml = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Quantity</th>
+                            <th>Entry Price</th>
+                            <th>Current Price</th>
+                            <th>Unrealized P&L</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            if (data.positions.length === 0) {
+                positionsHtml += '<tr><td colspan="7" style="text-align: center;">No open positions</td></tr>';
+            } else {
+                data.positions.forEach(position => {
+                    positionsHtml += `
+                        <tr>
+                            <td>${position.symbol}</td>
+                            <td>${position.side}</td>
+                            <td>${position.quantity}</td>
+                            <td>${formatCurrency(position.entryPrice)}</td>
+                            <td>${formatCurrency(position.currentPrice)}</td>
+                            <td class="${getPnLClass(position.unrealizedPnL)}">${formatCurrency(position.unrealizedPnL)}</td>
+                            <td>${position.status}</td>
+                        </tr>
+                    `;
+                });
+            }
+
+            positionsHtml += '</tbody></table>';
+            document.getElementById('positionsTable').innerHTML = positionsHtml;
+
+            // Update last refresh time
+            document.getElementById('lastUpdate').textContent = `Last updated: ${new Date().toLocaleString()}`;
+        }
+
+        async function refreshData() {
+            document.getElementById('lastUpdate').textContent = 'Refreshing...';
+            const data = await fetchPnLData();
+            updateDashboard(data);
+        }
+
+        function toggleAutoRefresh() {
+            if (autoRefreshEnabled) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+                autoRefreshEnabled = false;
+                document.getElementById('autoStatus').textContent = 'OFF';
+            } else {
+                autoRefreshInterval = setInterval(refreshData, 30000); // Refresh every 30 seconds
+                autoRefreshEnabled = true;
+                document.getElementById('autoStatus').textContent = 'ON (30s)';
+            }
+        }
+
+        // Initial load
+        refreshData();
+    </script>
+</body>
+</html>
