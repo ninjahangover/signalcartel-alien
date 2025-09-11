@@ -97,8 +97,16 @@ export class AvailableBalanceCalculator {
         openPositionsValue = 0;
       }
       
-      // Calculate available balance
-      const availableBalance = Math.max(0, totalBalance - openPositionsValue);
+      // 🔧 CRITICAL FIX: For crypto trading, USD balance is available for new trades
+      // Open positions in other assets (like BNB) don't reduce USD buying power
+      // Only USD-denominated positions should count against USD balance
+      const usdPositionsValue = openPositions
+        .filter(pos => pos.symbol && (pos.symbol.includes('USD') || pos.symbol.includes('ZUSD')))
+        .reduce((sum, pos) => sum + Math.abs(pos.quantity * pos.entryPrice), 0);
+      
+      const availableBalance = Math.max(0, totalBalance - usdPositionsValue);
+      
+      console.log(`🔧 BALANCE FIX: USD Balance $${totalBalance.toFixed(2)} - USD Positions $${usdPositionsValue.toFixed(2)} = Available $${availableBalance.toFixed(2)}`);
       
       // Calculate confidence threshold adjustment based on available cash ratio
       const cashRatio = availableBalance / Math.max(totalBalance, 1);
@@ -139,13 +147,14 @@ export class AvailableBalanceCalculator {
     } catch (error) {
       console.error('❌ Error calculating available balance:', error);
       
-      // Fallback to conservative defaults
+      // 🛡️ SAFE FALLBACK: Return zero balance to prevent any trading when balance can't be determined
+      // This prevents massive orders caused by fake fallback numbers
       return {
-        totalBalance: 350, // Conservative fallback
+        totalBalance: 0,
         openPositionsValue: 0,
-        availableBalance: 300, // Leave some buffer
+        availableBalance: 0, // Zero prevents any new trades when balance is unknown
         openPositionsCount: 0,
-        confidenceThresholdAdjustment: 20 // High confidence required when uncertain
+        confidenceThresholdAdjustment: 100 // Impossible threshold - no trading when balance unknown
       };
     }
   }
