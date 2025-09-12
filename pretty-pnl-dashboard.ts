@@ -163,6 +163,26 @@ async function initializeKrakenApi(): Promise<boolean> {
   return false;
 }
 
+// Fetch account balance from Kraken
+async function fetchAccountBalance(): Promise<any> {
+  try {
+    if (!krakenInitialized) {
+      const initialized = await initializeKrakenApi();
+      if (!initialized) return {};
+    }
+    
+    const balanceResponse = await krakenApiService.getAccountBalance();
+    const balance = balanceResponse?.result || {};
+    
+    console.log(`💰 Fetched account balance from Kraken`);
+    return balance;
+    
+  } catch (error) {
+    console.log('⚠️ Failed to fetch account balance:', error.message);
+    return {};
+  }
+}
+
 // Fetch limit orders from Kraken
 async function fetchLimitOrders(): Promise<LimitOrder[]> {
   try {
@@ -223,6 +243,9 @@ async function extractRealPnLData(): Promise<PnLSummary> {
   let totalPnL = 0;
   let totalUnrealizedPnL = 0;
   
+  // Fetch account balance from Kraken
+  const accountBalance = await fetchAccountBalance();
+  
   try {
     // Get all positions from database
     const allPositions = await prisma.managedPosition.findMany({
@@ -268,7 +291,7 @@ async function extractRealPnLData(): Promise<PnLSummary> {
       
       // Fetch REAL current price from Kraken API for 100% accuracy
       const currentPrice = await fetchRealKrakenPrice(position.symbol);
-      const realTimeUnrealizedPnL = (currentPrice - position.entryPrice) * position.quantity * (position.side.toUpperCase() === 'LONG' ? 1 : -1);
+      const realTimeUnrealizedPnL = (currentPrice - position.entryPrice) * position.quantity * (['BUY', 'LONG'].includes(position.side.toUpperCase()) ? 1 : -1);
       const realTimeUnrealizedPnLPercent = (realTimeUnrealizedPnL / entryValue) * 100;
       
       openPositions.push({
@@ -314,6 +337,7 @@ async function extractRealPnLData(): Promise<PnLSummary> {
   // Calculate symbol statistics
   const symbolStats: { [key: string]: { pnl: number, trades: number, winRate: number } } = {};
   
+  // Add closed trades to symbol stats
   closedTrades.forEach(trade => {
     if (!symbolStats[trade.symbol]) {
       symbolStats[trade.symbol] = { pnl: 0, trades: 0, winRate: 0 };
@@ -322,15 +346,48 @@ async function extractRealPnLData(): Promise<PnLSummary> {
     symbolStats[trade.symbol].trades += 1;
   });
   
+  // Add open positions to symbol stats (with unrealized P&L)
+  openPositions.forEach(position => {
+    if (!symbolStats[position.symbol]) {
+      symbolStats[position.symbol] = { pnl: 0, trades: 0, winRate: 0 };
+    }
+    symbolStats[position.symbol].pnl += position.unrealizedPnL;
+    symbolStats[position.symbol].trades += 1;
+  });
+  
   // Calculate win rates for each symbol
   Object.keys(symbolStats).forEach(symbol => {
     const symbolTrades = closedTrades.filter(t => t.symbol === symbol);
     const symbolWins = symbolTrades.filter(t => t.pnl > 0);
-    symbolStats[symbol].winRate = symbolTrades.length > 0 ? (symbolWins.length / symbolTrades.length) * 100 : 0;
+    const symbolOpenPositions = openPositions.filter(p => p.symbol === symbol && p.unrealizedPnL > 0);
+    const totalWins = symbolWins.length + symbolOpenPositions.length;
+    const totalTrades = symbolTrades.length + openPositions.filter(p => p.symbol === symbol).length;
+    symbolStats[symbol].winRate = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0;
   });
   
-  // Calculate portfolio value (for now, using fixed value - can be enhanced to pull from Kraken API)
-  const portfolioValue = 558.78; // Current portfolio value from Kraken
+  // Parse account balance
+  const usdBalance = parseFloat(accountBalance.ZUSD || '0');
+  
+  // Calculate portfolio value from position values  
+  const positionValue = openPositions.reduce((total, pos) => {
+    return total + (pos.quantity * pos.currentPrice);
+  }, 0);
+  
+  const portfolioValue = usdBalance + positionValue;
+  
+  // Create balance breakdown
+  const balanceBreakdown = {
+    availableUSD: usdBalance,
+    positionsValue: positionValue,
+    totalPortfolioValue: portfolioValue,
+    positions: openPositions.map(pos => ({
+      symbol: pos.symbol,
+      quantity: pos.quantity,
+      currentPrice: pos.currentPrice,
+      positionValue: pos.quantity * pos.currentPrice,
+      unrealizedPnL: pos.unrealizedPnL
+    }))
+  };
   
   return {
     totalPnL,
@@ -338,6 +395,7 @@ async function extractRealPnLData(): Promise<PnLSummary> {
     trades: trades.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
     openPositions,
     limitOrders,
+    balanceBreakdown,
     stats: {
       totalTrades: trades.length,
       closedTrades: closedTrades.length,
@@ -365,6 +423,7 @@ app.get('/api/pnl-data', async (req, res) => {
       trades: data.trades.slice(0, 20),
       openPositions: data.openPositions,
       limitOrders: data.limitOrders,
+      balanceBreakdown: data.balanceBreakdown,
       stats: data.stats,
       symbolStats: data.symbolStats
     });
@@ -657,6 +716,13 @@ app.get('/', (req, res) => {
     </div>
 
     <div class="section">
+        <h3>💰 ACCOUNT BALANCE & ALLOCATION</h3>
+        <div id="balanceBreakdown">
+            <div class="loading">🔄 Loading account balance from Kraken...</div>
+        </div>
+    </div>
+
+    <div class="section">
         <h3>📋 PENDING LIMIT ORDERS</h3>
         <div id="limitOrdersTable">
             <div class="loading">🔄 Loading pending orders from Kraken...</div>
@@ -759,6 +825,72 @@ app.get('/', (req, res) => {
                 symbolHtml = '<div class="loading">No symbol data available</div>';
             }
             document.getElementById('symbolStats').innerHTML = symbolHtml;
+
+            // Update balance breakdown
+            let balanceHtml = '';
+            if (data.balanceBreakdown) {
+                const breakdown = data.balanceBreakdown;
+                const availablePercent = breakdown.totalPortfolioValue > 0 ? (breakdown.availableUSD / breakdown.totalPortfolioValue * 100) : 0;
+                const positionsPercent = breakdown.totalPortfolioValue > 0 ? (breakdown.positionsValue / breakdown.totalPortfolioValue * 100) : 0;
+                
+                balanceHtml = \`
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                        <div class="status-box">
+                            <h4 style="color: #00d4ff;">💵 Available USD</h4>
+                            <div class="status-value info" style="font-size: 1.5em;">\${formatCurrency(breakdown.availableUSD)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${availablePercent.toFixed(1)}% of portfolio</div>
+                        </div>
+                        <div class="status-box">
+                            <h4 style="color: #00d4ff;">🏪 Positions Value</h4>
+                            <div class="status-value info" style="font-size: 1.5em;">\${formatCurrency(breakdown.positionsValue)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${positionsPercent.toFixed(1)}% of portfolio</div>
+                        </div>
+                        <div class="status-box">
+                            <h4 style="color: #00d4ff;">💎 Total Portfolio</h4>
+                            <div class="status-value info" style="font-size: 1.5em;">\${formatCurrency(breakdown.totalPortfolioValue)}</div>
+                            <div style="color: #888; font-size: 0.9em;">Live from Kraken</div>
+                        </div>
+                    </div>
+                \`;
+                
+                if (breakdown.positions && breakdown.positions.length > 0) {
+                    balanceHtml += \`
+                        <table>
+                            <thead>
+                                <tr style="background: rgba(0, 255, 136, 0.3);">
+                                    <th>Asset</th>
+                                    <th>Quantity</th>
+                                    <th>Current Price</th>
+                                    <th>Position Value</th>
+                                    <th>Unrealized P&L</th>
+                                    <th>% of Portfolio</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    \`;
+                    
+                    breakdown.positions.forEach(position => {
+                        const pnlClass = getPnLClass(position.unrealizedPnL);
+                        const portfolioPercent = breakdown.totalPortfolioValue > 0 ? (position.positionValue / breakdown.totalPortfolioValue * 100) : 0;
+                        
+                        balanceHtml += \`
+                            <tr>
+                                <td style="font-weight: bold;">\${position.symbol}</td>
+                                <td>\${position.quantity.toFixed(6)}</td>
+                                <td>\${formatCurrency(position.currentPrice)}</td>
+                                <td>\${formatCurrency(position.positionValue)}</td>
+                                <td class="\${pnlClass}">\${formatCurrency(position.unrealizedPnL)}</td>
+                                <td>\${portfolioPercent.toFixed(1)}%</td>
+                            </tr>
+                        \`;
+                    });
+                    
+                    balanceHtml += '</tbody></table>';
+                }
+            } else {
+                balanceHtml = '<div class="loading">Balance data not available</div>';
+            }
+            document.getElementById('balanceBreakdown').innerHTML = balanceHtml;
 
             // Update open positions table - CRITICAL FOR TRADING DECISIONS
             let openPositionsHtml = '';
