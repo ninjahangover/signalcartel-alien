@@ -4,6 +4,7 @@ import express from 'express';
 import path from 'path';
 import { PrismaClient } from '@prisma/client';
 import { krakenApiService } from './src/lib/kraken-api-service';
+import { analyzeLogMetrics } from './log-trade-analyzer';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -246,6 +247,10 @@ async function extractRealPnLData(): Promise<PnLSummary> {
   // Fetch account balance from Kraken
   const accountBalance = await fetchAccountBalance();
   
+  // Get trading metrics from logs
+  console.log('📊 Analyzing trading performance from logs...');
+  const logMetrics = await analyzeLogMetrics();
+  
   try {
     // Get all positions from database
     const allPositions = await prisma.managedPosition.findMany({
@@ -320,19 +325,19 @@ async function extractRealPnLData(): Promise<PnLSummary> {
   // Fetch limit orders from Kraken
   const limitOrders = await fetchLimitOrders();
   
-  // Calculate statistics
+  // Use log-based statistics for accurate trading metrics
   const closedTrades = trades.filter(t => t.type === 'close');
-  const winningTrades = closedTrades.filter(t => t.pnl > 0);
-  const winRate = closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0;
+  const winRate = logMetrics.winRate;
+  const todayTrades = logMetrics.todayTrades;
+  const biggestWin = logMetrics.biggestWin;
+  const biggestLoss = logMetrics.biggestLoss;
   
-  const today = new Date().toDateString();
-  const todayTrades = trades.filter(trade => 
-    new Date(trade.timestamp).toDateString() === today
-  ).length;
+  // Override totalPnL with log-based data if available
+  if (logMetrics.totalPnL !== 0) {
+    totalPnL = logMetrics.totalPnL;
+  }
   
-  const pnlValues = closedTrades.map(t => t.pnl);
-  const biggestWin = pnlValues.length > 0 ? Math.max(...pnlValues) : 0;
-  const biggestLoss = pnlValues.length > 0 ? Math.min(...pnlValues) : 0;
+  console.log(`🎯 Log-based metrics: ${logMetrics.totalTrades} trades, ${winRate.toFixed(1)}% win rate`);
   
   // Calculate symbol statistics
   const symbolStats: { [key: string]: { pnl: number, trades: number, winRate: number } } = {};
@@ -365,19 +370,23 @@ async function extractRealPnLData(): Promise<PnLSummary> {
     symbolStats[symbol].winRate = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0;
   });
   
-  // Parse account balance
-  const usdBalance = parseFloat(accountBalance.ZUSD || '0');
+  // Parse account balance (show USD and USDT separately)
+  const zusdBalance = parseFloat(accountBalance.ZUSD || '0');
+  const usdtBalance = parseFloat(accountBalance.USDT || '0');
+  const totalUsdBalance = zusdBalance + usdtBalance;
   
   // Calculate portfolio value from position values  
   const positionValue = openPositions.reduce((total, pos) => {
     return total + (pos.quantity * pos.currentPrice);
   }, 0);
   
-  const portfolioValue = usdBalance + positionValue;
+  const portfolioValue = totalUsdBalance + positionValue;
   
-  // Create balance breakdown
+  // Create balance breakdown with separate USD and USDT
   const balanceBreakdown = {
-    availableUSD: usdBalance,
+    availableUSD: zusdBalance,
+    availableUSDT: usdtBalance,
+    totalCashBalance: totalUsdBalance,
     positionsValue: positionValue,
     totalPortfolioValue: portfolioValue,
     positions: openPositions.map(pos => ({
@@ -397,8 +406,8 @@ async function extractRealPnLData(): Promise<PnLSummary> {
     limitOrders,
     balanceBreakdown,
     stats: {
-      totalTrades: trades.length,
-      closedTrades: closedTrades.length,
+      totalTrades: logMetrics.totalTrades,
+      closedTrades: logMetrics.winningTrades + logMetrics.losingTrades,
       openTrades: openPositions.length,
       pendingOrders: limitOrders.length,
       winRate,
@@ -830,24 +839,30 @@ app.get('/', (req, res) => {
             let balanceHtml = '';
             if (data.balanceBreakdown) {
                 const breakdown = data.balanceBreakdown;
-                const availablePercent = breakdown.totalPortfolioValue > 0 ? (breakdown.availableUSD / breakdown.totalPortfolioValue * 100) : 0;
+                const usdPercent = breakdown.totalPortfolioValue > 0 ? (breakdown.availableUSD / breakdown.totalPortfolioValue * 100) : 0;
+                const usdtPercent = breakdown.totalPortfolioValue > 0 ? (breakdown.availableUSDT / breakdown.totalPortfolioValue * 100) : 0;
                 const positionsPercent = breakdown.totalPortfolioValue > 0 ? (breakdown.positionsValue / breakdown.totalPortfolioValue * 100) : 0;
                 
                 balanceHtml = \`
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px; margin-bottom: 20px;">
                         <div class="status-box">
                             <h4 style="color: #00d4ff;">💵 Available USD</h4>
-                            <div class="status-value info" style="font-size: 1.5em;">\${formatCurrency(breakdown.availableUSD)}</div>
-                            <div style="color: #888; font-size: 0.9em;">\${availablePercent.toFixed(1)}% of portfolio</div>
+                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.availableUSD)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${usdPercent.toFixed(1)}% of portfolio</div>
+                        </div>
+                        <div class="status-box">
+                            <h4 style="color: #00d4ff;">🪙 Available USDT</h4>
+                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.availableUSDT)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${usdtPercent.toFixed(1)}% of portfolio</div>
                         </div>
                         <div class="status-box">
                             <h4 style="color: #00d4ff;">🏪 Positions Value</h4>
-                            <div class="status-value info" style="font-size: 1.5em;">\${formatCurrency(breakdown.positionsValue)}</div>
+                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.positionsValue)}</div>
                             <div style="color: #888; font-size: 0.9em;">\${positionsPercent.toFixed(1)}% of portfolio</div>
                         </div>
                         <div class="status-box">
                             <h4 style="color: #00d4ff;">💎 Total Portfolio</h4>
-                            <div class="status-value info" style="font-size: 1.5em;">\${formatCurrency(breakdown.totalPortfolioValue)}</div>
+                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.totalPortfolioValue)}</div>
                             <div style="color: #888; font-size: 0.9em;">Live from Kraken</div>
                         </div>
                     </div>
