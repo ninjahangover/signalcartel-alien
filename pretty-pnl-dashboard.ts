@@ -4,6 +4,7 @@ import express from 'express';
 import path from 'path';
 import { PrismaClient } from '@prisma/client';
 import { krakenApiService } from './src/lib/kraken-api-service';
+import { krakenFuturesService } from './src/lib/kraken-futures-service';
 import { analyzeLogMetrics } from './log-trade-analyzer';
 
 const prisma = new PrismaClient();
@@ -96,7 +97,8 @@ async function fetchRealKrakenPrice(symbol: string): Promise<number> {
       'ETHUSD': 'XETHZUSD',
       'SOLUSD': 'SOLUSD',
       'AVAXUSD': 'AVAXUSD',
-      'BNBUSDT': 'BNBUSDT'
+      'BNBUSDT': 'BNBUSDT',
+      'BNBUSD': 'BNBUSD'
     };
     
     const krakenPair = symbolMap[symbol] || symbol;
@@ -184,6 +186,30 @@ async function fetchAccountBalance(): Promise<any> {
   }
 }
 
+// Fetch futures/perpetual balance from Kraken Futures
+async function fetchFuturesBalance(): Promise<any> {
+  try {
+    console.log('💰 Fetching futures balance...');
+
+    const [accounts, wallets] = await Promise.all([
+      krakenFuturesService.getAccounts().catch(() => null),
+      krakenFuturesService.getWallets().catch(() => null)
+    ]);
+
+    if (accounts || wallets) {
+      console.log(`💰 Fetched futures balance from Kraken`);
+      return { accounts, wallets };
+    }
+
+    console.log('ℹ️  Futures trading not available or not configured');
+    return null;
+
+  } catch (error) {
+    console.error('❌ Error fetching futures balance:', error);
+    return null;
+  }
+}
+
 // Fetch limit orders from Kraken
 async function fetchLimitOrders(): Promise<LimitOrder[]> {
   try {
@@ -246,6 +272,9 @@ async function extractRealPnLData(): Promise<PnLSummary> {
   
   // Fetch account balance from Kraken
   const accountBalance = await fetchAccountBalance();
+
+  // Fetch futures balance from Kraken Futures
+  const futuresBalance = await fetchFuturesBalance();
   
   // Get trading metrics from logs
   console.log('📊 Analyzing trading performance from logs...');
@@ -374,21 +403,64 @@ async function extractRealPnLData(): Promise<PnLSummary> {
   const zusdBalance = parseFloat(accountBalance.ZUSD || '0');
   const usdtBalance = parseFloat(accountBalance.USDT || '0');
   const totalUsdBalance = zusdBalance + usdtBalance;
-  
-  // Calculate portfolio value from position values  
+
+  console.log(`🔍 Raw account balance:`, accountBalance);
+
+  // Check for other significant balances
+  const otherBalances = Object.entries(accountBalance || {})
+    .filter(([key, value]) => !['ZUSD', 'USDT'].includes(key) && parseFloat(value || '0') > 0.01)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(', ');
+  if (otherBalances) {
+    console.log(`🔍 Other account balances: ${otherBalances}`);
+  }
+
+  // Parse futures balance
+  let futuresUsdBalance = 0;
+  let futuresEquity = 0;
+  let futuresMargin = 0;
+
+  if (futuresBalance?.wallets) {
+    const usdWallet = futuresBalance.wallets.find((w: any) => w.currency === 'USD');
+    if (usdWallet) {
+      futuresUsdBalance = parseFloat(usdWallet.balance || '0');
+      futuresEquity = parseFloat(usdWallet.equity || '0');
+      futuresMargin = parseFloat(usdWallet.marginUsed || '0');
+    }
+  }
+
+  // Calculate portfolio value from position values
   const positionValue = openPositions.reduce((total, pos) => {
     return total + (pos.quantity * pos.currentPrice);
   }, 0);
-  
-  const portfolioValue = totalUsdBalance + positionValue;
-  
-  // Create balance breakdown with separate USD and USDT
+
+  const totalPortfolioValue = totalUsdBalance + positionValue + futuresEquity;
+
+  console.log(`🔍 Portfolio calculation debug:
+    ZUSD Balance: $${zusdBalance}
+    USDT Balance: $${usdtBalance}
+    Total USD Balance: $${totalUsdBalance}
+    Positions Value: $${positionValue}
+    Futures Equity: $${futuresEquity}
+    Total Portfolio Value: $${totalPortfolioValue}`);
+
+  // Create balance breakdown with spot and futures
   const balanceBreakdown = {
+    // Spot balances
     availableUSD: zusdBalance,
     availableUSDT: usdtBalance,
     totalCashBalance: totalUsdBalance,
     positionsValue: positionValue,
-    totalPortfolioValue: portfolioValue,
+
+    // Futures balances
+    futuresBalance: futuresUsdBalance,
+    futuresEquity: futuresEquity,
+    futuresMarginUsed: futuresMargin,
+    futuresAvailable: futuresEquity - futuresMargin,
+
+    // Combined totals
+    totalPortfolioValue: totalPortfolioValue,
+
     positions: openPositions.map(pos => ({
       symbol: pos.symbol,
       quantity: pos.quantity,
@@ -400,7 +472,7 @@ async function extractRealPnLData(): Promise<PnLSummary> {
   
   return {
     totalPnL,
-    portfolioValue,
+    portfolioValue: totalPortfolioValue,
     trades: trades.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
     openPositions,
     limitOrders,
@@ -843,29 +915,56 @@ app.get('/', (req, res) => {
                 const usdtPercent = breakdown.totalPortfolioValue > 0 ? (breakdown.availableUSDT / breakdown.totalPortfolioValue * 100) : 0;
                 const positionsPercent = breakdown.totalPortfolioValue > 0 ? (breakdown.positionsValue / breakdown.totalPortfolioValue * 100) : 0;
                 
+                const futuresPercent = breakdown.totalPortfolioValue > 0 ? (breakdown.futuresEquity / breakdown.totalPortfolioValue * 100) : 0;
+
                 balanceHtml = \`
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px;">
                         <div class="status-box">
-                            <h4 style="color: #00d4ff;">💵 Available USD</h4>
-                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.availableUSD)}</div>
-                            <div style="color: #888; font-size: 0.9em;">\${usdPercent.toFixed(1)}% of portfolio</div>
+                            <h4 style="color: #00d4ff;">💵 Spot USD</h4>
+                            <div class="status-value info" style="font-size: 1.2em;">\${formatCurrency(breakdown.availableUSD)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${usdPercent.toFixed(1)}% portfolio</div>
                         </div>
                         <div class="status-box">
-                            <h4 style="color: #00d4ff;">🪙 Available USDT</h4>
-                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.availableUSDT)}</div>
-                            <div style="color: #888; font-size: 0.9em;">\${usdtPercent.toFixed(1)}% of portfolio</div>
+                            <h4 style="color: #00d4ff;">🪙 Spot USDT</h4>
+                            <div class="status-value info" style="font-size: 1.2em;">\${formatCurrency(breakdown.availableUSDT)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${usdtPercent.toFixed(1)}% portfolio</div>
                         </div>
                         <div class="status-box">
-                            <h4 style="color: #00d4ff;">🏪 Positions Value</h4>
-                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.positionsValue)}</div>
-                            <div style="color: #888; font-size: 0.9em;">\${positionsPercent.toFixed(1)}% of portfolio</div>
+                            <h4 style="color: #ff6b35;">🚀 Futures Equity</h4>
+                            <div class="status-value \${breakdown.futuresEquity > 0 ? 'success' : 'info'}" style="font-size: 1.2em;">\${formatCurrency(breakdown.futuresEquity)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${futuresPercent.toFixed(1)}% portfolio</div>
+                        </div>
+                        <div class="status-box">
+                            <h4 style="color: #00d4ff;">🏪 Positions</h4>
+                            <div class="status-value info" style="font-size: 1.2em;">\${formatCurrency(breakdown.positionsValue)}</div>
+                            <div style="color: #888; font-size: 0.9em;">\${positionsPercent.toFixed(1)}% portfolio</div>
                         </div>
                         <div class="status-box">
                             <h4 style="color: #00d4ff;">💎 Total Portfolio</h4>
-                            <div class="status-value info" style="font-size: 1.3em;">\${formatCurrency(breakdown.totalPortfolioValue)}</div>
+                            <div class="status-value info" style="font-size: 1.2em;">\${formatCurrency(breakdown.totalPortfolioValue)}</div>
                             <div style="color: #888; font-size: 0.9em;">Live from Kraken</div>
                         </div>
                     </div>
+
+                    \${breakdown.futuresEquity > 0 ? \`
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 20px; padding: 15px; background: rgba(255, 107, 53, 0.1); border-radius: 8px;">
+                        <div class="status-box" style="background: rgba(255, 107, 53, 0.2);">
+                            <h4 style="color: #ff6b35;">🏦 Futures Balance</h4>
+                            <div class="status-value info" style="font-size: 1.1em;">\${formatCurrency(breakdown.futuresBalance)}</div>
+                            <div style="color: #888; font-size: 0.9em;">Available for trading</div>
+                        </div>
+                        <div class="status-box" style="background: rgba(255, 107, 53, 0.2);">
+                            <h4 style="color: #ff6b35;">⚡ Margin Used</h4>
+                            <div class="status-value \${breakdown.futuresMarginUsed > 0 ? 'warning' : 'success'}" style="font-size: 1.1em;">\${formatCurrency(breakdown.futuresMarginUsed)}</div>
+                            <div style="color: #888; font-size: 0.9em;">Used for positions</div>
+                        </div>
+                        <div class="status-box" style="background: rgba(255, 107, 53, 0.2);">
+                            <h4 style="color: #ff6b35;">🆓 Available Margin</h4>
+                            <div class="status-value success" style="font-size: 1.1em;">\${formatCurrency(breakdown.futuresAvailable)}</div>
+                            <div style="color: #888; font-size: 0.9em;">For new positions</div>
+                        </div>
+                    </div>
+                    \` : ''}
                 \`;
                 
                 if (breakdown.positions && breakdown.positions.length > 0) {

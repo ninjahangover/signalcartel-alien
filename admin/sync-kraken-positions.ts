@@ -58,7 +58,7 @@ async function syncKrakenPositions() {
           data: {
             symbol: position.symbol,
             strategy: 'tensor-ai-fusion',
-            side: 'long',
+            side: position.quantity > 0 ? 'BUY' : 'SELL',
             entryPrice: position.estimatedEntryPrice,
             quantity: position.quantity,
             entryTradeId: null,  // Now nullable in schema

@@ -30,6 +30,16 @@ else
     echo "❌ Database connection failed - continuing anyway"
 fi
 
+# Step 3.5: Sync Kraken positions with database
+echo "🔄 STEP 3.5: Syncing Kraken positions with database..."
+DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
+timeout 30s npx tsx admin/sync-kraken-positions.ts > /tmp/signalcartel-logs/position-sync.log 2>&1
+if [ $? -eq 0 ]; then
+    echo "✅ Position sync completed successfully"
+else
+    echo "⚠️  Position sync failed or timed out - continuing anyway"
+fi
+
 # Step 4: Start Kraken Proxy Server V2.6
 echo "🔧 STEP 4: Starting Kraken Proxy Server V2.6..."
 nohup npx tsx kraken-proxy-server.ts > /tmp/signalcartel-logs/kraken-proxy.log 2>&1 &
@@ -161,6 +171,9 @@ echo "   tail -f /tmp/signalcartel-logs/profit-predator.log"
 echo ""
 echo "🛡️ System Guardian Log:"
 echo "   tail -f /tmp/signalcartel-logs/system-guardian.log"
+echo ""
+echo "🔄 Position Sync Log:"
+echo "   tail -f /tmp/signalcartel-logs/position-sync.log"
 
 # Step 9: Process information
 echo ""
