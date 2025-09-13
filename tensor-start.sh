@@ -59,7 +59,7 @@ echo "🛡️ STEP 5: Starting System Guardian with critical failure alerts..."
 nohup env \
   DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
   NTFY_TOPIC="signal-cartel" \
-  npx tsx admin/quantum-forge-live-monitor.ts > /tmp/signalcartel-logs/system-guardian.log 2>&1 &
+  npx tsx admin/system-guardian.ts > /tmp/signalcartel-logs/system-guardian.log 2>&1 &
 GUARDIAN_PID=$!
 sleep 2
 
