@@ -296,8 +296,12 @@ export class GPUAccelerationService {
           const energy = tf.minimum(1, tf.div(volumesTensor, tf.add(volumeMean, 0.001)));
           
           // 5. Information Theory - price change entropy
-          const shiftedPrices = tf.concat([pricesTensor.slice([0, 1], [-1, -1]), pricesTensor.slice([0, -1], [-1, 1])], 1);
-          const priceChanges = tf.abs(tf.div(tf.sub(pricesTensor, shiftedPrices), tf.add(pricesTensor, 0.001)));
+          // Fix negative indexing by using explicit size calculations
+          const [batchSize, timeSteps] = pricesTensor.shape;
+          const shifted1 = pricesTensor.slice([0, 1], [batchSize, timeSteps - 1]);
+          const shifted2 = pricesTensor.slice([0, 0], [batchSize, timeSteps - 1]);
+          const shiftedPrices = tf.concat([shifted1, shifted2], 1);
+          const priceChanges = tf.abs(tf.div(tf.sub(pricesTensor.slice([0, 0], [batchSize, timeSteps - 1]), shifted2), tf.add(pricesTensor.slice([0, 0], [batchSize, timeSteps - 1]), 0.001)));
           const info = tf.minimum(1, tf.mul(priceChanges, 100));
           
           // 6. Fractal Dimensions - price complexity

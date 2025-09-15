@@ -445,10 +445,16 @@ export class BayesianProbabilityEngine {
     signalPrice: number = 0
   ): Promise<void> {
     try {
+      // 🔧 V3.2.3 DATABASE FIX: Validate symbol before storage
+      if (!symbol || typeof symbol !== 'string' || symbol.trim().length === 0) {
+        console.log(`⚠️ DATABASE: Skipping Bayesian storage - invalid symbol: ${symbol}`);
+        return;
+      }
+
       // 🔧 V2.7 DATABASE FIX: Simplify database storage to prevent validation errors
       await prisma.intuitionAnalysis.create({
         data: {
-          symbol,
+          symbol: symbol.trim(),
           strategy: 'bayesian-probability-engine',
           signalType: recommendation === 'STRONG_BUY' || recommendation === 'BUY' ? 'BUY' : 
                      recommendation === 'STRONG_SELL' || recommendation === 'SELL' ? 'SELL' : 'WAIT',
