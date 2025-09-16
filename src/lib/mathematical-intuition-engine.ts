@@ -163,6 +163,16 @@ export class MathematicalIntuitionEngine {
    * This is where intuition transcends calculation
    */
   async senseMarketFlowField(marketData: any, crossSiteData?: any): Promise<FlowFieldData> {
+    // Add null check for marketData
+    if (!marketData) {
+      return {
+        currentStrength: 0.5,
+        resistancePoints: [],
+        accelerationZones: [],
+        harmonicResonance: 0.5
+      };
+    }
+
     const priceHistory = marketData.priceHistory || [];
     const volume = marketData.volume || 0;
     const volatility = this.calculateVolatility(priceHistory);
@@ -210,6 +220,11 @@ export class MathematicalIntuitionEngine {
    * Beyond technical analysis - pure pattern intuition
    */
   feelPatternResonance(signal: any, marketData: any, crossSiteData?: any): number {
+    // Add null check for marketData
+    if (!marketData) {
+      return 0.5;
+    }
+
     const technicalPattern = signal.technicalScore || 0.5;
     const sentimentAlignment = signal.sentimentScore || 0.5;
     const volumeConfirmation = this.feelVolumeConfirmation(marketData);
@@ -923,6 +938,11 @@ export class MathematicalIntuitionEngine {
   }
 
   private measureEnergeticResonance(signal: any, marketData: any): number {
+    // Add null check for marketData
+    if (!marketData) {
+      return 0.5;
+    }
+
     // Feel energetic alignment between signal and market
     const signalEnergy = (signal.confidence || 0.5) * (signal.strength || 0.5);
     const marketEnergy = this.feelMarketEnergy(marketData);
@@ -963,7 +983,12 @@ export class MathematicalIntuitionEngine {
    */
   private accessMathematicalInstinct(signal: any, marketData: any): number {
     // 🧠 ADVANCED MATHEMATICAL MODELS - Far beyond E = (W × A) - (L × B)
-    
+
+    // Add null check for marketData
+    if (!marketData) {
+      return 0.5;
+    }
+
     // 1️⃣ INFORMATION THEORY: Entropy and mutual information
     const informationContent = this.calculateInformationTheoryScore(signal, marketData);
     

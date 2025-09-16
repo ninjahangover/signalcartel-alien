@@ -16,7 +16,7 @@ import { PrismaClient } from '@prisma/client';
 import { CRYPTO_TRADING_PAIRS } from './crypto-trading-pairs';
 import { quantumForgeOrderBookAI } from './quantum-forge-orderbook-ai';
 import { UniversalSentimentEnhancer, BaseStrategySignal } from './sentiment/universal-sentiment-enhancer';
-import { mathematicalIntuitionEngine } from './mathematical-intuition-engine';
+import { mathIntuitionEngine } from './mathematical-intuition-engine';
 import { gpuService } from './gpu-acceleration-service';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -111,16 +111,22 @@ export class QuantumForgeProfitPredator {
   private activeHunts: Map<string, ProfitHunt> = new Map();
   private recentHuntResults: HuntResult[] = [];
   private learningMemory: Map<string, any> = new Map();
-  
+
   // Logging configuration
   private readonly LOG_DIR = '/tmp/signalcartel-logs';
   private readonly LOG_FILE = path.join('/tmp/signalcartel-logs', 'profit-predator.log');
-  
+
   // Aggressive profit hunting parameters
   private maxConcurrentHunts = 12;      // Hunt aggressively across multiple opportunities
   private acceptableLossRate = 0.4;     // Accept 40% losses for bigger wins
   private minExpectancy = 1.5;          // Minimum 1.5:1 expectancy ratio
   private evolutionThreshold = 50;      // Evolve algorithms every 50 trades
+
+  // API Rate Limiting and Batching
+  private readonly BATCH_SIZE = 25;     // Max pairs per batch to respect API limits
+  private readonly BATCH_DELAY_MS = 2000; // 2 seconds between batches
+  private currentBatchIndex = 0;        // Rotating batch index
+  private lastBatchTime = 0;            // Track last batch request time
   
   constructor() {
     this.prisma = new PrismaClient();
@@ -175,6 +181,8 @@ export class QuantumForgeProfitPredator {
     this.logToFile('🐅 QUANTUM FORGE™ Profit Predator - HUNTING MODE ACTIVATED');
     this.logToFile('💀 Accepting losses to optimize for maximum expectancy');
     this.logToFile('🔄 Evolving algorithms in real-time for continuous improvement');
+    this.logToFile(`🎯 SMART BATCHING: ${this.getHuntingPairs().length} total pairs, ${this.BATCH_SIZE} per batch, ${this.BATCH_DELAY_MS}ms delays`);
+    this.logToFile(`🔄 ROTATION STRATEGY: Predator Targets → High Leverage → Majors → Memes → AI/Tech → Others`);
 
     // Evolution check - evolve if we've learned enough
     if (this.shouldEvolve()) {
@@ -239,11 +247,12 @@ export class QuantumForgeProfitPredator {
    */
   private async huntArbitrage(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
-    
-    // Look for price discrepancies across similar pairs (simplified approach)
-    const majorPairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'LINKUSD'];
-    
-    for (const symbol of majorPairs) {
+
+    // SMART BATCHING: Use prioritized batch to respect API limits
+    await this.enforceRateLimit();
+    const pairBatch = this.getHuntingPairsBatch('ARBITRAGE');
+
+    for (const symbol of pairBatch) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
@@ -305,11 +314,12 @@ export class QuantumForgeProfitPredator {
    */
   private async huntVolumeSpikes(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
-    
-    // Scan for unusual volume patterns
-    const allPairs = this.getHuntingPairs();
-    
-    for (const symbol of allPairs.slice(0, 20)) {
+
+    // SMART BATCHING: Use prioritized batch to respect API limits
+    await this.enforceRateLimit();
+    const pairBatch = this.getHuntingPairsBatch('VOLUME_SPIKE');
+
+    for (const symbol of pairBatch) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
@@ -373,10 +383,12 @@ export class QuantumForgeProfitPredator {
    */
   private async huntSentimentBombs(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
-    
-    const majorPairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'LINKUSD', 'AVAXUSD', 'MATICUSD'];
-    
-    for (const symbol of majorPairs) {
+
+    // SMART BATCHING: Use prioritized batch focused on high-leverage pairs
+    await this.enforceRateLimit();
+    const pairBatch = this.getHuntingPairsBatch('SENTIMENT_BOMB');
+
+    for (const symbol of pairBatch) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
@@ -451,10 +463,12 @@ export class QuantumForgeProfitPredator {
    */
   private async huntOrderBookImbalances(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
+
+    // SMART BATCHING: Use prioritized batch for order book analysis
+    await this.enforceRateLimit();
+    const pairBatch = this.getHuntingPairsBatch('ORDER_BOOK_IMBALANCE');
     
-    const liquidPairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD'];
-    
-    for (const symbol of liquidPairs) {
+    for (const symbol of pairBatch) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
@@ -531,10 +545,12 @@ export class QuantumForgeProfitPredator {
    */
   private async huntMomentumBreakouts(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
-    
-    const allPairs = this.getHuntingPairs();
-    
-    for (const symbol of allPairs.slice(0, 15)) {
+
+    // SMART BATCHING: Use prioritized batch for momentum hunting
+    await this.enforceRateLimit();
+    const pairBatch = this.getHuntingPairsBatch('MOMENTUM_BREAKOUT');
+
+    for (const symbol of pairBatch) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
@@ -604,11 +620,12 @@ export class QuantumForgeProfitPredator {
    */
   private async huntMeanReversions(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
-    
-    // Focus on major pairs for mean reversion
-    const majorPairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'LINKUSD'];
-    
-    for (const symbol of majorPairs) {
+
+    // SMART BATCHING: Use prioritized batch for mean reversion hunting
+    await this.enforceRateLimit();
+    const pairBatch = this.getHuntingPairsBatch('MEAN_REVERSION');
+
+    for (const symbol of pairBatch) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
@@ -679,8 +696,8 @@ export class QuantumForgeProfitPredator {
   private async huntNewsReactions(): Promise<ProfitHunt[]> {
     const hunts: ProfitHunt[] = [];
     
-    // Focus on pairs that react strongly to news
-    const newsReactivePairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'AVAXUSD', 'DOTUSD'];
+    // DYNAMIC: Use all major pairs + meme coins + AI/tech tokens for news reaction hunting
+    const newsReactivePairs = [...this.getMajorCryptoPairs(), ...this.getMemeCoinPairs(), ...this.getAITechPairs()];
     
     try {
       // STEP 1: Batch fetch market data to respect API limits
@@ -727,7 +744,7 @@ export class QuantumForgeProfitPredator {
           
           // Additional validation using mathematical intuition for high-confidence opportunities
           if (opportunity.confidence > 0.5) {
-            const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuitively({
+            const intuitionResult = await mathIntuitionEngine.analyzeIntuitively({
               symbol,
               currentPrice: marketData.price,
               priceChange: marketData.change24h || 0,
@@ -831,7 +848,7 @@ export class QuantumForgeProfitPredator {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
 
-        const intuitionResult = await mathematicalIntuitionEngine.analyzeIntuitively({
+        const intuitionResult = await mathIntuitionEngine.analyzeIntuitively({
           symbol,
           currentPrice: marketData.price,
           priceChange: marketData.change24h || 0,
@@ -955,12 +972,115 @@ export class QuantumForgeProfitPredator {
   /**
    * Utility functions
    */
+  /**
+   * Get prioritized batches of pairs for hunting
+   * Rotates through different priority categories to respect API limits
+   */
+  private getHuntingPairsBatch(huntType: string): string[] {
+    const allPairs = CRYPTO_TRADING_PAIRS
+      .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
+      .map(pair => pair.symbol);
+
+    // Define priority categories
+    const priorityCategories = [
+      this.getPredatorTargetPairs(),           // Highest priority: 24 predator targets
+      this.getHighLeveragePairs(),             // High priority: 119 leverage pairs
+      this.getMajorCryptoPairs(),              // Medium priority: Major cryptos
+      this.getMemeCoinPairs(),                 // Medium priority: Meme coins
+      this.getAITechPairs(),                   // Medium priority: AI/Tech
+      this.getRemainingPairs()                 // Lower priority: Everything else
+    ];
+
+    // Rotate through categories based on hunt cycle
+    const categoryIndex = this.currentBatchIndex % priorityCategories.length;
+    const selectedCategory = priorityCategories[categoryIndex];
+
+    // Return batch from selected category
+    const batch = selectedCategory.slice(0, this.BATCH_SIZE);
+
+    this.logToFile(`🎯 ${huntType}: Batch ${this.currentBatchIndex + 1} from category ${categoryIndex + 1} (${batch.length} pairs)`);
+
+    // Increment for next hunt type
+    this.currentBatchIndex++;
+
+    return batch;
+  }
+
   private getHuntingPairs(): string[] {
-    // All pairs that we hunt across - no loyalty to any specific pair
+    // Fallback method for backward compatibility
     return CRYPTO_TRADING_PAIRS
-      .filter(pair => pair.quoteAsset === 'USD') // Focus on USD pairs for simplicity
+      .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
+      .map(pair => pair.symbol);
+  }
+
+  private getHighLeveragePairs(): string[] {
+    // Get all high-leverage pairs (3x+) for aggressive hunting
+    return CRYPTO_TRADING_PAIRS
+      .filter(pair => pair.maxLeverage >= 3)
+      .map(pair => pair.symbol);
+  }
+
+  private getPredatorTargetPairs(): string[] {
+    // Get the highest priority predator target pairs
+    return CRYPTO_TRADING_PAIRS
+      .filter(pair => pair.isPredatorTarget)
+      .map(pair => pair.symbol);
+  }
+
+  private getMajorCryptoPairs(): string[] {
+    // Get major cryptocurrency pairs for stable opportunities (all USD variants)
+    const majors = ['XBTUSD', 'XBTUSDT', 'XBTUSDC', 'ETHUSD', 'ETHUSDT', 'ETHUSDC',
+                   'SOLUSD', 'SOLUSDT', 'SOLUSDC', 'ADAUSD', 'ADAUSDT', 'ADAUSDC',
+                   'XRPUSD', 'XRPUSDT', 'XRPUSDC', 'DOTUSD', 'DOTUSDT', 'DOTUSDC',
+                   'LINKUSD', 'LINKUSDT', 'LINKUSDC', 'AVAXUSD', 'AVAXUSDT', 'AVAXUSDC',
+                   'ATOMUSD', 'ATOMUSDT', 'ATOMUSDC', 'NEARUSD', 'LTCUSD', 'LTCUSDT',
+                   'LTCUSDC', 'BCHUSD', 'BCHUSDT', 'BCHUSDC', 'TRXUSD'];
+    return majors.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+  }
+
+  private getMemeCoinPairs(): string[] {
+    // Get meme coin pairs with high volatility opportunities (all USD variants)
+    const memes = ['XDGUSD', 'XDGUSDT', 'XDGUSDC', 'SHIBUSD', 'SHIBUSDT', 'SHIBUSDC',
+                   'PEPEUSD', 'BONKUSD', 'WIFUSD', 'FLOKIUSD', 'MEWUSD'];
+    return memes.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+  }
+
+  private getAITechPairs(): string[] {
+    // Get AI & Technology tokens with momentum potential (all USD variants)
+    const aiTech = ['RENDERUSD', 'TAOUSD', 'INJUSD', 'VIRTUALUSD', 'VIRTUALUSDT', 'VIRTUALUSDC'];
+    return aiTech.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+  }
+
+  private getRemainingPairs(): string[] {
+    // Get all remaining pairs not in priority categories
+    const priorityPairs = new Set([
+      ...this.getPredatorTargetPairs(),
+      ...this.getHighLeveragePairs(),
+      ...this.getMajorCryptoPairs(),
+      ...this.getMemeCoinPairs(),
+      ...this.getAITechPairs()
+    ]);
+
+    return CRYPTO_TRADING_PAIRS
+      .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
       .map(pair => pair.symbol)
-      .slice(0, 30); // Top 30 most liquid pairs
+      .filter(symbol => !priorityPairs.has(symbol));
+  }
+
+  /**
+   * Rate limiting utility - ensures proper delays between API calls
+   */
+  private async enforceRateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastBatch = now - this.lastBatchTime;
+
+    if (timeSinceLastBatch < this.BATCH_DELAY_MS) {
+      const delay = this.BATCH_DELAY_MS - timeSinceLastBatch;
+      this.logToFile(`⏳ API Rate limiting: Waiting ${delay}ms before next batch`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    this.lastBatchTime = Date.now();
   }
 
   private calculateUniquenessScore(symbol: string, volumeRatio: number): number {
