@@ -271,9 +271,9 @@ class ProductionTradingEngine {
       const symbol = pairsToUpdate[i];
       
       try {
-        // Adaptive delay based on previous failures
-        const baseDelay = 15000; // 15 seconds base delay
-        const backoffDelay = Math.min(consecutiveFailures * 5000, 30000); // Up to 30s backoff
+        // Adaptive delay based on previous failures - OPTIMIZED FOR CACHE
+        const baseDelay = 2000; // 2 seconds base delay (reduced from 15s - cache is working!)
+        const backoffDelay = Math.min(consecutiveFailures * 2000, 10000); // Up to 10s backoff
         const totalDelay = baseDelay + backoffDelay;
         
         if (i > 0) {
@@ -2098,9 +2098,9 @@ class ProductionTradingEngine {
     
     while (this.isRunning) {
       try {
-        // Add timeout protection for the entire trading cycle
-        const cycleTimeout = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Trading cycle timeout')), 45000)
+        // Add timeout protection for the entire trading cycle - EXTENDED FOR CACHE OPTIMIZATION
+        const cycleTimeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Trading cycle timeout')), 120000) // Extended to 2 minutes
         );
         
         await Promise.race([
