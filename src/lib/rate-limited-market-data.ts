@@ -33,13 +33,13 @@ class RateLimitedMarketDataService {
   
   // Rate limits for different APIs
   private readonly RATE_LIMITS = {
-    'kraken-public': { requests: 60, windowMs: 60000 }, // 60 per minute (conservative)
+    'kraken-public': { requests: 30, windowMs: 60000 }, // 30 per minute (extra conservative for startup)
     coingecko: { requests: 10, windowMs: 60000 }, // 10 per minute (conservative)
     binance: { requests: 1200, windowMs: 60000 }, // 1200 per minute
     fallback: { requests: 5, windowMs: 60000 } // Very conservative fallback
   };
   
-  private readonly CACHE_DURATION = 30000; // 30 seconds
+  private readonly CACHE_DURATION = 60000; // 60 seconds for better startup stability
   
   static getInstance(): RateLimitedMarketDataService {
     if (!RateLimitedMarketDataService.instance) {

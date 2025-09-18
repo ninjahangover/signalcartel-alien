@@ -58,12 +58,12 @@ else
 fi
 
 # Step 4: Stop system guardian
-GUARDIAN_PID=$(pgrep -f "quantum-forge-live-monitor.ts")
+GUARDIAN_PID=$(pgrep -f "system-guardian.ts")
 if [ ! -z "$GUARDIAN_PID" ]; then
     echo "🛡️ Stopping System Guardian (PID: $GUARDIAN_PID)..."
     kill $GUARDIAN_PID
     sleep 2
-    
+
     # Force kill if still running
     if ps -p $GUARDIAN_PID > /dev/null; then
         echo "⚠️  Force stopping System Guardian..."
@@ -74,8 +74,21 @@ else
     echo "ℹ️  System Guardian not running"
 fi
 
-# Step 5: Clean up any remaining Node processes
-echo "🧹 Cleaning up any remaining processes..."
+# Step 5: Final position sync before shutdown
+echo "🔄 STEP 5: Final position sync before shutdown..."
+# Load environment variables first
+source .env 2>/dev/null || true
+# Sync positions one final time to ensure consistency
+DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
+timeout 20s npx tsx admin/robust-position-sync.ts > /tmp/signalcartel-logs/shutdown-position-sync.log 2>&1
+if [ $? -eq 0 ]; then
+    echo "✅ Final position sync completed - database ready for next startup"
+else
+    echo "⚠️  Final position sync failed or timed out - database may need manual sync"
+fi
+
+# Step 6: Clean up any remaining Node processes
+echo "🧹 STEP 6: Cleaning up any remaining processes..."
 pkill -f "npx tsx" 2>/dev/null || true
 
 echo ""

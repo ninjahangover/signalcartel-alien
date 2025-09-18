@@ -97,7 +97,14 @@ class GPUAcceleratedQueueManager extends EventEmitter {
 
   static getInstance(): GPUAcceleratedQueueManager {
     if (!GPUAcceleratedQueueManager.instance) {
-      GPUAcceleratedQueueManager.instance = new GPUAcceleratedQueueManager();
+      try {
+        GPUAcceleratedQueueManager.instance = new GPUAcceleratedQueueManager();
+      } catch (error) {
+        console.error('🚨 Failed to create GPU Queue Manager instance:', error);
+        // Force reset and retry once
+        GPUAcceleratedQueueManager.instance = null;
+        GPUAcceleratedQueueManager.instance = new GPUAcceleratedQueueManager();
+      }
     }
     return GPUAcceleratedQueueManager.instance;
   }
@@ -113,7 +120,12 @@ class GPUAcceleratedQueueManager extends EventEmitter {
       rateLimitHits: 0,
       gpuUtilization: 0
     };
-    
+
+    // Ensure requestQueue is always properly initialized as Array
+    this.requestQueue = [];
+    this.processingQueue = new Set();
+    this.rateLimiters = new Map();
+
     this.initializeGPUContext();
     this.initializeRateLimiters();
     this.startProcessingLoop();
@@ -183,6 +195,12 @@ class GPUAcceleratedQueueManager extends EventEmitter {
         resolve,
         reject
       };
+
+      // Safety check: ensure requestQueue is always an array
+      if (!Array.isArray(this.requestQueue)) {
+        console.warn('⚠️ RequestQueue corrupted, reinitializing...');
+        this.requestQueue = [];
+      }
 
       this.requestQueue.push(request);
       this.stats.totalRequests++;

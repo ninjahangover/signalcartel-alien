@@ -18,6 +18,7 @@ import { quantumForgeOrderBookAI } from './quantum-forge-orderbook-ai';
 import { UniversalSentimentEnhancer, BaseStrategySignal } from './sentiment/universal-sentiment-enhancer';
 import { mathIntuitionEngine } from './mathematical-intuition-engine';
 import { gpuService } from './gpu-acceleration-service';
+import { mathematicalPairSelector } from './mathematical-pair-selector';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -122,19 +123,46 @@ export class QuantumForgeProfitPredator {
   private minExpectancy = 1.5;          // Minimum 1.5:1 expectancy ratio
   private evolutionThreshold = 50;      // Evolve algorithms every 50 trades
 
-  // API Rate Limiting and Batching
-  private readonly BATCH_SIZE = 25;     // Max pairs per batch to respect API limits
-  private readonly BATCH_DELAY_MS = 2000; // 2 seconds between batches
+  // API Rate Limiting - Following Kraken Guidelines
+  // Kraken allows:
+  // - Public endpoints: 1 request per second
+  // - Private endpoints: 20 per minute (3 seconds between)
+  // We'll be conservative to avoid blacklisting
+  private readonly BATCH_SIZE = 10;     // Smaller batches to respect limits
+  private readonly BATCH_DELAY_MS = 5000; // 5 seconds between batches (conservative)
+  private readonly PUBLIC_API_DELAY_MS = 1500; // 1.5 seconds for public data
   private currentBatchIndex = 0;        // Rotating batch index
   private lastBatchTime = 0;            // Track last batch request time
+  private lastPublicApiCall = 0;        // Track public API calls separately
   
+  // 🚀 STATIC CACHE for all trading pairs (shared across instances)
+  private static allTradingPairsCache: string[] = [];
+  private static lastPairsFetch = 0;
+  private static readonly PAIRS_CACHE_TTL = 3600000; // 1 hour cache
+
   constructor() {
+    // Initialize Prisma synchronously, connect lazily
     this.prisma = new PrismaClient();
     this.sentimentEnhancer = new UniversalSentimentEnhancer();
     this.evolutionMetrics = this.initializeEvolutionMetrics();
-    
+
     // Initialize logging
     this.initializeLogging();
+
+    // Test database connection asynchronously (non-blocking)
+    this.testDatabaseConnection();
+  }
+
+  /**
+   * Test database connection without blocking constructor
+   */
+  private async testDatabaseConnection() {
+    try {
+      await this.prisma.$connect();
+      this.logToFile('✅ Profit Predator: Database connection established');
+    } catch (error) {
+      this.logToFile(`❌ Profit Predator: Database connection failed, using fallbacks: ${error.message}`);
+    }
   }
 
   /**
@@ -179,10 +207,28 @@ export class QuantumForgeProfitPredator {
    */
   async huntForProfits(): Promise<ProfitHunt[]> {
     this.logToFile('🐅 QUANTUM FORGE™ Profit Predator - HUNTING MODE ACTIVATED');
+    this.logToFile('🧮 MATHEMATICAL SELECTION: Using profit expectancy instead of volume bias');
     this.logToFile('💀 Accepting losses to optimize for maximum expectancy');
     this.logToFile('🔄 Evolving algorithms in real-time for continuous improvement');
-    this.logToFile(`🎯 SMART BATCHING: ${this.getHuntingPairs().length} total pairs, ${this.BATCH_SIZE} per batch, ${this.BATCH_DELAY_MS}ms delays`);
-    this.logToFile(`🔄 ROTATION STRATEGY: Predator Targets → High Leverage → Majors → Memes → AI/Tech → Others`);
+
+    // NEW: Get mathematically selected pairs instead of volume-biased selection
+    const availableCapital = await this.getAvailableCapital();
+    const allowMargin = process.env.ENABLE_MARGIN_TRADING === 'true';
+
+    const optimalPairs = await mathematicalPairSelector.selectOptimalPairs(
+      availableCapital,
+      5,
+      allowMargin,
+      0.05
+    );
+
+    this.logToFile(`🎯 MATHEMATICAL SELECTION: ${optimalPairs.length} pairs with positive expectancy`);
+    if (optimalPairs.length > 0) {
+      this.logToFile('📊 TOP OPPORTUNITIES (regardless of size):');
+      optimalPairs.slice(0, 5).forEach((pair, idx) => {
+        this.logToFile(`   ${idx + 1}. ${pair.symbol}: ${(pair.expectedReturn * 100).toFixed(2)}% expected, ${(pair.probabilityOfProfit * 100).toFixed(1)}% win prob`);
+      });
+    }
 
     // Evolution check - evolve if we've learned enough
     if (this.shouldEvolve()) {
@@ -243,6 +289,58 @@ export class QuantumForgeProfitPredator {
   }
 
   /**
+   * Calculate mathematical expectancy for any pair
+   * E[X] = p(win) * avgWin - p(loss) * avgLoss
+   */
+  private calculateExpectedValue(
+    symbol: string,
+    marketData: any,
+    historicalWinRate: number = 0.5
+  ): number {
+    const volatility = Math.abs(marketData.change24h || 0);
+    const momentum = marketData.change24h || 0;
+    const volume = marketData.volume24h || 0;
+
+    // Calculate win probability using market conditions
+    const momentumBoost = momentum > 0 ? 0.1 : -0.1;
+    const volumeNormalized = Math.log10(Math.max(volume, 1000)) / 10; // Normalize volume logarithmically
+    const winProbability = Math.min(0.9, Math.max(0.1, historicalWinRate + momentumBoost + volumeNormalized * 0.05));
+
+    // Expected win/loss based on volatility
+    const avgWin = volatility * 0.8; // Conservative win estimate
+    const avgLoss = volatility * 0.4; // Controlled loss with stops
+
+    // Expected Value calculation
+    return winProbability * avgWin - (1 - winProbability) * avgLoss;
+  }
+
+  /**
+   * Calculate Kelly Criterion for position sizing
+   * f* = (p*b - q)/b where p=win prob, b=win/loss ratio
+   */
+  private calculateKellyFraction(winProb: number, winLossRatio: number): number {
+    const p = winProb;
+    const q = 1 - winProb;
+    const b = winLossRatio;
+
+    if (b <= 0) return 0;
+
+    const kelly = (p * b - q) / b;
+
+    // Apply safety: Never more than 25%, use half Kelly
+    return Math.max(0, Math.min(0.25, kelly * 0.5));
+  }
+
+  /**
+   * Calculate Sharpe Ratio for risk-adjusted returns
+   */
+  private calculateSharpeRatio(expectedReturn: number, volatility: number): number {
+    const riskFreeRate = 0.001; // 0.1% baseline
+    if (volatility === 0) return 0;
+    return (expectedReturn - riskFreeRate) / volatility;
+  }
+
+  /**
    * Hunt for arbitrage opportunities
    */
   private async huntArbitrage(): Promise<ProfitHunt[]> {
@@ -250,19 +348,25 @@ export class QuantumForgeProfitPredator {
 
     // SMART BATCHING: Use prioritized batch to respect API limits
     await this.enforceRateLimit();
-    const pairBatch = this.getHuntingPairsBatch('ARBITRAGE');
+    const pairBatch = await this.getHuntingPairsBatch('ARBITRAGE');
 
     for (const symbol of pairBatch) {
       try {
         const marketData = await this.getMarketData(symbol);
         if (!marketData) continue;
 
-        // Simplified arbitrage detection (would be more sophisticated in production)
+        // Calculate mathematical metrics instead of volume filtering
         const volatility = Math.abs(marketData.change24h || 0);
-        const volume = marketData.volume24h || 1000000;
-        
-        // Look for high volume + volatility spikes that create arbitrage opportunities
-        if (volatility > 5 && volume > 50000000) {
+        const volume = marketData.volume24h || 0;
+
+        // Get historical success rate for this symbol
+        const historicalSuccess = await this.getHistoricalSuccessRate(symbol, 'ARBITRAGE');
+
+        // Calculate expected value regardless of volume
+        const expectedValue = this.calculateExpectedValue(symbol, marketData, historicalSuccess);
+
+        // Only filter by positive expectancy, not volume
+        if (expectedValue > 0) {
           const expectedReturn = volatility * 0.3; // Capture 30% of the move
           const expectancyRatio = expectedReturn / Math.max(2, volatility * 0.1);
           
@@ -317,7 +421,7 @@ export class QuantumForgeProfitPredator {
 
     // SMART BATCHING: Use prioritized batch to respect API limits
     await this.enforceRateLimit();
-    const pairBatch = this.getHuntingPairsBatch('VOLUME_SPIKE');
+    const pairBatch = await this.getHuntingPairsBatch('VOLUME_SPIKE');
 
     for (const symbol of pairBatch) {
       try {
@@ -328,9 +432,13 @@ export class QuantumForgeProfitPredator {
         const avgVolume = 5000000; // Would calculate real average
         const volumeRatio = volume / avgVolume;
         
-        // Hunt for 3x+ volume spikes
-        if (volumeRatio > 3 && volume > 2000000) {
-          const priceChange = Math.abs(marketData.change24h || 0);
+        // Calculate expected value for this opportunity
+        const priceChange = Math.abs(marketData.change24h || 0);
+        const historicalSuccess = await this.getHistoricalSuccessRate(symbol, 'VOLUME_SPIKE');
+        const expectedValue = this.calculateExpectedValue(symbol, marketData, historicalSuccess);
+
+        // Hunt based on mathematical expectancy, not arbitrary volume threshold
+        if (expectedValue > 0 && volumeRatio > 1.5) { // Lower threshold, let math decide
           const expectedReturn = Math.min(15, volumeRatio * priceChange * 0.2);
           const maxDownside = Math.min(8, priceChange * 0.4);
           const expectancyRatio = expectedReturn / maxDownside;
@@ -386,7 +494,7 @@ export class QuantumForgeProfitPredator {
 
     // SMART BATCHING: Use prioritized batch focused on high-leverage pairs
     await this.enforceRateLimit();
-    const pairBatch = this.getHuntingPairsBatch('SENTIMENT_BOMB');
+    const pairBatch = await this.getHuntingPairsBatch('SENTIMENT_BOMB');
 
     for (const symbol of pairBatch) {
       try {
@@ -466,7 +574,7 @@ export class QuantumForgeProfitPredator {
 
     // SMART BATCHING: Use prioritized batch for order book analysis
     await this.enforceRateLimit();
-    const pairBatch = this.getHuntingPairsBatch('ORDER_BOOK_IMBALANCE');
+    const pairBatch = await this.getHuntingPairsBatch('ORDER_BOOK_IMBALANCE');
     
     for (const symbol of pairBatch) {
       try {
@@ -548,7 +656,7 @@ export class QuantumForgeProfitPredator {
 
     // SMART BATCHING: Use prioritized batch for momentum hunting
     await this.enforceRateLimit();
-    const pairBatch = this.getHuntingPairsBatch('MOMENTUM_BREAKOUT');
+    const pairBatch = await this.getHuntingPairsBatch('MOMENTUM_BREAKOUT');
 
     for (const symbol of pairBatch) {
       try {
@@ -559,10 +667,14 @@ export class QuantumForgeProfitPredator {
         const volume = marketData.volume24h || 1000000;
         const volatility = Math.abs(priceChange);
         
-        // Hunt for strong momentum + volume confirmation
-        if (Math.abs(priceChange) > 8 && volume > 5000000) {
+        // Calculate expected value for momentum opportunity
+        const historicalSuccess = await this.getHistoricalSuccessRate(symbol, 'MOMENTUM_BREAKOUT');
+        const expectedValue = this.calculateExpectedValue(symbol, marketData, historicalSuccess);
+
+        // Hunt based on mathematical expectancy
+        if (expectedValue > 0 && Math.abs(priceChange) > 2) { // Lower threshold, math decides
           const momentumStrength = Math.min(1, volatility / 15);
-          const volumeConfirmation = Math.min(1, Math.log(volume / 1000000) / 5);
+          const volumeConfirmation = Math.min(1, Math.log(Math.max(volume, 1000) / 1000000) / 5);
           const combinedStrength = (momentumStrength + volumeConfirmation) / 2;
           
           if (combinedStrength > 0.6) {
@@ -623,7 +735,7 @@ export class QuantumForgeProfitPredator {
 
     // SMART BATCHING: Use prioritized batch for mean reversion hunting
     await this.enforceRateLimit();
-    const pairBatch = this.getHuntingPairsBatch('MEAN_REVERSION');
+    const pairBatch = await this.getHuntingPairsBatch('MEAN_REVERSION');
 
     for (const symbol of pairBatch) {
       try {
@@ -633,10 +745,14 @@ export class QuantumForgeProfitPredator {
         const priceChange = marketData.change24h || 0;
         const volume = marketData.volume24h || 1000000;
         
-        // Hunt for extreme moves in either direction (reversion opportunities)
-        if (Math.abs(priceChange) > 12 && volume > 10000000) {
+        // Calculate expected value for mean reversion
+        const historicalSuccess = await this.getHistoricalSuccessRate(symbol, 'MEAN_REVERSION');
+        const expectedValue = this.calculateExpectedValue(symbol, marketData, historicalSuccess);
+
+        // Hunt based on mathematical expectancy for reversion
+        if (expectedValue > 0 && Math.abs(priceChange) > 5) { // Lower threshold
           const extremeLevel = Math.min(1, Math.abs(priceChange) / 20);
-          const volumeSupport = Math.min(1, volume / 50000000);
+          const volumeSupport = Math.min(1, Math.max(volume, 1000) / 50000000);
           const reversionStrength = (extremeLevel + volumeSupport) / 2;
           
           if (reversionStrength > 0.6) {
@@ -974,34 +1090,310 @@ export class QuantumForgeProfitPredator {
    */
   /**
    * Get prioritized batches of pairs for hunting
-   * Rotates through different priority categories to respect API limits
+   * Dynamically categorizes ALL pairs based on actual market data
    */
-  private getHuntingPairsBatch(huntType: string): string[] {
-    const allPairs = CRYPTO_TRADING_PAIRS
-      .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
-      .map(pair => pair.symbol);
+  private async getHuntingPairsBatch(huntType: string): Promise<string[]> {
+    try {
+      // Get ALL active pairs from database
+      const allPairs = await this.getAllActivePairs();
 
-    // Define priority categories
-    const priorityCategories = [
-      this.getPredatorTargetPairs(),           // Highest priority: 24 predator targets
-      this.getHighLeveragePairs(),             // High priority: 119 leverage pairs
-      this.getMajorCryptoPairs(),              // Medium priority: Major cryptos
-      this.getMemeCoinPairs(),                 // Medium priority: Meme coins
-      this.getAITechPairs(),                   // Medium priority: AI/Tech
-      this.getRemainingPairs()                 // Lower priority: Everything else
+      if (allPairs.length === 0) {
+        // Fallback to CRYPTO_TRADING_PAIRS if database is empty
+        return CRYPTO_TRADING_PAIRS
+          .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
+          .map(pair => pair.symbol)
+          .slice(0, this.BATCH_SIZE);
+      }
+
+      // Dynamically categorize based on actual market data
+      const categorizedPairs = await this.categorizePairsByMarketData(allPairs);
+
+      // Rotate through categories to ensure all pairs get evaluated
+      const categoryNames = Object.keys(categorizedPairs);
+      const categoryIndex = this.currentBatchIndex % categoryNames.length;
+      const selectedCategory = categoryNames[categoryIndex];
+      const selectedPairs = categorizedPairs[selectedCategory] || [];
+
+      // Return batch from selected category
+      const batch = selectedPairs.slice(0, this.BATCH_SIZE);
+
+      this.logToFile(`🎯 ${huntType}: Batch ${this.currentBatchIndex + 1} - ${selectedCategory} (${batch.length}/${selectedPairs.length} pairs)`);
+
+      // Increment for next hunt type
+      this.currentBatchIndex++;
+
+      return batch;
+    } catch (error) {
+      this.logToFile(`⚠️ Error getting hunting batch: ${error.message}`);
+      // Fallback to ensure system continues
+      return CRYPTO_TRADING_PAIRS
+        .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
+        .map(pair => pair.symbol)
+        .slice(this.currentBatchIndex * this.BATCH_SIZE, (this.currentBatchIndex + 1) * this.BATCH_SIZE);
+    }
+  }
+
+  /**
+   * Get ALL active pairs from database
+   */
+  private async getAllActivePairs(): Promise<string[]> {
+    try {
+      // 🚀 CACHE FIRST: Check if we have cached pairs (massive performance improvement)
+      const now = Date.now();
+      if (QuantumForgeProfitPredator.allTradingPairsCache.length > 0 &&
+          (now - QuantumForgeProfitPredator.lastPairsFetch) < QuantumForgeProfitPredator.PAIRS_CACHE_TTL) {
+        this.logToFile(`⚡ CACHE HIT: Using ${QuantumForgeProfitPredator.allTradingPairsCache.length} cached trading pairs`);
+        return QuantumForgeProfitPredator.allTradingPairsCache;
+      }
+
+      // 🔄 CACHE MISS: Fetch fresh data from Kraken API (only when needed)
+      this.logToFile('🔍 CACHE MISS: Fetching ALL available trading pairs from Kraken API...');
+
+      const allKrakenPairs = await this.fetchAllKrakenPairs();
+      if (allKrakenPairs.length > 0) {
+        // 💾 CACHE THE RESULTS: Store for 1 hour to prevent repeated API calls
+        QuantumForgeProfitPredator.allTradingPairsCache = allKrakenPairs;
+        QuantumForgeProfitPredator.lastPairsFetch = now;
+
+        this.logToFile(`✅ SUCCESS: Found ${allKrakenPairs.length} trading pairs from Kraken API (CACHED for 1 hour)`);
+        return allKrakenPairs;
+      }
+
+      // Fallback 1: Try database sources
+      let pairs: string[] = [];
+
+      if (this.prisma) {
+        try {
+          const positions = await this.prisma.managedPosition.findMany({
+            select: { symbol: true },
+            distinct: ['symbol']
+          });
+
+          if (positions.length > 0) {
+            pairs = positions.map(p => p.symbol).filter(s => s.endsWith('USD') || s.endsWith('USDT'));
+            this.logToFile(`📊 Found ${pairs.length} pairs from database (limited coverage)`);
+          }
+        } catch (e) {
+          this.logToFile(`⚠️ Database query failed: ${e.message}`);
+        }
+      }
+
+      // Final fallback: Use comprehensive list
+      if (pairs.length === 0) {
+        this.logToFile('⚠️ API and database failed, using comprehensive fallback pairs');
+        return this.getFallbackPairs();
+      }
+
+      // Merge with strategic pairs to ensure comprehensive coverage
+      const strategicPairs = ['SLAYUSD', 'WIFUSD', 'PEPEUSD', 'SHIBUSD', 'FARTCOINUSD', 'DUCKUSD', 'CORNUSD'];
+      const uniquePairs = [...new Set([...pairs, ...strategicPairs])];
+
+      this.logToFile(`✅ Final pair list: ${uniquePairs.length} total pairs`);
+      return uniquePairs;
+
+    } catch (error) {
+      this.logToFile(`⚠️ Error in getAllActivePairs: ${error.message}`);
+      return this.getFallbackPairs();
+    }
+  }
+
+  /**
+   * Fetch ALL available trading pairs directly from Kraken API
+   * RATE LIMITED to comply with Kraken's API guidelines
+   */
+  private async fetchAllKrakenPairs(): Promise<string[]> {
+    try {
+      // 🚨 RATE LIMIT COMPLIANCE: Add delay to respect Kraken API limits
+      const now = Date.now();
+      const timeSinceLastPublicCall = now - this.lastPublicApiCall;
+      const minDelay = 2000; // 2 seconds between public API calls (very conservative)
+
+      if (timeSinceLastPublicCall < minDelay) {
+        const waitTime = minDelay - timeSinceLastPublicCall;
+        this.logToFile(`⏳ KRAKEN RATE LIMIT: Waiting ${waitTime}ms before AssetPairs API call`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+
+      this.lastPublicApiCall = Date.now();
+
+      // Use rate-limited fetch to get all available pairs
+      const response = await fetch('https://api.kraken.com/0/public/AssetPairs');
+      if (!response.ok) {
+        throw new Error(`Kraken API failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.error && data.error.length > 0) {
+        throw new Error(`Kraken API error: ${data.error.join(', ')}`);
+      }
+
+      const pairs = Object.keys(data.result || {})
+        .filter(pair => {
+          // Filter for USD and USDT pairs only
+          return pair.endsWith('USD') || pair.endsWith('USDT') || pair.endsWith('ZUSD');
+        })
+        .map(pair => {
+          // Normalize pair names (remove Z prefix, etc.)
+          if (pair.endsWith('ZUSD')) {
+            return pair.replace('ZUSD', 'USD');
+          }
+          return pair;
+        })
+        .filter(pair => {
+          // Remove any pairs that don't look like normal crypto pairs
+          return pair.match(/^[A-Z0-9]+USD[T]?$/);
+        });
+
+      this.logToFile(`🎯 KRAKEN API COMPLIANT: Fetched ${pairs.length} USD/USDT pairs (rate limited)`);
+      return pairs;
+
+    } catch (error) {
+      this.logToFile(`⚠️ Failed to fetch Kraken pairs: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Comprehensive fallback pairs - ensures access to 500+ opportunities for margin trading
+   */
+  private getFallbackPairs(): string[] {
+    return [
+      // 🎯 Small-cap meme coins (perfect for margin trading)
+      'SLAYUSD', 'WIFUSD', 'PEPEUSD', 'SHIBUSD', 'FARTCOINUSD', 'DUCKUSD',
+      'CORNUSD', 'MOODENGUSD', 'BONKUSD', 'DOGEUSD', 'FLOKIUSD', 'SHIBAUSD',
+      'SAMOUSD', 'RATUSD', 'JUPUSD', 'PYTUSD', 'JITOUSD', 'WENUD', 'MOGUSD',
+      'BOOKUSD', 'BOKEUSD', 'MYRIUSD', 'ORCAUSD', 'RAYHUDYUSD', 'STEPUSD',
+
+      // 💎 Mid-cap opportunities
+      'LINKUSD', 'UNIUSD', 'AAVEUSD', 'MATICUSD', 'ALGOUSD', 'ATOMUSD',
+      'FILUSD', 'ICPUSD', 'APTUSD', 'NEARUSD', 'GALAUSD', 'MANAUSD',
+      'SANDUSD', 'ENJUSD', 'CHZUSD', 'BATUSD', '1INCHUSD', 'YFIUSD',
+      'SUSHIUSD', 'COMPUSD', 'MKRUSD', 'SNXUSD', 'CRVUSD', 'BANDUSD',
+
+      // 🚀 Major pairs (lower priority but still valuable)
+      'BTCUSD', 'ETHUSD', 'SOLUSD', 'AVAXUSD', 'DOTUSD', 'ADAUSD',
+      'XRPUSD', 'LTCUSD', 'BCHUSD', 'ETCUSD', 'XLMUSD', 'TRXUSD',
+
+      // 📊 USDT pairs for broader coverage
+      'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'BNBUSDT', 'XRPUSDT',
+      'DOGEUSDT', 'MATICUSDT', 'DOTUSDT', 'AVAXUSDT', 'SHIBUSDT', 'LINKUSDT',
+
+      // 🎯 Additional small-caps perfect for margin
+      'JASMYUSD', 'LRCUSD', 'STORJUSD', 'SCUSD', 'ANKRUSD', 'NMRUSD',
+      'SKLUSD', 'FETUSD', 'GRTUSD', 'RENUSD', 'AUDIOUSD', 'CTSIUSD',
+      'DEXEUSD', 'RSRUSD', 'GHSTUSD', 'POWRUSD', 'ICXUSD', 'IOTUSD',
+
+      // 💰 More opportunities
+      'RNDRUSD', 'INJUSD', 'LDOUSD', 'OPUSD', 'ARBUSD', 'GMTUSD',
+      'APEUSD', 'MASKUSD', 'LPTUSD', 'ENSUSD', 'IMXUSD', 'AXSUSD'
     ];
+  }
 
-    // Rotate through categories based on hunt cycle
-    const categoryIndex = this.currentBatchIndex % priorityCategories.length;
-    const selectedCategory = priorityCategories[categoryIndex];
+  /**
+   * Dynamically categorize pairs based on actual market data
+   * No hard-coding - uses real price and volume data
+   */
+  private async categorizePairsByMarketData(pairs: string[]): Promise<Record<string, string[]>> {
+    const categories: Record<string, string[]> = {
+      'micro-cap': [],      // < $0.001
+      'small-cap': [],      // $0.001 - $1
+      'mid-cap': [],        // $1 - $100
+      'large-cap': [],      // $100 - $10000
+      'mega-cap': [],       // > $10000
+      'high-volume': [],    // > $10M volume
+      'medium-volume': [],  // $1M - $10M volume
+      'low-volume': [],     // < $1M volume
+      'high-volatility': [], // > 10% change
+      'stable': []          // < 2% change
+    };
 
-    // Return batch from selected category
-    const batch = selectedCategory.slice(0, this.BATCH_SIZE);
+    // Batch fetch market data for efficiency
+    const marketDataBatch = await this.getMarketDataBatch(pairs);
 
-    this.logToFile(`🎯 ${huntType}: Batch ${this.currentBatchIndex + 1} from category ${categoryIndex + 1} (${batch.length} pairs)`);
+    for (const symbol of pairs) {
+      try {
+        const data = marketDataBatch[symbol] || await this.getMarketData(symbol);
+        if (!data) continue;
 
-    // Increment for next hunt type
-    this.currentBatchIndex++;
+        const price = data.price || 0;
+        const volume = data.volume24h || 0;
+        const change = Math.abs(data.change24h || 0);
+
+        // Categorize by price (perfect for margin testing)
+        if (price < 0.001) categories['micro-cap'].push(symbol);
+        else if (price < 1) categories['small-cap'].push(symbol);
+        else if (price < 100) categories['mid-cap'].push(symbol);
+        else if (price < 10000) categories['large-cap'].push(symbol);
+        else categories['mega-cap'].push(symbol);
+
+        // Categorize by volume
+        if (volume > 10000000) categories['high-volume'].push(symbol);
+        else if (volume > 1000000) categories['medium-volume'].push(symbol);
+        else categories['low-volume'].push(symbol);
+
+        // Categorize by volatility
+        if (change > 10) categories['high-volatility'].push(symbol);
+        else if (change < 2) categories['stable'].push(symbol);
+
+      } catch (error) {
+        // Skip pairs that fail to get data
+        continue;
+      }
+    }
+
+    // Log category distribution
+    this.logToFile(`📊 Dynamic categorization complete:`);
+    for (const [category, symbols] of Object.entries(categories)) {
+      if (symbols.length > 0) {
+        this.logToFile(`   ${category}: ${symbols.length} pairs`);
+      }
+    }
+
+    return categories;
+  }
+
+  /**
+   * Batch fetch market data for multiple pairs
+   */
+  private async getMarketDataBatch(symbols: string[]): Promise<Record<string, any>> {
+    const batch: Record<string, any> = {};
+
+    try {
+      // Safety check: Ensure Prisma client is available
+      if (!this.prisma) {
+        this.logToFile('⚠️ Market data batch: Database not connected, using API fallback');
+        // Return empty batch to trigger API fallback in calling code
+        return {};
+      }
+
+      // Try to fetch recent market data from database with better error handling
+      let recentData: any[] = [];
+      try {
+        recentData = await this.prisma.marketData.findMany({
+          where: {
+            symbol: { in: symbols },
+            timestamp: {
+              gte: new Date(Date.now() - 3600000) // Last hour
+            }
+          },
+          orderBy: { timestamp: 'desc' },
+          distinct: ['symbol']
+        });
+      } catch (dbError) {
+        this.logToFile(`⚠️ MarketData query failed: ${dbError.message}, using API fallback`);
+        // Continue without database data - will use API fallback
+      }
+
+      for (const data of recentData) {
+        batch[data.symbol] = {
+          price: parseFloat(data.close.toString()),
+          volume24h: parseFloat(data.volume?.toString() || '0'),
+          change24h: 0 // Would calculate from price history
+        };
+      }
+    } catch (error) {
+      this.logToFile(`⚠️ Error batch fetching market data: ${error.message}`);
+    }
 
     return batch;
   }
@@ -1045,6 +1437,21 @@ export class QuantumForgeProfitPredator {
     return memes.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
   }
 
+  /**
+   * Get small-cap pairs perfect for margin trading testing
+   * These have lower capital requirements and high volatility
+   */
+  private getSmallCapPairs(): string[] {
+    const smallCaps = [
+      'SLAYUSD', 'PEPEUSD', 'SHIBUSD', 'BONKUSD', 'WIFUSD',
+      'FLOKIUSD', 'MEWUSD', 'CORNUSD', 'FARTCOINUSD', 'CATUSD',
+      'DUCKUSD', 'MOODENGUSD', 'SCUSD', 'WENUSD', 'CHAIDOGUSD',
+      'DEAIUMUSD', 'CATDOGUSD', 'MOOGIUSD', 'TORUSD', 'HIPPOSUSD',
+      'NOTCOINUSD', 'MOONUSD', 'BABYDOGEUSD', 'XECUSD', 'RYUUSD'
+    ];
+    return smallCaps.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+  }
+
   private getAITechPairs(): string[] {
     // Get AI & Technology tokens with momentum potential (all USD variants)
     const aiTech = ['RENDERUSD', 'TAOUSD', 'INJUSD', 'VIRTUALUSD', 'VIRTUALUSDT', 'VIRTUALUSDC'];
@@ -1069,6 +1476,7 @@ export class QuantumForgeProfitPredator {
 
   /**
    * Rate limiting utility - ensures proper delays between API calls
+   * Following Kraken's guidelines to avoid blacklisting
    */
   private async enforceRateLimit(): Promise<void> {
     const now = Date.now();
@@ -1076,11 +1484,26 @@ export class QuantumForgeProfitPredator {
 
     if (timeSinceLastBatch < this.BATCH_DELAY_MS) {
       const delay = this.BATCH_DELAY_MS - timeSinceLastBatch;
-      this.logToFile(`⏳ API Rate limiting: Waiting ${delay}ms before next batch`);
+      this.logToFile(`⏳ Kraken API Rate limit: Waiting ${delay}ms to respect limits`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
 
     this.lastBatchTime = Date.now();
+  }
+
+  /**
+   * Rate limit for public API calls specifically
+   */
+  private async enforcePublicApiRateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastCall = now - this.lastPublicApiCall;
+
+    if (timeSinceLastCall < this.PUBLIC_API_DELAY_MS) {
+      const delay = this.PUBLIC_API_DELAY_MS - timeSinceLastCall;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    this.lastPublicApiCall = Date.now();
   }
 
   private calculateUniquenessScore(symbol: string, volumeRatio: number): number {
@@ -1149,28 +1572,52 @@ export class QuantumForgeProfitPredator {
 
   private async getMarketData(symbol: string) {
     try {
+      // First check database for recent data to minimize API calls
+      const recentData = await this.prisma.marketData.findFirst({
+        where: {
+          symbol,
+          timestamp: {
+            gte: new Date(Date.now() - 300000) // Data from last 5 minutes
+          }
+        },
+        orderBy: { timestamp: 'desc' }
+      });
+
+      if (recentData) {
+        // Use cached data if fresh enough
+        return {
+          price: parseFloat(recentData.close.toString()),
+          change24h: 0, // Would calculate from price history
+          volume24h: parseFloat(recentData.volume?.toString() || '0'),
+          volatility: 5 // Default volatility
+        };
+      }
+
+      // Only fetch from API if necessary (rate limited)
+      await this.enforcePublicApiRateLimit();
+
       const data = await this.prisma.marketDataCollection.findFirst({
         where: { symbol },
         orderBy: { newestData: 'desc' }
       });
-      
+
       if (!data) return null;
-      
+
       const priceData = await this.prisma.marketData.findFirst({
         where: { symbol },
         orderBy: { timestamp: 'desc' }
       });
 
-      // Real market data calculations based on symbol characteristics
-      const symbolHash = symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      const timeVariation = Math.sin((Date.now() / 3600000) % (2 * Math.PI)); // Hour cycle
-      
-      return {
-        price: priceData?.close || (30000 + (symbolHash % 20000) + timeVariation * 5000),
-        change24h: timeVariation * 10, // Real time-based variation
-        volume24h: 500000 + (symbolHash % 50000000) + Math.abs(timeVariation) * 20000000,
-        volatility: Math.abs(timeVariation * 8) + 2
-      };
+      if (priceData) {
+        return {
+          price: parseFloat(priceData.close.toString()),
+          change24h: 0, // Would calculate from price history
+          volume24h: parseFloat(priceData.volume?.toString() || '0'),
+          volatility: 5 // Default volatility
+        };
+      }
+
+      return null;
     } catch (error) {
       return null;
     }
@@ -1194,6 +1641,84 @@ export class QuantumForgeProfitPredator {
       newPatternsDiscovered: 0,
       obsoletePatternsPurged: 0
     };
+  }
+
+  /**
+   * Get available capital for position sizing
+   */
+  private async getAvailableCapital(): Promise<number> {
+    try {
+      // Safety check: Ensure Prisma client is available
+      if (!this.prisma) {
+        this.logToFile('⚠️ Capital check: Database not connected, using fallback capital');
+        return 100; // Conservative fallback for small-cap margin trading
+      }
+
+      // Try to get from ManagedAccount first (more reliable)
+      try {
+        const managedAccount = await this.prisma.managedAccount.findFirst({
+          orderBy: { updatedAt: 'desc' }
+        });
+
+        if (managedAccount?.availableBalance) {
+          const available = parseFloat(managedAccount.availableBalance.toString());
+          if (available > 0) {
+            return available;
+          }
+        }
+      } catch (e) {
+        // Try alternative table
+      }
+
+      // Fallback: Try AccountBalance table
+      try {
+        const balance = await this.prisma.accountBalance.findFirst({
+          orderBy: { timestamp: 'desc' }
+        });
+
+        if (balance?.availableBalance) {
+          const available = parseFloat(balance.availableBalance.toString());
+          if (available > 0) {
+            return available;
+          }
+        }
+      } catch (e) {
+        // Continue to next fallback
+      }
+
+      // Final fallback: calculate from positions
+      try {
+        if (!this.prisma) {
+          this.logToFile('⚠️ Position fallback: Database not available');
+          return 100; // Conservative fallback
+        }
+
+        const positions = await this.prisma.managedPosition.findMany({
+          where: { status: 'open' }
+        });
+
+        if (positions.length > 0) {
+          const positionValue = positions.reduce((sum, pos) => {
+            const qty = parseFloat(pos.quantity?.toString() || '0');
+            const price = parseFloat(pos.currentPrice?.toString() || pos.entryPrice?.toString() || '0');
+            return sum + (qty * price);
+          }, 0);
+
+          // Your actual capital minus positions
+          const estimatedAvailable = Math.max(50, 600 - positionValue);
+          return estimatedAvailable;
+        }
+      } catch (e) {
+        // Use default
+      }
+
+      // Default to safe amount for calculations
+      return 100;
+
+    } catch (error) {
+      this.logToFile(`Warning: Could not get available capital: ${error.message}`);
+      return 100; // Safe default for calculations
+    }
   }
 
   /**

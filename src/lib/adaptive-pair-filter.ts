@@ -71,7 +71,7 @@ export class AdaptivePairFilter {
     try {
       // Calculate dynamic criteria using mathematical formulas
       const dynamicCriteria = await this.calculateDynamicFilterCriteria(marketVolatility, systemConfidence);
-      
+
       // Always allow if no historical data
       if (!this.performanceCache.has(symbol)) {
         await this.updatePairPerformance(symbol);
@@ -79,6 +79,9 @@ export class AdaptivePairFilter {
 
     const performance = this.performanceCache.get(symbol);
     if (!performance || performance.totalTrades < dynamicCriteria.minTrades) {
+      // 🚀 MARGIN TRADING: Be more aggressive with new opportunities
+      // Profit Predator is finding 16-20% expected returns on small-caps
+      console.log(`✅ ALLOWING NEW OPPORTUNITY: ${symbol} (${performance?.totalTrades || 0} trades, building history)`);
       return true; // Allow new pairs to build history
     }
 
@@ -319,17 +322,13 @@ export class AdaptivePairFilter {
    */
   async initialize(): Promise<void> {
     console.log("🔧 Initializing Adaptive Pair Filter...");
-    
-    // Pre-block known losers based on current data
-    const knownLosers = ['ETHUSD', 'BNBUSD']; // Based on analysis
-    for (const symbol of knownLosers) {
-      await this.updatePairPerformance(symbol);
-      const performance = this.performanceCache.get(symbol);
-      if (performance) {
-        this.evaluatePairPerformance(performance);
-      }
-    }
-    
+
+    // 🚀 MARGIN TRADING MODE: Allow all pairs discovered by Profit Predator
+    // Remove hardcoded blocking to enable small-cap opportunities
+    // Only block pairs after they prove to be consistently losing
+    console.log("🎯 MARGIN TRADING MODE: Allowing all mathematically selected opportunities");
+    console.log("💡 Small-cap pairs like SLAYUSD, FARTCOINUSD now enabled for margin trading");
+
     console.log(`🚫 Currently blocking ${this.blockedPairs.size} pairs: ${Array.from(this.blockedPairs).join(', ')}`);
   }
 }

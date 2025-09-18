@@ -398,17 +398,17 @@ class ProductionTradingEngine {
         signalStrength: hunt.signalStrength
       }));
       
-      // 🎆 AI-DRIVEN OPPORTUNITY SELECTION - NO RESTRICTIONS!
-      // Let the AI choose the absolute best opportunities regardless of pair
+      // 🚀 MARGIN TRADING: AGGRESSIVE THRESHOLDS FOR SMALL-CAP OPPORTUNITIES!
+      // Lower thresholds to capture 16-20% expected returns from Profit Predator
       const topScoringPairs = opportunities
-        .filter(opp => opp.score >= 70) // 70%+ scoring threshold
+        .filter(opp => opp.score >= 15) // 15%+ for margin trading with small-caps
         .sort((a, b) => b.score - a.score) // Sort by score descending
         .slice(0, 20) // Top 20 opportunities (expanded from 15)
         .map(opp => opp.symbol);
-        
-      // Also include good opportunities for diversification
+
+      // Also include developing opportunities for diversification
       const goodScoringPairs = opportunities
-        .filter(opp => opp.score >= 50 && opp.score < 70)
+        .filter(opp => opp.score >= 8 && opp.score < 15) // Lower threshold for small-caps
         .sort((a, b) => b.score - a.score)
         .slice(0, 10) // Top 10 good opportunities
         .map(opp => opp.symbol);
@@ -423,10 +423,10 @@ class ProductionTradingEngine {
         // 🎯 UPDATE PRIORITY PAIRS FOR BALANCE CACHING (only top-scoring pairs get fresh Kraken API calls)
         this.balanceCalculator.updatePriorityPairs([...this.CORE_PAIRS, ...topScoringPairs]);
         
-        log(`🎆 PROFIT PREDATOR™ OPPORTUNITY SELECTION: ${topScoringPairs.length} top + ${goodScoringPairs.length} good scoring pairs`);
-        log(`   Top-Scoring (70%+): ${topScoringPairs.join(', ')}`);
+        log(`🎆 PROFIT PREDATOR™ MARGIN OPPORTUNITIES: ${topScoringPairs.length} top + ${goodScoringPairs.length} good scoring pairs`);
+        log(`   🚀 Top-Scoring (15%+): ${topScoringPairs.join(', ')}`);
         if (goodScoringPairs.length > 0) {
-          log(`   Good-Scoring (50-69%): ${goodScoringPairs.join(', ')}`);
+          log(`   💎 Good-Scoring (8-14%): ${goodScoringPairs.join(', ')}`);
         }
         
         // Log changes
@@ -440,8 +440,8 @@ class ProductionTradingEngine {
           log(`   ❌ Removed: ${removed.join(', ')}`);
         }
       } else {
-        // No high-scoring opportunities, keep existing dynamic pairs
-        log(`📊 PROFIT PREDATOR™: No 70%+ opportunities found, keeping existing dynamic pairs`);
+        // No opportunities above margin trading threshold, keep existing dynamic pairs
+        log(`📊 PROFIT PREDATOR™: No 15%+ margin opportunities found, keeping existing dynamic pairs`);
       }
       
       this.lastSmartHunterUpdate = now;

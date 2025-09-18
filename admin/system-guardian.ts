@@ -30,7 +30,7 @@ const MONITORED_PROCESSES: ProcessConfig[] = [
     port: 3002,
     healthCheck: async () => {
       try {
-        const response = await fetch('http://127.0.0.1:3002/api/queue-stats', { timeout: 5000 });
+        const response = await fetch('http://127.0.0.1:3002/health', { timeout: 5000 });
         return response.ok;
       } catch {
         return false;
@@ -39,7 +39,7 @@ const MONITORED_PROCESSES: ProcessConfig[] = [
     restartCommand: 'nohup npx tsx kraken-proxy-server.ts > /tmp/signalcartel-logs/kraken-proxy.log 2>&1 &',
     logValidation: async () => {
       try {
-        const response = await fetch('http://127.0.0.1:3002/api/queue-stats');
+        const response = await fetch('http://127.0.0.1:3002/health');
         return response.ok;
       } catch {
         return false;
@@ -49,7 +49,7 @@ const MONITORED_PROCESSES: ProcessConfig[] = [
   {
     name: 'Profit Predator Engine',
     processPattern: 'production-trading-profit-predator.ts',
-    restartCommand: 'nohup env DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" ENABLE_GPU_STRATEGIES=true NTFY_TOPIC="signal-cartel" NODE_OPTIONS="--max-old-space-size=4096" TRADING_MODE="LIVE" npx tsx production-trading-profit-predator.ts > /tmp/signalcartel-logs/profit-predator.log 2>&1 &',
+    restartCommand: 'nohup env DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" ENABLE_GPU_STRATEGIES=false CUDA_VISIBLE_DEVICES="" NTFY_TOPIC="signal-cartel" NODE_OPTIONS="--max-old-space-size=4096" TRADING_MODE="LIVE" npx tsx production-trading-profit-predator.ts > /tmp/signalcartel-logs/profit-predator.log 2>&1 &',
     logValidation: async () => {
       try {
         const logContent = await import('fs').then(fs => fs.promises.readFile('/tmp/signalcartel-logs/profit-predator.log', 'utf8'));

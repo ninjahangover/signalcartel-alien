@@ -38,6 +38,31 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Kraken proxy server is running' });
 });
 
+// Public API endpoints for trading system compatibility
+app.get('/public/:endpoint', async (req, res) => {
+  try {
+    const { endpoint } = req.params;
+    const queryParams = req.query;
+
+    // Build Kraken public API URL
+    let url = `https://api.kraken.com/0/public/${endpoint}`;
+    if (Object.keys(queryParams).length > 0) {
+      const params = new URLSearchParams(queryParams as any);
+      url += `?${params.toString()}`;
+    }
+
+    console.log(`📡 Public API call: ${url}`);
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    res.json(data);
+  } catch (error) {
+    console.error('❌ Public API error:', error);
+    res.status(500).json({ error: ['Public API call failed'] });
+  }
+});
+
 // Main proxy endpoint
 app.post('/api/kraken-proxy', async (req, res) => {
   try {
