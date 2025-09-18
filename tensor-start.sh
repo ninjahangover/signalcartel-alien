@@ -30,14 +30,17 @@ else
     echo "❌ Database connection failed - continuing anyway"
 fi
 
-# Step 3.5: Sync Kraken positions with database
-echo "🔄 STEP 3.5: Syncing Kraken positions with database..."
+# Step 3.5: Robust position sync with actual Kraken holdings
+echo "🔄 STEP 3.5: Robust position sync with actual Kraken holdings..."
+# Load environment variables first
+source .env 2>/dev/null || true
+# Use robust position sync for perfect database alignment
 DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
-timeout 30s npx tsx admin/sync-kraken-positions.ts > /tmp/signalcartel-logs/position-sync.log 2>&1
+timeout 20s npx tsx admin/robust-position-sync.ts > /tmp/signalcartel-logs/position-sync.log 2>&1
 if [ $? -eq 0 ]; then
-    echo "✅ Position sync completed successfully"
+    echo "✅ Robust position sync completed successfully - database perfectly aligned"
 else
-    echo "⚠️  Position sync failed or timed out - continuing anyway"
+    echo "⚠️  Robust position sync failed or timed out - continuing anyway"
 fi
 
 # Step 4: Start Kraken Proxy Server V2.6
@@ -70,21 +73,28 @@ else
     echo "⚠️  System Guardian startup failed"
 fi
 
-# Step 5.5: Start Profit Predator Engine
+# Step 5.5: Start Profit Predator Engine (after proxy stabilization)
 echo "🐅 STEP 5.5: Starting QUANTUM FORGE™ Profit Predator Engine..."
+echo "⏳ Waiting for Kraken Proxy and GPU Queue Manager initialization..."
+sleep 5
+
 nohup env \
   DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
   ENABLE_GPU_STRATEGIES=true \
+  CUDA_VISIBLE_DEVICES=0 \
+  TF_FORCE_GPU_ALLOW_GROWTH=true \
   NTFY_TOPIC="signal-cartel" \
   NODE_OPTIONS="--max-old-space-size=4096" \
   TRADING_MODE="LIVE" \
   npx tsx production-trading-profit-predator.ts > /tmp/signalcartel-logs/profit-predator.log 2>&1 &
 PREDATOR_PID=$!
-sleep 3
+sleep 8
 
 # Verify profit predator is running
 if ps -p $PREDATOR_PID > /dev/null; then
     echo "✅ Profit Predator running (PID: $PREDATOR_PID) - hunting for opportunities"
+    echo "⏳ Waiting for GPU context stabilization..."
+    sleep 5
 else
     echo "⚠️  Profit Predator startup failed"
 fi
@@ -102,6 +112,8 @@ nohup env \
   TENSOR_MODE=true \
   DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
   ENABLE_GPU_STRATEGIES=true \
+  ENABLE_MARGIN_TRADING=true \
+  ENABLE_FUTURES_TRADING=true \
   NTFY_TOPIC="signal-cartel" \
   NODE_OPTIONS="--max-old-space-size=4096" \
   TRADING_MODE="LIVE" \

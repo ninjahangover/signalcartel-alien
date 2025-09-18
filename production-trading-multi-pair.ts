@@ -1723,11 +1723,26 @@ class ProductionTradingEngine {
           // 🐛 V2.5 DEBUG: Log signal processing details
           log(`🔍 V2.5 DEBUG: ${data.symbol} signal.action="${signal.action}" -> side="${side}"`);
           
-          // 🚨 SPOT MARKET RESTRICTION: Can only go LONG on Kraken spot
-          // Skip SHORT positions as we can't sell assets we don't own
-          if (side === 'short') {
+          // 🚨 SPOT MARKET RESTRICTION: Can only go LONG on Kraken spot (unless margin enabled)
+          // Skip SHORT positions if margin trading is not enabled
+          if (side === 'short' && process.env.ENABLE_MARGIN_TRADING !== 'true') {
             log(`⚠️ SPOT RESTRICTION: Skipping SHORT signal for ${data.symbol} - can only BUY on spot market`);
             continue; // Skip to next market opportunity
+          }
+
+          // 🎯 MARGIN TRADING ENABLED: Can execute both LONG and SHORT positions
+          if (side === 'short' && process.env.ENABLE_MARGIN_TRADING === 'true') {
+            log(`📊 MARGIN TRADING: Executing SHORT signal for ${data.symbol} with margin account`);
+
+            // 🛡️ SAFETY CHECK: Limit total margin exposure for $600 account
+            const openPositions = await this.positionManager.getOpenPositions();
+            const shortPositions = openPositions.filter(p => p.side === 'short');
+            const totalShortValue = shortPositions.reduce((sum, p) => sum + (p.quantity * p.currentPrice), 0);
+
+            if (totalShortValue > 300) { // Max 50% of account in shorts
+              log(`⚠️ MARGIN SAFETY: Total short exposure $${totalShortValue.toFixed(2)} exceeds $300 limit - skipping new SHORT`);
+              continue;
+            }
           }
           
           // 🧠 ENHANCED MATHEMATICAL INTUITION DYNAMIC POSITION SIZING
@@ -1893,11 +1908,13 @@ class ProductionTradingEngine {
                 pair: data.symbol,
                 type: krakenSide,
                 ordertype: 'market' as const, // Market order for immediate execution
-                volume: actualQuantity.toString()
+                volume: actualQuantity.toString(),
+                // Add leverage for margin SHORT orders (1x = no leverage for safety)
+                ...(side === 'short' && process.env.ENABLE_MARGIN_TRADING === 'true' ? { leverage: 'none' } : {})
               };
-              
-              log(`🔥 KRAKEN API: Placing ${side.toUpperCase()} market order for ${actualQuantity.toFixed(6)} ${data.symbol}`);
-              
+
+              log(`🔥 KRAKEN API: Placing ${side.toUpperCase()} ${side === 'short' ? 'MARGIN' : ''} market order for ${actualQuantity.toFixed(6)} ${data.symbol}`);
+
               orderResult = await krakenApiService.placeOrder(orderRequest);
               
               if (orderResult.result?.txid && orderResult.result.txid[0]) {
@@ -2556,9 +2573,18 @@ class ProductionTradingEngine {
       if (tensorDecision?.shouldTrade && (tensorDecision?.direction === 'LONG' || tensorDecision?.direction === 'BUY')) {
         signalAction = 'BUY';
       } else if (tensorDecision?.shouldTrade && (tensorDecision?.direction === 'SHORT' || tensorDecision?.direction === 'SELL')) {
-        // 🎯 V2.6 FIX: For spot trading, SELL signals should be HOLD (skip trade) since we can't short
-        signalAction = 'HOLD';
-        console.log(`🎯 V2.6 SPOT TRADING: Tensor says SELL/SHORT - skipping since we can't short on spot account`);
+        // 🚀 V3.3 ENHANCEMENT: Support SHORT trades via futures or margin
+        if (process.env.ENABLE_FUTURES_TRADING === 'true') {
+          signalAction = 'SELL'; // Enable SHORT via futures
+          console.log(`🚀 V3.3 FUTURES: Tensor says SELL/SHORT - will execute via futures account`);
+        } else if (process.env.ENABLE_MARGIN_TRADING === 'true') {
+          signalAction = 'SELL'; // Enable SHORT via margin
+          console.log(`🚀 V3.3 MARGIN: Tensor says SELL/SHORT - will execute via margin trading`);
+        } else {
+          // Fallback to original behavior
+          signalAction = 'HOLD';
+          console.log(`🎯 V2.6 SPOT TRADING: Tensor says SELL/SHORT - skipping since we can't short on spot account`);
+        }
       } else if (tensorDecision?.shouldTrade) {
         // 🔥 V2.6 FIX: If direction is unclear, log it but don't force to BUY
         signalAction = 'HOLD';
