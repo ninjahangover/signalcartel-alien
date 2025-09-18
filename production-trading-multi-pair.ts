@@ -253,16 +253,18 @@ class ProductionTradingEngine {
     log('💰 Smart cache update: Priority pairs only...');
     const startTime = Date.now();
     
-    // 🚀 DYNAMIC PRIORITY: Use discovered opportunities as priority pairs when available
-    let PRIORITY_PAIRS = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'AVAXUSD', 'DOTUSD']; // Fallback
+    // 🎯 PURE OPPORTUNITY-DRIVEN TRADING: Only trade when Profit Predator finds high-quality opportunities
+    let PRIORITY_PAIRS: string[] = [];
 
-    // If Profit Predator has discovered high-expectancy opportunities, prioritize those instead
+    // Use ONLY discovered opportunities - no hardcoded fallback pairs
     if (this.dynamicPairs.length > 0) {
       PRIORITY_PAIRS = this.dynamicPairs.slice(0, 8); // Top 8 discovered opportunities
-      log(`🎯 PRIORITY DISCOVERY: Using ${PRIORITY_PAIRS.length} Profit Predator opportunities as priority pairs`);
-      log(`   🚀 Discovered Priorities: ${PRIORITY_PAIRS.join(', ')}`);
+      log(`🎯 OPPORTUNITY-DRIVEN: Using ${PRIORITY_PAIRS.length} Profit Predator discoveries`);
+      log(`   🚀 Current Opportunities: ${PRIORITY_PAIRS.join(', ')}`);
     } else {
-      log(`🔄 FALLBACK PRIORITIES: Using hardcoded pairs (no discoveries yet)`);
+      log(`⏳ PATIENT WAITING: No high-quality opportunities found - preserving capital for better chances`);
+      log(`   💡 Philosophy: Better to wait than deploy capital into mediocre opportunities`);
+      return; // Exit early - don't update prices for trading when no opportunities exist
     }
 
     // Additional pairs to update in rotation (max 3 per cycle to prevent overload)
@@ -444,8 +446,8 @@ class ProductionTradingEngine {
             // Start looking for opportunities in this section (MOST RECENT ONLY)
             let opportunitiesFound = 0;
 
-            // Look at the NEXT lines after this header (since lines are in reverse order, original opportunities after header appear later in reversed array)
-            for (let j = i + 1; j < Math.min(lines.length, i + 10); j++) {
+            // Look at the PREVIOUS lines before this header (opportunities appear AFTER header in original log, so BEFORE header in reversed array)
+            for (let j = Math.max(0, i - 10); j < i; j++) {
               const oppLine = lines[j];
 
               // Enhanced debug logging
