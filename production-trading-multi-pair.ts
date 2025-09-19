@@ -76,6 +76,7 @@ class ProductionTradingEngine {
   private pairAdapter: ReturnType<typeof getIntelligentPairAdapter>;
   private webhookAdapter: WebhookPayloadAdapter;
   private krakenInitialized: boolean = false;
+  private adaptivePairFilter: any; // AdaptivePairFilter instance
   
   // 🧮 TENSOR FUSION MODE (gradual rollout)
   private tensorMode: boolean = process.env.TENSOR_MODE === 'true';
@@ -108,6 +109,9 @@ class ProductionTradingEngine {
     this.enhancedIntuition = enhancedMathematicalIntuition;
     this.pairAdapter = getIntelligentPairAdapter();
     this.webhookAdapter = new WebhookPayloadAdapter('quantum-forge-live-trading');
+
+    // Initialize Adaptive Pair Filter for dynamic pair validation
+    this.initializeAdaptivePairFilter();
 
     // Initialize enhanced trading systems
     console.log('🧠 Initializing Unified Tensor Coordinator...');
@@ -146,7 +150,24 @@ class ProductionTradingEngine {
     }
     log('');
   }
-  
+
+  /**
+   * Initialize Adaptive Pair Filter for dynamic pair validation
+   */
+  private async initializeAdaptivePairFilter() {
+    try {
+      const { AdaptivePairFilter } = await import('./src/lib/adaptive-pair-filter');
+      this.adaptivePairFilter = new AdaptivePairFilter(prisma);
+      log('✅ Adaptive Pair Filter initialized for dynamic pair validation');
+    } catch (error) {
+      log(`❌ Failed to initialize Adaptive Pair Filter: ${error.message}`);
+      // Create a fallback object with getValidPairs method
+      this.adaptivePairFilter = {
+        getValidPairs: async (pairs: string[]) => pairs // Fallback: return all pairs as valid
+      };
+    }
+  }
+
   async initialize() {
     try {
       // Initialize phase manager
@@ -644,8 +665,30 @@ class ProductionTradingEngine {
           log(`   ❌ Removed: ${removed.join(', ')}`);
         }
       } else {
-        // No opportunities above margin trading threshold, keep existing dynamic pairs
-        log(`📊 PROFIT PREDATOR™: No ${dynamicThreshold.toFixed(1)}%+ opportunities found (dynamic threshold), keeping existing pairs`);
+        // No opportunities above margin trading threshold, but still use ALL discovered pairs for tensor evaluation
+        // The tensor AI will make the final decision on whether to trade
+        if (opportunities.length > 0) {
+          log(`📊 PROFIT PREDATOR™: Found ${opportunities.length} opportunities below ${dynamicThreshold.toFixed(1)}% threshold`);
+          log(`🧠 TENSOR EVALUATION: Adding ALL discovered pairs for tensor AI analysis`);
+
+          // Add ALL discovered pairs (tensor will decide if they're worth trading)
+          const allDiscoveredPairs = opportunities.map(o => o.symbol);
+          this.dynamicPairs = allDiscoveredPairs;
+
+          // Update balance calculator priority pairs
+          this.balanceCalculator.updatePriorityPairs(allDiscoveredPairs);
+
+          // Fetch prices for ALL discovered opportunities
+          log(`🔥 FETCHING PRICES: Getting prices for ${allDiscoveredPairs.length} discovered pairs...`);
+          try {
+            await this.fetchPricesForNewOpportunities(allDiscoveredPairs);
+            log(`✅ PRICE FETCH: ${allDiscoveredPairs.length} opportunities ready for tensor evaluation`);
+          } catch (error) {
+            log(`❌ PRICE FETCH ERROR: ${error.message} - will retry next cycle`);
+          }
+        } else {
+          log(`📊 PROFIT PREDATOR™: No opportunities found, keeping existing pairs`);
+        }
       }
       
       this.lastSmartHunterUpdate = now;

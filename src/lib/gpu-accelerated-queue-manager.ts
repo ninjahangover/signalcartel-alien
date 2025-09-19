@@ -216,45 +216,68 @@ class GPUAcceleratedQueueManager extends EventEmitter {
   }
 
   /**
-   * GPU-accelerated priority sorting using tensor operations
+   * GPU-accelerated priority sorting using tensor operations with safe memory management
    */
   private async sortQueueByPriority(): Promise<void> {
     if (this.requestQueue.length <= 1) return;
 
     try {
-      if (this.gpuContext.initialized) {
-        // Use GPU for large queue sorting
+      if (this.gpuContext.initialized && this.requestQueue.length > 10) {
+        // Only use GPU for larger queues to avoid memory overhead
         await tf.tidy(() => {
-          const priorities = tf.tensor1d(this.requestQueue.map(r => r.priority));
-          const ages = tf.tensor1d(this.requestQueue.map(r => Date.now() - r.timestamp));
-          
-          // Calculate composite priority score: priority * (1 + age_factor)
-          const ageFactors = ages.div(60000).add(1); // Normalize age to minutes
-          const compositeScores = priorities.mul(ageFactors);
-          
-          // Sort indices by composite score (descending)
-          const sortedIndices = tf.topk(compositeScores, compositeScores.shape[0]).indices;
-          const indices = sortedIndices.dataSync();
-          
-          // Reorder queue based on GPU-calculated priorities
-          const sortedQueue = indices.map(i => this.requestQueue[i]);
-          this.requestQueue = sortedQueue;
-          
+          // Validate data before creating tensors
+          const priorityData = this.requestQueue.map(r => r.priority || 0.5);
+          const ageData = this.requestQueue.map(r => Math.max(0, Date.now() - r.timestamp));
+
+          // Create tensors with validated data
+          const priorities = tf.tensor1d(priorityData);
+          const ages = tf.tensor1d(ageData);
+
+          // Safe division and addition operations
+          const normalizedAges = tf.clipByValue(ages.div(tf.scalar(60000)), 0, 10); // Clip to prevent overflow
+          const ageFactors = normalizedAges.add(tf.scalar(1));
+
+          // Calculate composite priority score with bounds checking
+          const compositeScores = tf.mul(priorities, ageFactors);
+
+          // Use topk with validated size
+          const k = Math.min(compositeScores.shape[0], this.requestQueue.length);
+          if (k > 0) {
+            const topkResult = tf.topk(compositeScores, k);
+            const indices = Array.from(topkResult.indices.dataSync());
+
+            // Safely reorder queue with bounds checking
+            const sortedQueue: typeof this.requestQueue = [];
+            indices.forEach(i => {
+              if (i >= 0 && i < this.requestQueue.length) {
+                sortedQueue.push(this.requestQueue[i]);
+              }
+            });
+
+            if (sortedQueue.length === this.requestQueue.length) {
+              this.requestQueue = sortedQueue;
+            }
+
+            // Clean up topk result tensors
+            topkResult.values.dispose();
+            topkResult.indices.dispose();
+          }
+
           this.gpuContext.computationsPerformed++;
           this.stats.gpuUtilization = Math.min(100, this.gpuContext.computationsPerformed / 100);
         });
       } else {
-        // Fallback CPU sorting
+        // Use CPU sorting for small queues or when GPU unavailable
         this.requestQueue.sort((a, b) => {
-          const aPriority = a.priority + (Date.now() - a.timestamp) / 600000; // Age bonus
-          const bPriority = b.priority + (Date.now() - b.timestamp) / 600000;
+          const aPriority = (a.priority || 0.5) + Math.min(Date.now() - a.timestamp, 600000) / 600000;
+          const bPriority = (b.priority || 0.5) + Math.min(Date.now() - b.timestamp, 600000) / 600000;
           return bPriority - aPriority;
         });
       }
     } catch (error) {
       console.warn('⚠️ GPU priority sorting failed, using fallback:', error.message);
-      // Simple priority sort as fallback
-      this.requestQueue.sort((a, b) => b.priority - a.priority);
+      // Simple priority sort as fallback with safe defaults
+      this.requestQueue.sort((a, b) => (b.priority || 0.5) - (a.priority || 0.5));
     }
   }
 
@@ -420,38 +443,47 @@ class GPUAcceleratedQueueManager extends EventEmitter {
    * Calculate GPU-optimized exponential backoff delay
    */
   private async calculateBackoffDelay(request: APIRequest, limiter: any): Promise<number> {
-    if (!limiter) return 1000 * Math.pow(2, request.retryCount);
+    if (!limiter) return 1000 * Math.pow(2, Math.max(0, request.retryCount || 0));
 
     try {
-      if (this.gpuContext.initialized) {
+      if (this.gpuContext.initialized && limiter.config && limiter.consecutiveFailures < 10) {
+        // Only use GPU for reasonable failure counts to avoid overflow
         return await tf.tidy(() => {
           const config = limiter.config;
-          const baseDelay = tf.scalar(1000);
-          const exponentialFactor = tf.scalar(config.exponentialBase);
-          const retryCount = tf.scalar(request.retryCount);
-          const consecutiveFailures = tf.scalar(limiter.consecutiveFailures);
-          
-          // GPU calculation: baseDelay * (exponentialBase ^ (retryCount + consecutiveFailures/10))
-          const exponent = retryCount.add(consecutiveFailures.div(10));
-          const multiplier = exponentialFactor.pow(exponent);
-          const calculatedDelay = baseDelay.mul(multiplier);
-          
-          // Apply jitter (±20%) and cap at maxBackoffMs
-          const jitter = tf.randomUniform([1], 0.8, 1.2);
-          const finalDelay = calculatedDelay.mul(jitter);
-          
-          const delay = finalDelay.dataSync()[0];
-          return Math.min(delay, config.maxBackoffMs);
+          const baseDelay = tf.scalar(Math.max(1000, config.baseDelayMs || 1000));
+          const exponentialBase = Math.min(3, Math.max(1.5, config.exponentialBase || 2)); // Limit base to prevent overflow
+          const exponentialFactor = tf.scalar(exponentialBase);
+          const retryCount = tf.scalar(Math.max(0, Math.min(10, request.retryCount || 0))); // Limit retry count
+          const consecutiveFailures = tf.scalar(Math.max(0, Math.min(10, limiter.consecutiveFailures || 0))); // Limit failures
+
+          // Safe GPU calculation with bounds checking
+          const failureAdjustment = tf.clipByValue(consecutiveFailures.div(tf.scalar(10)), 0, 1);
+          const exponent = tf.add(retryCount, failureAdjustment);
+          const clippedExponent = tf.clipByValue(exponent, 0, 8); // Prevent extreme exponentials
+          const multiplier = tf.pow(exponentialFactor, clippedExponent);
+          const calculatedDelay = tf.mul(baseDelay, multiplier);
+
+          // Apply jitter (±20%) with safe bounds
+          const jitterValue = 0.8 + Math.random() * 0.4; // CPU-based jitter to avoid GPU random issues
+          const jitter = tf.scalar(jitterValue);
+          const finalDelay = tf.mul(calculatedDelay, jitter);
+
+          const delay = Math.max(100, finalDelay.dataSync()[0]); // Minimum 100ms delay
+          const maxBackoff = Math.min(300000, config.maxBackoffMs || 60000); // Max 5 minutes
+          return Math.min(delay, maxBackoff);
         });
       }
     } catch (error) {
       console.warn('⚠️ GPU backoff calculation failed, using fallback:', error.message);
     }
 
-    // Fallback CPU calculation
-    const config = limiter.config;
-    const baseDelay = 1000 * Math.pow(config.exponentialBase, request.retryCount);
-    const failurePenalty = limiter.consecutiveFailures * 500;
+    // Fallback CPU calculation with safe bounds
+    const config = limiter.config || {};
+    const retryCount = Math.max(0, Math.min(10, request.retryCount || 0));
+    const exponentialBase = Math.min(3, Math.max(1.5, config.exponentialBase || 2));
+    const baseDelay = Math.max(1000, config.baseDelayMs || 1000);
+    const calculatedDelay = baseDelay * Math.pow(exponentialBase, retryCount);
+    const failurePenalty = Math.max(0, Math.min(10, limiter.consecutiveFailures || 0)) * 500;
     const jitter = 0.8 + Math.random() * 0.4; // ±20% jitter
     
     return Math.min((baseDelay + failurePenalty) * jitter, config.maxBackoffMs);

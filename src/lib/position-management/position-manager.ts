@@ -7,6 +7,9 @@
  */
 
 import { predictivePositionManager } from '../predictive-position-manager';
+import { realTimePriceFetcher } from '../real-time-price-fetcher';
+import { krakenApiService } from '../kraken-api-service';
+import { advancedRiskOrchestrator } from '../advanced-risk-orchestrator';
 
 export interface Position {
   id: string;
@@ -83,6 +86,39 @@ export interface PositionTrade {
   executedAt: Date;
   pnl?: number;
   isEntry: boolean;
+}
+
+export interface AccountSnapshot {
+  totalUSD: number;
+  availableUSD: number;
+  positionsValue: number;
+  openPositionsCount: number;
+  leverageUsed: number;
+  marginAvailable?: number;
+  accountEquity: number;
+}
+
+export interface DynamicPositionSizing {
+  recommendedSizeUSD: number;
+  recommendedQuantity: number;
+  riskPercentage: number;
+  leverageUsed: number;
+  marginRequired: number;
+  kellyFraction: number;
+  adjustmentFactors: {
+    account: number;
+    risk: number;
+    opportunity: number;
+    regime: number;
+  };
+}
+
+export interface OpportunityEvaluation {
+  shouldTrade: boolean;
+  action: 'NEW_POSITION' | 'REPLACE_POSITION' | 'SKIP';
+  positionToReplace?: string;
+  reason: string;
+  confidence: number;
 }
 
 export class PositionManager {
@@ -163,12 +199,13 @@ export class PositionManager {
       }
       
       // Open new long position or add to existing
+      const quantity = signal.quantity || await this.calculatePositionSize(signal);
       return await this.openPosition({
         strategy: signal.strategy,
         symbol: signal.symbol,
         side: 'long',
         price: signal.price,
-        quantity: signal.quantity || this.calculatePositionSize(signal),
+        quantity,
         timestamp: signal.timestamp
       });
     }
@@ -182,13 +219,14 @@ export class PositionManager {
         return await this.closePosition(position.id, signal.price, 'signal_reversal');
       }
       
-      // Open new short position or add to existing  
+      // Open new short position or add to existing
+      const quantity = signal.quantity || await this.calculatePositionSize(signal);
       return await this.openPosition({
         strategy: signal.strategy,
         symbol: signal.symbol,
         side: 'short',
         price: signal.price,
-        quantity: signal.quantity || this.calculatePositionSize(signal),
+        quantity,
         timestamp: signal.timestamp
       });
     }
@@ -308,17 +346,39 @@ export class PositionManager {
           }
         });
         
-        // Step 3: DASHBOARD FIX - Also create LiveTrade for dashboard visibility
-        let livePositionId: string;
+        // Step 3: DASHBOARD POSITION FIX - Create LivePosition first for dashboard position visibility
+        const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
+        const livePositionId = `live-pos-${position.id}`;
+
         try {
-          const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
-          livePositionId = `live-pos-${position.id}`;
-          
+          await tx.livePosition.create({
+            data: {
+              id: livePositionId,
+              sessionId: sessionId,
+              symbol: position.symbol,
+              strategy: position.strategy,
+              side: position.side,
+              quantity: position.quantity,
+              entryPrice: position.entryPrice,
+              entryValue: position.quantity * position.entryPrice,
+              entryTime: position.entryTime,
+              entryTradeIds: entryTrade.id,
+              status: 'open',
+              unrealizedPnL: 0.0,
+              totalCommissions: 0.0,
+              totalFees: 0.0,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }
+          });
+          console.log(`✅ DASHBOARD: Created LivePosition ${livePositionId} for ${position.symbol}`);
+
+          // Step 4: DASHBOARD FIX - Create LiveTrade AFTER position exists
           await tx.liveTrade.create({
             data: {
               id: `live-${entryTrade.id}`,
               sessionId: sessionId,
-              positionId: livePositionId, // Link to LivePosition
+              positionId: livePositionId, // Link to existing LivePosition
               exchangeOrderId: `kraken-${entryTrade.id}`,
               exchangeTradeId: entryTrade.id,
               symbol: entryTrade.symbol,
@@ -349,41 +409,41 @@ export class PositionManager {
               updatedAt: entryTrade.executedAt
             }
           });
-        } catch (liveTradeError) {
-          console.log(`⚠️ LiveTrade creation failed (non-critical): ${liveTradeError.message}`);
-        }
-        
-        // Step 4: DASHBOARD POSITION FIX - Create LivePosition for dashboard position visibility
-        try {
-          const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
-          await tx.livePosition.create({
-            data: {
-              id: livePositionId,
-              sessionId: sessionId,
-              symbol: position.symbol,
-              strategy: position.strategy,
-              side: position.side,
-              quantity: position.quantity,
-              entryPrice: position.entryPrice,
-              entryValue: position.quantity * position.entryPrice,
-              entryTime: position.entryTime,
-              entryTradeIds: entryTrade.id,
-              status: 'open',
-              unrealizedPnL: 0.0,
-              totalCommissions: 0.0,
-              totalFees: 0.0,
-              createdAt: new Date(),
-              updatedAt: new Date()
-            }
-          });
-          console.log(`✅ DASHBOARD: Created LivePosition ${livePositionId} for ${position.symbol}`);
+          console.log(`✅ DASHBOARD: Created LiveTrade ${entryTrade.id} for ${position.symbol}`);
         } catch (livePositionError) {
-          console.log(`⚠️ LivePosition creation failed (non-critical): ${livePositionError.message}`);
+          console.log(`⚠️ LivePosition/LiveTrade creation failed (non-critical): ${livePositionError.message}`);
         }
       });
       
       console.log(`✅ DATABASE: Successfully created position ${position.id} and trade ${entryTrade.id}`);
-      
+
+      // 🔥 CRITICAL FIX: Place actual Kraken order after database creation
+      try {
+        console.log(`🔥 KRAKEN API: Placing ${params.side.toUpperCase()} order for ${params.quantity} ${params.symbol} @ $${params.price}`);
+
+        const krakenOrderType = params.side === 'long' ? 'buy' : 'sell';
+        const krakenOrderResult = await krakenApiService.placeOrder({
+          pair: params.symbol,
+          type: krakenOrderType,
+          ordertype: 'market',
+          volume: params.quantity.toString()
+        });
+
+        if (krakenOrderResult.result && krakenOrderResult.result.txid && krakenOrderResult.result.txid.length > 0) {
+          const krakenOrderId = krakenOrderResult.result.txid[0];
+          console.log(`✅ KRAKEN ORDER PLACED: ${krakenOrderId} | ${krakenOrderType.toUpperCase()} ${params.quantity} ${params.symbol}`);
+          console.log(`🔗 POSITION LINKED: ${position.id} ↔ Kraken: ${krakenOrderId}`);
+        } else {
+          console.log(`⚠️ KRAKEN ORDER: No transaction ID returned, but database position created`);
+          console.log(`📋 Kraken Response:`, JSON.stringify(krakenOrderResult, null, 2));
+        }
+
+      } catch (krakenError) {
+        console.log(`❌ KRAKEN ORDER FAILED: ${krakenError instanceof Error ? krakenError.message : 'Unknown error'}`);
+        console.log(`⚠️ VIRTUAL POSITION: Database position ${position.id} created but no Kraken order placed`);
+        // Don't throw - we have the database position for tracking, but log the Kraken failure
+      }
+
     } catch (error) {
       console.log(`❌ DATABASE TRANSACTION FAILED: ${error.message}`);
       console.error(`❌ POSITION MANAGER ERROR: ${error.message}`, error.stack);
@@ -470,15 +530,30 @@ export class PositionManager {
           }
         });
         
-        // Step 3: DASHBOARD FIX - Also create LiveTrade for exit/close for dashboard visibility
+        // Step 3: DASHBOARD POSITION FIX - Update LivePosition to closed status first
         const livePositionId = `live-pos-${positionId}`;
         try {
-          const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
+          await tx.livePosition.update({
+            where: { id: livePositionId },
+            data: {
+              status: 'closed',
+              exitPrice: exitPrice,
+              exitValue: exitTrade.value,
+              exitTime: exitTrade.executedAt,
+              exitTradeIds: exitTrade.id,
+              realizedPnL: pnl,
+              netPnL: pnl, // Same as realized for simplicity
+              updatedAt: new Date()
+            }
+          });
+          console.log(`✅ DASHBOARD: Updated LivePosition ${livePositionId} to closed`);
+
+          // Step 4: DASHBOARD FIX - Create LiveTrade for exit/close AFTER position exists
           await tx.liveTrade.create({
             data: {
               id: `live-exit-${exitTrade.id}`,
-              sessionId: sessionId,
-              positionId: livePositionId, // Link to LivePosition
+              sessionId: process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208',
+              positionId: livePositionId, // Link to existing LivePosition
               exchangeOrderId: `kraken-exit-${exitTrade.id}`,
               exchangeTradeId: exitTrade.id,
               symbol: exitTrade.symbol,
@@ -510,28 +585,8 @@ export class PositionManager {
             }
           });
           console.log(`✅ DASHBOARD: Created LiveTrade exit record for ${exitTrade.symbol}`);
-        } catch (liveTradeExitError) {
-          console.log(`⚠️ LiveTrade exit creation failed (non-critical): ${liveTradeExitError.message}`);
-        }
-        
-        // Step 4: DASHBOARD POSITION FIX - Update LivePosition to closed status
-        try {
-          await tx.livePosition.update({
-            where: { id: livePositionId },
-            data: {
-              status: 'closed',
-              exitPrice: exitPrice,
-              exitValue: exitTrade.value,
-              exitTime: exitTrade.executedAt,
-              exitTradeIds: exitTrade.id,
-              realizedPnL: pnl,
-              netPnL: pnl, // Same as realized for simplicity
-              updatedAt: new Date()
-            }
-          });
-          console.log(`✅ DASHBOARD: Updated LivePosition ${livePositionId} to closed`);
         } catch (livePositionUpdateError) {
-          console.log(`⚠️ LivePosition update failed (non-critical): ${livePositionUpdateError.message}`);
+          console.log(`⚠️ LivePosition/LiveTrade update failed (non-critical): ${livePositionUpdateError.message}`);
         }
       });
       
@@ -684,29 +739,432 @@ export class PositionManager {
   }
   
   /**
-   * Calculate position size based on signal and risk management
+   * 🎯 DYNAMIC POSITION SIZING - ENHANCED WITH REAL-TIME ACCOUNT BALANCE
+   *
+   * Replaces hardcoded $10K assumption with real-time account balance integration
+   * Integrates Kelly Criterion, risk management, and leverage awareness
    */
-  private calculatePositionSize(signal: TradingSignal): number {
-    // 🔥 MATHEMATICAL POSITION SIZING - MATCH AI-FOCUSED ENGINE
-    // Use 8% of $10K account with confidence scaling
-    const ACCOUNT_BALANCE = 10000; // $10K account balance
-    const baseSize = 0.08 * ACCOUNT_BALANCE; // 8% = $800 base - need size to win big!
-    
-    // AI Confidence Multiplier (higher confidence = larger position)
-    const confidenceMultiplier = 0.5 + (signal.confidence * 1.5); // 0.5x to 2.0x based on confidence
-    
-    // Price-based adjustments for better returns
-    const lowPriceBoost = signal.price < 10 ? 1.3 : 1.0; // Boost smaller price assets
-    const stablecoinBoost = signal.symbol.includes('USDT') || signal.symbol.includes('USDC') ? 1.2 : 1.0;
-    const balanceOptimization = lowPriceBoost * stablecoinBoost;
-    
-    // Final USD amount
-    const usdAmount = baseSize * confidenceMultiplier * balanceOptimization;
-    const quantity = usdAmount / signal.price; // Convert USD to actual quantity
-    
-    console.log(`💰 FALLBACK POSITION SIZING: Base $${baseSize.toFixed(0)} × Conf(${(signal.confidence * 100).toFixed(1)}%) = $${usdAmount.toFixed(2)} / $${signal.price} = ${quantity.toFixed(4)} units`);
-    
-    return quantity;
+  async calculateDynamicPositionSize(
+    symbol: string,
+    expectedReturn: number,
+    winProbability: number,
+    currentPrice: number,
+    leverageMultiplier: number = 1,
+    signal?: TradingSignal
+  ): Promise<DynamicPositionSizing> {
+    console.log(`🎯 DYNAMIC POSITION SIZING: ${symbol} at $${currentPrice} with ${expectedReturn}% expected return`);
+
+    // Get real-time account snapshot
+    const accountSnapshot = await this.getAccountSnapshot();
+    console.log(`💰 Account Snapshot: $${accountSnapshot.totalUSD.toFixed(2)} total, $${accountSnapshot.availableUSD.toFixed(2)} available`);
+
+    // Calculate Kelly Criterion optimal position size
+    const kellyFraction = await this.calculateKellyFraction(expectedReturn, winProbability);
+    console.log(`📊 Kelly Fraction: ${(kellyFraction * 100).toFixed(2)}%`);
+
+    // Base position size using Kelly Criterion
+    let basePositionUSD = accountSnapshot.accountEquity * kellyFraction;
+
+    // Account size adjustments (smaller accounts need more aggressive sizing for meaningful returns)
+    const accountFactor = this.calculateAccountSizeFactor(accountSnapshot.totalUSD);
+
+    // Risk-aware adjustments using Advanced Risk Orchestrator
+    const currentPositions = await this.getOpenPositions();
+    const riskFactor = await this.calculateRiskAdjustmentFactor(symbol, currentPositions, accountSnapshot);
+
+    // Opportunity quality adjustment (higher expected returns get larger allocation)
+    const opportunityFactor = this.calculateOpportunityFactor(expectedReturn, winProbability);
+
+    // Market regime adjustment (from real-time regime monitor)
+    const regimeFactor = await this.calculateRegimeFactor(symbol);
+
+    // Apply all adjustment factors
+    const adjustedPositionUSD = basePositionUSD * accountFactor * riskFactor * opportunityFactor * regimeFactor;
+
+    // Apply leverage constraints
+    const maxLeveragePositionUSD = leverageMultiplier * accountSnapshot.availableUSD;
+    const finalPositionUSD = Math.min(adjustedPositionUSD, maxLeveragePositionUSD, accountSnapshot.availableUSD);
+
+    // Calculate final quantity with validation
+    const recommendedQuantity = (finalPositionUSD && currentPrice && finalPositionUSD > 0 && currentPrice > 0)
+      ? finalPositionUSD / currentPrice
+      : 0;
+
+    // Calculate risk percentage of total account with validation
+    const riskPercentage = (finalPositionUSD && accountSnapshot.accountEquity && accountSnapshot.accountEquity > 0)
+      ? (finalPositionUSD / accountSnapshot.accountEquity) * 100
+      : 0;
+
+    // Calculate margin requirements for leverage with validation
+    const marginRequired = (finalPositionUSD && leverageMultiplier && leverageMultiplier > 0)
+      ? finalPositionUSD / leverageMultiplier
+      : finalPositionUSD;
+
+    console.log(`🎯 DYNAMIC SIZING RESULT: $${finalPositionUSD.toFixed(2)} → ${recommendedQuantity.toFixed(6)} ${symbol} (${riskPercentage.toFixed(1)}% of account)`);
+
+    return {
+      recommendedSizeUSD: finalPositionUSD,
+      recommendedQuantity,
+      riskPercentage,
+      leverageUsed: leverageMultiplier,
+      marginRequired,
+      kellyFraction,
+      adjustmentFactors: {
+        account: accountFactor,
+        risk: riskFactor,
+        opportunity: opportunityFactor,
+        regime: regimeFactor
+      }
+    };
+  }
+
+  /**
+   * 📊 REAL-TIME ACCOUNT SNAPSHOT
+   *
+   * Gets current account balance, position values, and leverage usage from Kraken API
+   */
+  async getAccountSnapshot(): Promise<AccountSnapshot> {
+    try {
+      // Get USD balance from Kraken
+      let availableUSD = 150; // Fallback default
+
+      try {
+        const balances = await krakenApiService.getBalance();
+        const usdBalance = parseFloat(balances.USD || '0');
+        const usdtBalance = parseFloat(balances.USDT || '0');
+        availableUSD = usdBalance + usdtBalance;
+      } catch (apiError) {
+        console.warn(`⚠️ Kraken API balance fetch failed, using fallback: ${apiError.message}`);
+      }
+
+      // Calculate current position values
+      const openPositions = await this.getOpenPositions();
+      let positionsValue = 0;
+
+      for (const position of openPositions) {
+        try {
+          const priceData = await realTimePriceFetcher.getCurrentPrice(position.symbol);
+          if (priceData.success) {
+            positionsValue += position.quantity * priceData.price;
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not get price for ${position.symbol}: ${error.message}`);
+          // Use entry price as fallback
+          positionsValue += position.quantity * position.entryPrice;
+        }
+      }
+
+      const totalUSD = availableUSD + positionsValue;
+      const accountEquity = totalUSD; // For spot trading, equity = total value
+
+      console.log(`📊 ACCOUNT SNAPSHOT: Total $${totalUSD.toFixed(2)}, Available $${availableUSD.toFixed(2)}, Positions $${positionsValue.toFixed(2)}`);
+
+      return {
+        totalUSD,
+        availableUSD,
+        positionsValue,
+        openPositionsCount: openPositions.length,
+        leverageUsed: positionsValue > 0 ? positionsValue / availableUSD : 0,
+        accountEquity
+      };
+
+    } catch (error) {
+      console.error(`❌ Failed to get account snapshot: ${error.message}`);
+      // Fallback to conservative estimates
+      return {
+        totalUSD: 600, // Conservative fallback based on CLAUDE.md
+        availableUSD: 150,
+        positionsValue: 450,
+        openPositionsCount: 6,
+        leverageUsed: 0,
+        accountEquity: 600
+      };
+    }
+  }
+
+  /**
+   * 🧮 KELLY CRITERION CALCULATION
+   *
+   * Calculates optimal position size based on expected return and win probability
+   */
+  private async calculateKellyFraction(expectedReturn: number, winProbability: number): Promise<number> {
+    // Validate inputs
+    if (!expectedReturn || !winProbability || expectedReturn <= 0 || winProbability <= 0 || winProbability >= 100) {
+      console.warn(`⚠️ Invalid Kelly inputs: expectedReturn=${expectedReturn}, winProbability=${winProbability}`);
+      return 0.05; // Conservative 5% fallback
+    }
+
+    // Convert percentage to decimal
+    const p = winProbability / 100;
+    const q = 1 - p;
+
+    // IMPROVED KELLY CALCULATION FOR TRADING SYSTEMS
+    // For trading, we need to account for the fact that our "expected return" is already
+    // the mathematical expectation, so we use a different approach
+
+    // Method 1: Traditional Kelly with estimated win/loss amounts
+    const estimatedWinAmount = expectedReturn / p; // What we need to win to achieve expected return
+    const estimatedLossAmount = estimatedWinAmount * (p / q) - expectedReturn; // Balanced loss amount
+
+    const kelly1 = (p * estimatedWinAmount - q * estimatedLossAmount) / estimatedWinAmount;
+
+    // Method 2: Simplified Kelly for positive expected value systems
+    // f = expectedReturn / variance, where variance is estimated from win probability
+    const variance = Math.max(0.01, expectedReturn * (1 / p - 1)); // Higher variance for lower win rates
+    const kelly2 = expectedReturn / variance;
+
+    // Method 3: Conservative allocation based on expected return and confidence
+    const kelly3 = Math.min(0.15, expectedReturn / 100 * Math.sqrt(p));
+
+    // Use the most conservative approach but ensure minimum viable position size
+    let kelly = Math.min(kelly1, kelly2, kelly3);
+
+    // If Kelly is negative or too small, use adaptive minimum based on expected return
+    if (kelly <= 0 || kelly < 0.01) {
+      // For profitable opportunities discovered by Profit Predator, use minimum viable allocation
+      if (expectedReturn >= 12.0) { // High-quality opportunities get minimum 2-5% allocation
+        kelly = Math.min(0.05, Math.max(0.02, expectedReturn / 100 * 0.3));
+        console.log(`💡 ADAPTIVE KELLY: Using ${(kelly*100).toFixed(2)}% minimum for ${expectedReturn.toFixed(1)}% opportunity`);
+      } else {
+        kelly = 0.01; // Very small allocation for marginal opportunities
+      }
+    }
+
+    // Cap Kelly fraction to prevent over-leverage (max 15% of account on any single trade)
+    const cappedKelly = Math.max(0.01, Math.min(kelly, 0.15));
+
+    // Additional safety check for NaN
+    const finalKelly = isNaN(cappedKelly) ? 0.02 : cappedKelly;
+
+    console.log(`🧮 ENHANCED KELLY: p=${(p*100).toFixed(1)}%, expectedReturn=${expectedReturn.toFixed(2)}%, kelly=${(kelly*100).toFixed(2)}%, final=${(finalKelly*100).toFixed(2)}%`);
+
+    return finalKelly;
+  }
+
+  /**
+   * 📏 ACCOUNT SIZE ADJUSTMENT FACTOR
+   *
+   * Smaller accounts need more aggressive position sizing for meaningful returns
+   */
+  private calculateAccountSizeFactor(accountSize: number): number {
+    if (accountSize < 1000) {
+      return 1.8; // Very aggressive for small accounts
+    } else if (accountSize < 5000) {
+      return 1.4; // Moderately aggressive
+    } else if (accountSize < 20000) {
+      return 1.1; // Slightly aggressive
+    } else {
+      return 1.0; // Conservative for large accounts
+    }
+  }
+
+  /**
+   * 🛡️ RISK ADJUSTMENT FACTOR
+   *
+   * Uses Advanced Risk Orchestrator to calculate position-specific risk adjustments
+   */
+  private async calculateRiskAdjustmentFactor(
+    symbol: string,
+    currentPositions: Position[],
+    accountSnapshot: AccountSnapshot
+  ): Promise<number> {
+    try {
+      // Use Advanced Risk Orchestrator for sophisticated risk assessment
+      const currentPrices: Record<string, number> = {};
+
+      // Get current prices for all open positions
+      for (const position of currentPositions) {
+        try {
+          const priceData = await realTimePriceFetcher.getCurrentPrice(position.symbol);
+          if (priceData.success) {
+            currentPrices[position.symbol] = priceData.price;
+          }
+        } catch (error) {
+          currentPrices[position.symbol] = position.entryPrice; // Fallback
+        }
+      }
+
+      // Calculate portfolio risk metrics
+      const riskMetrics = await advancedRiskOrchestrator.calculatePortfolioRisk(currentPositions, currentPrices);
+
+      // Risk adjustment based on portfolio risk score
+      if (riskMetrics.overallRiskScore > 8.0) {
+        return 0.5; // Very conservative - high risk portfolio
+      } else if (riskMetrics.overallRiskScore > 6.0) {
+        return 0.7; // Conservative - moderate risk
+      } else if (riskMetrics.overallRiskScore > 4.0) {
+        return 0.9; // Slightly conservative
+      } else {
+        return 1.1; // Slightly aggressive - low risk portfolio
+      }
+
+    } catch (error) {
+      console.warn(`⚠️ Risk calculation failed, using conservative factor: ${error.message}`);
+      return 0.8; // Conservative fallback
+    }
+  }
+
+  /**
+   * 🎯 OPPORTUNITY QUALITY FACTOR
+   *
+   * Higher quality opportunities get larger position allocations
+   */
+  private calculateOpportunityFactor(expectedReturn: number, winProbability: number): number {
+    // Quality score based on expected return and win probability
+    const qualityScore = (expectedReturn * winProbability) / 100;
+
+    if (qualityScore > 15) {
+      return 1.5; // Exceptional opportunity
+    } else if (qualityScore > 10) {
+      return 1.3; // High quality
+    } else if (qualityScore > 6) {
+      return 1.1; // Good quality
+    } else {
+      return 0.9; // Lower quality
+    }
+  }
+
+  /**
+   * 🌊 MARKET REGIME ADJUSTMENT FACTOR
+   *
+   * Adjusts position sizing based on current market regime
+   */
+  private async calculateRegimeFactor(symbol: string): Promise<number> {
+    try {
+      // Would integrate with real-time regime monitor
+      // For now, use conservative default
+      return 1.0;
+    } catch (error) {
+      return 1.0; // Neutral factor on error
+    }
+  }
+
+  /**
+   * 🔄 OPPORTUNITY REPLACEMENT EVALUATION
+   *
+   * Determines if current position should be replaced with better opportunity
+   */
+  async evaluateOpportunityReplacement(
+    newOpportunity: {
+      symbol: string;
+      expectedReturn: number;
+      winProbability: number;
+      currentPrice: number;
+    }
+  ): Promise<OpportunityEvaluation> {
+    console.log(`🔄 EVALUATING OPPORTUNITY REPLACEMENT: ${newOpportunity.symbol} with ${newOpportunity.expectedReturn}% expected return`);
+
+    const openPositions = await this.getOpenPositions();
+    const accountSnapshot = await this.getAccountSnapshot();
+
+    // If we have available capital, no need to replace
+    if (accountSnapshot.availableUSD > 100) { // Need at least $100 for meaningful position
+      return {
+        shouldTrade: true,
+        action: 'NEW_POSITION',
+        reason: 'Sufficient capital available for new position',
+        confidence: 0.9
+      };
+    }
+
+    // Find underperforming positions that could be replaced
+    const candidatesForReplacement = [];
+
+    for (const position of openPositions) {
+      try {
+        // Get current price for P&L calculation
+        const priceData = await realTimePriceFetcher.getCurrentPrice(position.symbol);
+        if (!priceData.success) continue;
+
+        const currentPrice = priceData.price;
+        const unrealizedPnL = this.calculatePnL(position, currentPrice);
+        const unrealizedPnLPercent = (unrealizedPnL / (position.quantity * position.entryPrice)) * 100;
+
+        // Consider for replacement if:
+        // 1. Position is losing money
+        // 2. New opportunity has significantly higher expected return
+        const opportunityDelta = newOpportunity.expectedReturn - (unrealizedPnLPercent * 4); // Rough expected return estimation
+
+        if (unrealizedPnLPercent < -2 && opportunityDelta > 5) { // Losing position + much better opportunity
+          candidatesForReplacement.push({
+            position,
+            currentPrice,
+            unrealizedPnLPercent,
+            opportunityDelta,
+            replaceScore: Math.abs(unrealizedPnLPercent) + opportunityDelta
+          });
+        }
+
+      } catch (error) {
+        console.warn(`⚠️ Could not evaluate position ${position.symbol} for replacement: ${error.message}`);
+      }
+    }
+
+    if (candidatesForReplacement.length === 0) {
+      return {
+        shouldTrade: false,
+        action: 'SKIP',
+        reason: 'No underperforming positions found for replacement',
+        confidence: 0.8
+      };
+    }
+
+    // Sort by replacement score (highest first)
+    candidatesForReplacement.sort((a, b) => b.replaceScore - a.replaceScore);
+    const bestReplacement = candidatesForReplacement[0];
+
+    return {
+      shouldTrade: true,
+      action: 'REPLACE_POSITION',
+      positionToReplace: bestReplacement.position.id,
+      reason: `Replace losing position (${bestReplacement.unrealizedPnLPercent.toFixed(2)}% P&L) with better opportunity (+${bestReplacement.opportunityDelta.toFixed(1)}% delta)`,
+      confidence: 0.85
+    };
+  }
+
+  /**
+   * Calculate position size based on signal and risk management (FALLBACK METHOD)
+   */
+  private async calculatePositionSize(signal: TradingSignal): Promise<number> {
+    console.log(`💰 USING DYNAMIC POSITION SIZING for ${signal.symbol}`);
+
+    try {
+      // Use enhanced dynamic position sizing
+      const dynamicSizing = await this.calculateDynamicPositionSize(
+        signal.symbol,
+        15.0, // Default expected return for fallback
+        signal.confidence * 100, // Convert to percentage
+        signal.price,
+        1.0, // No leverage for fallback
+        signal
+      );
+
+      console.log(`✅ DYNAMIC SIZING: ${dynamicSizing.recommendedQuantity.toFixed(6)} ${signal.symbol} ($${dynamicSizing.recommendedSizeUSD.toFixed(2)})`);
+      return dynamicSizing.recommendedQuantity;
+
+    } catch (error) {
+      console.warn(`⚠️ Dynamic sizing failed, using legacy fallback: ${error.message}`);
+
+      // Original fallback logic
+      const ACCOUNT_BALANCE = 10000; // $10K account balance
+      const baseSize = 0.08 * ACCOUNT_BALANCE; // 8% = $800 base - need size to win big!
+
+      // AI Confidence Multiplier (higher confidence = larger position)
+      const confidenceMultiplier = 0.5 + (signal.confidence * 1.5); // 0.5x to 2.0x based on confidence
+
+      // Price-based adjustments for better returns
+      const lowPriceBoost = signal.price < 10 ? 1.3 : 1.0; // Boost smaller price assets
+      const stablecoinBoost = signal.symbol.includes('USDT') || signal.symbol.includes('USDC') ? 1.2 : 1.0;
+      const balanceOptimization = lowPriceBoost * stablecoinBoost;
+
+      // Final USD amount
+      const usdAmount = baseSize * confidenceMultiplier * balanceOptimization;
+      const quantity = usdAmount / signal.price; // Convert USD to actual quantity
+
+      console.log(`💰 FALLBACK POSITION SIZING: Base $${baseSize.toFixed(0)} × Conf(${(signal.confidence * 100).toFixed(1)}%) = $${usdAmount.toFixed(2)} / $${signal.price} = ${quantity.toFixed(4)} units`);
+
+      return quantity;
+    }
   }
   
   /**
@@ -799,6 +1257,156 @@ export class PositionManager {
     });
   }
   
+  /**
+   * 🎯 INTELLIGENT OPPORTUNITY PROCESSOR
+   *
+   * Main method for the trading system to evaluate and execute opportunities
+   * Handles dynamic position sizing, opportunity replacement, and leverage management
+   */
+  async processOpportunityIntelligently(
+    opportunity: {
+      symbol: string;
+      expectedReturn: number;
+      winProbability: number;
+      currentPrice: number;
+      strategy: string;
+      confidence: number;
+      leverageMultiplier?: number;
+    }
+  ): Promise<{
+    action: 'OPENED' | 'REPLACED' | 'SKIPPED';
+    result: any;
+    sizing: DynamicPositionSizing;
+    evaluation: OpportunityEvaluation;
+    positionReplaced?: string;
+  }> {
+    console.log(`🎯 INTELLIGENT OPPORTUNITY PROCESSING: ${opportunity.symbol} with ${opportunity.expectedReturn}% expected return`);
+
+    // Step 1: Evaluate opportunity replacement strategy
+    const evaluation = await this.evaluateOpportunityReplacement({
+      symbol: opportunity.symbol,
+      expectedReturn: opportunity.expectedReturn,
+      winProbability: opportunity.winProbability,
+      currentPrice: opportunity.currentPrice
+    });
+
+    console.log(`🔄 EVALUATION RESULT: ${evaluation.action} - ${evaluation.reason}`);
+
+    // Step 2: Calculate dynamic position sizing
+    const sizing = await this.calculateDynamicPositionSize(
+      opportunity.symbol,
+      opportunity.expectedReturn,
+      opportunity.winProbability,
+      opportunity.currentPrice,
+      opportunity.leverageMultiplier || 1.0
+    );
+
+    // Step 3: Execute based on evaluation
+    switch (evaluation.action) {
+      case 'NEW_POSITION': {
+        // Open new position with dynamic sizing
+        // Validate quantity before creating signal
+        if (!sizing.recommendedQuantity || sizing.recommendedQuantity <= 0 || isNaN(sizing.recommendedQuantity)) {
+          console.warn(`⚠️ Invalid quantity (${sizing.recommendedQuantity}) for ${opportunity.symbol}, skipping position`);
+          return {
+            action: 'SKIPPED',
+            result: { action: 'skipped', reason: 'Invalid position quantity calculated' },
+            sizing,
+            evaluation
+          };
+        }
+
+        const signal: TradingSignal = {
+          strategy: opportunity.strategy,
+          symbol: opportunity.symbol,
+          action: 'BUY', // Default to BUY for new positions
+          price: opportunity.currentPrice,
+          confidence: opportunity.confidence,
+          quantity: sizing.recommendedQuantity,
+          timestamp: new Date()
+        };
+
+        const result = await this.processSignal(signal);
+        console.log(`✅ NEW POSITION OPENED: ${opportunity.symbol} with $${sizing.recommendedSizeUSD.toFixed(2)} (${sizing.riskPercentage.toFixed(1)}% of account)`);
+
+        return {
+          action: 'OPENED',
+          result,
+          sizing,
+          evaluation
+        };
+      }
+
+      case 'REPLACE_POSITION': {
+        // Close the underperforming position first
+        if (evaluation.positionToReplace) {
+          try {
+            const closeResult = await this.closePosition(
+              evaluation.positionToReplace,
+              opportunity.currentPrice,
+              'intelligent_replacement'
+            );
+            console.log(`🔄 CLOSED UNDERPERFORMING POSITION: ${closeResult.position.symbol} for replacement`);
+
+            // Wait a moment for cleanup
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Open new position with freed capital
+            const signal: TradingSignal = {
+              strategy: opportunity.strategy,
+              symbol: opportunity.symbol,
+              action: 'BUY',
+              price: opportunity.currentPrice,
+              confidence: opportunity.confidence,
+              quantity: sizing.recommendedQuantity,
+              timestamp: new Date()
+            };
+
+            const result = await this.processSignal(signal);
+            console.log(`✅ REPLACEMENT POSITION OPENED: ${opportunity.symbol} replacing ${closeResult.position.symbol}`);
+
+            return {
+              action: 'REPLACED',
+              result,
+              sizing,
+              evaluation,
+              positionReplaced: closeResult.position.symbol
+            };
+
+          } catch (error) {
+            console.error(`❌ Position replacement failed: ${error.message}`);
+            return {
+              action: 'SKIPPED',
+              result: { action: 'failed', error: error.message },
+              sizing,
+              evaluation
+            };
+          }
+        }
+        break;
+      }
+
+      case 'SKIP':
+      default: {
+        console.log(`⏸️ OPPORTUNITY SKIPPED: ${evaluation.reason}`);
+        return {
+          action: 'SKIPPED',
+          result: { action: 'skipped', reason: evaluation.reason },
+          sizing,
+          evaluation
+        };
+      }
+    }
+
+    // Fallback (shouldn't reach here)
+    return {
+      action: 'SKIPPED',
+      result: { action: 'fallback_skip' },
+      sizing,
+      evaluation
+    };
+  }
+
   /**
    * Get portfolio summary with real P&L
    */

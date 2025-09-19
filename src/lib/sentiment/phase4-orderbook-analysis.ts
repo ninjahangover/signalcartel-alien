@@ -86,16 +86,23 @@ export class OrderBookAnalyzer extends EventEmitter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private updateCount = 0; // Track updates for log throttling
-  
+
+  // 🔧 NON-BLOCKING MESSAGE QUEUE: Prevent event loop blocking
+  private messageQueue: any[] = [];
+  private processingQueue = false;
+  private maxQueueSize = 100; // Prevent memory overflow
+
   // Binance US WebSocket URLs (better for US-based servers)
   private readonly BINANCE_US_WS = 'wss://stream.binance.us:9443/ws';
-  
-  // Use single stream for now (easier to handle)  
+
+  // Use single stream for now (easier to handle)
   private currentSymbolIndex = 0;
 
   constructor() {
     super();
-    this.connect();
+    // 🔧 TEMPORARILY DISABLED: WebSocket still consuming too many CPU cycles
+    console.log('📊 Order Book WebSocket temporarily disabled - prioritizing hunting cycles for contest');
+    // this.connect();
   }
 
   private connect(): void {
@@ -112,7 +119,7 @@ export class OrderBookAnalyzer extends EventEmitter {
       });
       
       this.ws.on('message', (data) => {
-        this.handleMessage(data);
+        this.queueMessage(data);
       });
       
       this.ws.on('close', () => {
@@ -136,12 +143,64 @@ export class OrderBookAnalyzer extends EventEmitter {
       console.error('Max reconnection attempts reached');
       return;
     }
-    
+
     this.reconnectAttempts++;
     const delay = Math.pow(2, this.reconnectAttempts) * 1000; // Exponential backoff
-    
+
     console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
     setTimeout(() => this.connect(), delay);
+  }
+
+  /**
+   * 🚀 NON-BLOCKING MESSAGE QUEUE: Queue messages for deferred processing
+   * Prevents WebSocket message handling from blocking the main event loop
+   */
+  private queueMessage(data: any): void {
+    // Prevent memory overflow - drop oldest messages if queue is full
+    if (this.messageQueue.length >= this.maxQueueSize) {
+      this.messageQueue.shift(); // Remove oldest message
+    }
+
+    this.messageQueue.push(data);
+
+    // Start processing if not already running
+    if (!this.processingQueue) {
+      setImmediate(() => this.processMessageQueue());
+    }
+  }
+
+  /**
+   * 🔄 DEFERRED PROCESSING: Process message queue with hunting cycle priority
+   * Dramatically throttled to ensure hunting cycles get CPU time
+   */
+  private processMessageQueue(): void {
+    if (this.processingQueue || this.messageQueue.length === 0) {
+      return;
+    }
+
+    this.processingQueue = true;
+
+    // 🎯 HUNTING CYCLE PRIORITY: Only process 1 message every 500ms
+    // This ensures WebSocket doesn't dominate CPU cycles
+    const processOneMessage = () => {
+      if (this.messageQueue.length > 0) {
+        const data = this.messageQueue.shift();
+        this.handleMessage(data);
+
+        // Wait 500ms before processing next message to give hunting cycles priority
+        setTimeout(() => {
+          if (this.messageQueue.length > 0) {
+            processOneMessage();
+          } else {
+            this.processingQueue = false;
+          }
+        }, 500);
+      } else {
+        this.processingQueue = false;
+      }
+    };
+
+    processOneMessage();
   }
   
   private handleMessage(data: any): void {
@@ -158,9 +217,9 @@ export class OrderBookAnalyzer extends EventEmitter {
       } else if (message.lastUpdateId && message.bids && message.asks) {
         // Direct single stream format (what we're actually getting)
         this.updateCount++;
-        // Only log every 50th update to prevent spam
-        if (this.updateCount % 50 === 0) {
-          console.log('📊 Processing order book update for single stream');
+        // 🚀 NON-BLOCKING: Process every message since we're using deferred processing
+        if (this.updateCount % 25 === 0) {
+          console.log('📊 Processing order book update via non-blocking queue');
         }
         this.processDirectDepthUpdate(message);
       }
@@ -236,8 +295,8 @@ export class OrderBookAnalyzer extends EventEmitter {
     // Generate intelligence analysis
     const intelligence = this.generateIntelligence(snapshot);
     
-    // Only log signal generation every 25th time to reduce spam
-    if (this.updateCount % 25 === 0) {
+    // Only log signal generation every 50th time to reduce spam while maintaining visibility
+    if (this.updateCount % 50 === 0) {
       console.log(`✅ Generated order book signal for ${symbol}: ${intelligence.signals.positionBias} (${intelligence.signals.entryConfidence}%)`);
     }
     

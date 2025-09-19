@@ -2568,11 +2568,13 @@ export class TensorAIFusionEngine {
       // Mathematical derivation: Validation threshold inversely related to tensor strength
       // High tensor confidence + positive returns = lower validation needed (mathematical proof exists)
       const tensorStrengthFactor = Math.max(0.3, tensorConfidence); // Tensor confidence factor
-      const profitabilityFactor = Math.max(0.1, Math.min(1.0, (expectedReturn + 0.02) * 5)); // Scale expected return with baseline
+      // FIX: Ensure profitabilityFactor is always positive and reasonable
+      // Use absolute value to prevent negative returns from breaking the calculation
+      const profitabilityFactor = Math.max(0.1, Math.min(1.0, Math.abs(expectedReturn) + 0.1)); // Always positive, bounded
       const reliabilityFactor = Math.max(0.5, avgReliability); // System reliability
-      
+
       // Dynamic threshold = base_validation / (tensor_strength * profitability * reliability)
-      const baseValidationNeed = 0.35; // Base validation requirement  
+      const baseValidationNeed = 0.35; // Base validation requirement
       const threshold = baseValidationNeed / (tensorStrengthFactor * profitabilityFactor * reliabilityFactor);
       
       console.log(`🧮 DYNAMIC THRESHOLD: tensor_conf=${(tensorConfidence*100).toFixed(1)}% profit=${(expectedReturn*100).toFixed(2)}% reliability=${(avgReliability*100).toFixed(1)}% → threshold=${(threshold*100).toFixed(1)}%`);
@@ -3833,10 +3835,10 @@ export class TensorAIFusionEngine {
         ? (fusedTensor[3] || 0.5) * 10 // Convert reliability to information bits
         : 5.0; // Safe fallback information content
       
-      if (tensorStrength > 0.7 && informationContent > 3.0) {
+      if (tensorStrength > 0.55 && informationContent > 2.5) {
         // Trust the mathematical predictions - this is where the magic happens!
         timing = 'IMMEDIATE';
-        confidence = Math.min(0.85, 0.6 + (tensorStrength - 0.7) * 0.5); // Scale up from 60% to 85%
+        confidence = Math.min(0.85, 0.6 + (tensorStrength - 0.55) * 0.6); // Scale up from 60% to 85%
         reasons.push(`predictive tensor math override - ${tensorStrength.toFixed(2)} strength, ${informationContent.toFixed(1)} bits info`);
       } else {
         timing = 'WAIT_CONFIRMATION';

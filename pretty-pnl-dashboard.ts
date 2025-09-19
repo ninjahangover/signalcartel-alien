@@ -97,7 +97,7 @@ async function getRealEntryPrice(asset: string, currentQuantity: number): Promis
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         endpoint: 'TradesHistory',
-        params: { start: Math.floor(Date.now() / 1000) - (90 * 24 * 60 * 60) }, // Last 90 days
+        params: { start: Math.floor(Date.now() / 1000) - (30 * 60) }, // Last 30 minutes only
         apiKey: KRAKEN_API_KEY,
         apiSecret: KRAKEN_PRIVATE_KEY
       })
@@ -176,7 +176,7 @@ async function getAverageEntryPrice(asset: string, currentQuantity: number): Pro
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         endpoint: 'TradesHistory',
-        params: { start: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60) }, // Last 30 days
+        params: { start: Math.floor(Date.now() / 1000) - (30 * 60) }, // Last 30 minutes only
         apiKey: KRAKEN_API_KEY,
         apiSecret: KRAKEN_PRIVATE_KEY
       })

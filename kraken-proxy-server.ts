@@ -38,6 +38,51 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Kraken proxy server is running' });
 });
 
+// Order book endpoint for profit predator
+app.get('/api/order-book', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+    if (!symbol) {
+      return res.status(400).json({ success: false, error: 'Symbol parameter required' });
+    }
+
+    // Map to Kraken format and call depth endpoint
+    const krakenPair = symbol; // Assuming symbol is already in Kraken format (e.g., BTCUSD)
+    const url = `https://api.kraken.com/0/public/Depth?pair=${krakenPair}&count=10`;
+
+    console.log(`📊 Order book request: ${url}`);
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.error && data.error.length > 0) {
+      return res.json({ success: false, error: data.error });
+    }
+
+    // Extract the order book data (Kraken returns nested structure)
+    const pairData = data.result[Object.keys(data.result)[0]];
+    const orderBook = {
+      bids: pairData.bids.map(([price, volume]: [string, string]) => [parseFloat(price), parseFloat(volume)]),
+      asks: pairData.asks.map(([price, volume]: [string, string]) => [parseFloat(price), parseFloat(volume)]),
+      midPrice: 0, // Will be calculated below
+      spreadPercent: 0 // Will be calculated below
+    };
+
+    // Calculate mid price and spread
+    if (orderBook.bids.length > 0 && orderBook.asks.length > 0) {
+      const bestBid = orderBook.bids[0][0];
+      const bestAsk = orderBook.asks[0][0];
+      orderBook.midPrice = (bestBid + bestAsk) / 2;
+      orderBook.spreadPercent = ((bestAsk - bestBid) / orderBook.midPrice) * 100;
+    }
+
+    res.json({ success: true, data: orderBook });
+  } catch (error) {
+    console.error('❌ Order book API error:', error);
+    res.status(500).json({ success: false, error: 'Order book fetch failed' });
+  }
+});
+
 // Public API endpoints for trading system compatibility
 app.get('/public/:endpoint', async (req, res) => {
   try {
@@ -112,10 +157,20 @@ app.post('/api/kraken-proxy', async (req, res) => {
         timeout: 10000
       });
 
+      const hasResult = !!response.data.result;
+      const hasError = !!(response.data.error && response.data.error.length > 0);
+
       console.log(`✅ Kraken API ${endpoint} success:`, {
-        hasResult: !!response.data.result,
-        hasError: !!(response.data.error && response.data.error.length > 0)
+        hasResult,
+        hasError,
+        errorDetails: hasError ? response.data.error : null
       });
+
+      // 🛡️ BULLETPROOF: Log suspicious responses for debugging
+      if (!hasResult && !hasError) {
+        console.log(`⚠️ Suspicious response for ${endpoint}: no result and no error`);
+        console.log(`📋 Full response:`, JSON.stringify(response.data, null, 2));
+      }
 
       return res.json(response.data);
     } else {

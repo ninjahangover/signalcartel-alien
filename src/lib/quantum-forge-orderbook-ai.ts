@@ -525,13 +525,27 @@ export class QuantumForgeOrderBookAI {
   
   // Data fetching and conversion methods
   private async fetchOrderBookData(symbol: string): Promise<any> {
-    const response = await fetch(`http://localhost:3001/api/order-book?symbol=${symbol}USD`);
-    if (!response.ok) throw new Error(`API returned ${response.status}`);
-    
-    const data = await response.json();
-    if (!data.success) throw new Error(data.error || 'API error');
-    
-    return data.data;
+    try {
+      // 🎯 CONTEST OPTIMIZATION: Much shorter timeout to prevent hunting cycle blocking
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+
+      const response = await fetch(`http://localhost:3002/api/order-book?symbol=${symbol}USD`, {
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) throw new Error(`API returned ${response.status}`);
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'API error');
+
+      return data.data;
+    } catch (error) {
+      // 🏃‍♂️ FAST FAIL: Don't block hunting cycles for order book issues
+      throw new Error(`Order book fetch failed: ${error.message}`);
+    }
   }
   
   private convertToSnapshot(orderBookData: any, symbol: string): OrderBookSnapshot {

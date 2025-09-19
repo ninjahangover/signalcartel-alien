@@ -1,0 +1,29 @@
+[Unit]
+Description=SignalCartel System Guardian - Auto-restart monitoring for trading system
+After=network.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=telgkb9
+WorkingDirectory=/home/telgkb9/depot/current
+Environment="NODE_ENV=production"
+Environment="DATABASE_URL=postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public"
+Environment="NTFY_TOPIC=signal-cartel"
+Environment="NODE_OPTIONS=--max-old-space-size=4096"
+Environment="PATH=/home/telgkb9/.nvm/versions/node/v22.18.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/telgkb9/.nvm/versions/node/v22.18.0/bin/npx tsx admin/system-guardian.ts
+
+# Auto-restart configuration
+Restart=always
+RestartSec=10
+StartLimitInterval=600
+StartLimitBurst=5
+
+# Process management
+KillMode=process
+StandardOutput=append:/tmp/signalcartel-logs/system-guardian.log
+StandardError=append:/tmp/signalcartel-logs/system-guardian.log
+
+[Install]
+WantedBy=multi-user.target

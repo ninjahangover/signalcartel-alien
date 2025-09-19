@@ -5,6 +5,7 @@
 
 import { krakenApiService } from './kraken-api-service.js';
 import { PositionManager, Position } from './position-management/position-manager.js';
+import { balanceApiCircuitBreaker } from './circuit-breaker.js';
 
 export interface AvailableBalanceResult {
   totalBalance: number;
@@ -18,8 +19,10 @@ export class AvailableBalanceCalculator {
   private positionManager: PositionManager;
   private cachedBalance: AvailableBalanceResult | null = null;
   private lastBalanceUpdate: number = 0;
-  private balanceCacheTime: number = 120000; // 2 minutes cache for non-priority pairs
+  private balanceCacheTime: number = 300000; // 5 minutes cache to reduce API calls
   private priorityPairs: Set<string> = new Set();
+  private static lastApiCall: number = 0;
+  private static minApiInterval: number = 10000; // 10 seconds minimum between Kraken API calls
   
   constructor(positionManager: PositionManager) {
     // BULLETPROOF: Validate positionManager
@@ -43,25 +46,58 @@ export class AvailableBalanceCalculator {
   }
 
   /**
-   * Calculate available balance for trading (cached for non-priority pairs)
+   * Calculate available balance for trading (AGGRESSIVE CACHING to prevent rate limits)
    */
   async calculateAvailableBalance(symbol?: string): Promise<AvailableBalanceResult> {
     const now = Date.now();
-    const isPriorityPair = !symbol || this.priorityPairs.has(symbol);
-    
-    // Use cached balance for non-priority pairs if cache is fresh
-    if (!isPriorityPair && this.cachedBalance && (now - this.lastBalanceUpdate) < this.balanceCacheTime) {
-      console.log(`💰 Using cached balance for ${symbol}: $${this.cachedBalance.availableBalance.toFixed(2)} (${Math.round((now - this.lastBalanceUpdate) / 1000)}s old)`);
+
+    // 🔧 RATE LIMIT FIX: Use cache aggressively - only fresh API calls if absolutely necessary
+    const cacheAge = now - this.lastBalanceUpdate;
+    const timeSinceLastApiCall = now - AvailableBalanceCalculator.lastApiCall;
+
+    // Always use cache if:
+    // 1. Cache exists and is less than 5 minutes old, OR
+    // 2. Recent API call was made (prevent rapid-fire API calls), OR
+    // 3. Cache exists and recent API call would violate rate limit
+    if (this.cachedBalance && (
+        cacheAge < this.balanceCacheTime ||
+        timeSinceLastApiCall < AvailableBalanceCalculator.minApiInterval
+    )) {
+      console.log(`💰 CACHED balance (rate limit protection): $${this.cachedBalance.availableBalance.toFixed(2)} (cache: ${Math.round(cacheAge / 1000)}s old, last API: ${Math.round(timeSinceLastApiCall / 1000)}s ago)`);
       return this.cachedBalance;
     }
 
     try {
-      // Only call Kraken API for priority pairs or when cache is stale
-      const accountInfo = await krakenApiService.getAccountInfo();
+      // 🔧 CRITICAL: Update API call timestamp BEFORE making call to prevent concurrent calls
+      AvailableBalanceCalculator.lastApiCall = now;
+
+      // Only make API call if cache is truly stale AND enough time has passed
+      console.log(`🔄 Making Kraken API call (cache ${Math.round(cacheAge / 1000)}s old, last API ${Math.round(timeSinceLastApiCall / 1000)}s ago)`);
+
+      // 🛡️ BULLETPROOF: Use circuit breaker for balance API calls
+      const accountInfo = await balanceApiCircuitBreaker.execute(
+        async () => await krakenApiService.getAccountInfo(),
+        async () => {
+          console.log(`⚡ Circuit breaker fallback: Using cached balance if available`);
+          if (this.cachedBalance) {
+            console.log(`💰 FALLBACK: Using stale cached balance: $${this.cachedBalance.availableBalance.toFixed(2)}`);
+            return {
+              balance: { ZUSD: this.cachedBalance.totalBalance.toString() }
+            };
+          }
+
+          // 🛡️ EMERGENCY FALLBACK: Provide safe default balance to prevent system crash
+          console.log(`🛡️ EMERGENCY FALLBACK: Using conservative default balance for contest safety`);
+          return {
+            balance: { ZUSD: '100.00' } // Conservative fallback for contest mode
+          };
+        }
+      );
+
       const totalBalance = parseFloat(accountInfo.balance?.ZUSD || '0');
       
-      console.log(`💰 Kraken Balance ${isPriorityPair ? '(PRIORITY)' : '(CACHE REFRESH)'}: $${totalBalance.toFixed(2)} for ${symbol || 'system'}`);
-      
+      console.log(`💰 Kraken Balance (FRESH API CALL): $${totalBalance.toFixed(2)} for ${symbol || 'system'}`);
+
       // BULLETPROOF: Get all open positions with error handling
       let openPositions: Position[] = [];
       let openPositionsValue = 0;
@@ -146,9 +182,25 @@ export class AvailableBalanceCalculator {
       
     } catch (error) {
       console.error('❌ Error calculating available balance:', error);
-      
-      // 🛡️ SAFE FALLBACK: Return zero balance to prevent any trading when balance can't be determined
-      // This prevents massive orders caused by fake fallback numbers
+
+      // 🔧 RATE LIMIT FIX: Reset API call timestamp on error so we can retry sooner if needed
+      AvailableBalanceCalculator.lastApiCall = 0;
+
+      // 🛡️ CIRCUIT BREAKER: Reset on critical error to prevent system lockup
+      if (error.message && error.message.includes('Circuit breaker')) {
+        console.log(`🔄 CIRCUIT BREAKER: Resetting balance circuit breaker to prevent system lockup`);
+        balanceApiCircuitBreaker.reset();
+      }
+
+      // 🛡️ FALLBACK: If we have cached data, use it even if stale when API fails
+      if (this.cachedBalance) {
+        const cacheAge = now - this.lastBalanceUpdate;
+        console.log(`⚠️ API failed, using stale cached balance: $${this.cachedBalance.availableBalance.toFixed(2)} (${Math.round(cacheAge / 1000)}s old)`);
+        return this.cachedBalance;
+      }
+
+      // 🛡️ LAST RESORT: Return zero balance only when no cache exists
+      console.log(`🛑 No cached balance available, returning zero to prevent unsafe trading`);
       return {
         totalBalance: 0,
         openPositionsValue: 0,

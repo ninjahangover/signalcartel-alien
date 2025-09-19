@@ -66,58 +66,119 @@ class KrakenApiService {
 
   private async makeRequest(endpoint: string, params: any = {}): Promise<any> {
     return this.queueRequest(async () => {
-      console.log(`🔄 Kraken Proxy: Making API call to ${endpoint}`, {
-        hasApiKey: !!this.apiKey,
-        hasApiSecret: !!this.apiSecret,
-        endpoint,
-        params
-      });
+      const maxRetries = 3;
+      let lastError: any;
 
-      try {
-        if (!this.apiKey || !this.apiSecret) {
-          throw new Error('API credentials not set');
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`🔄 Kraken Proxy: Making API call to ${endpoint} (attempt ${attempt}/${maxRetries})`, {
+            hasApiKey: !!this.apiKey,
+            hasApiSecret: !!this.apiSecret,
+            endpoint,
+            params
+          });
+
+          if (!this.apiKey || !this.apiSecret) {
+            throw new Error('API credentials not set');
+          }
+
+          // Use the working proxy server approach
+          const requestBody = {
+            endpoint,
+            params: params || {},
+            apiKey: this.apiKey,
+            apiSecret: this.apiSecret,
+          };
+
+          console.log(`🔄 Kraken Proxy: Request for ${endpoint} (attempt ${attempt})`);
+
+          const response = await fetch('http://127.0.0.1:3002/api/kraken-proxy', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+          });
+
+          console.log(`🔄 Kraken Proxy: Response status ${response.status} for ${endpoint} (attempt ${attempt})`);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`🔄 Kraken Proxy: Failed with ${response.status}:`, errorText);
+            throw new Error(`Proxy request failed: ${response.status} - ${errorText}`);
+          }
+
+          const data = await response.json();
+
+          // 🛡️ BULLETPROOF: Validate response structure
+          if (!data || typeof data !== 'object') {
+            throw new Error('Invalid response format from Kraken API');
+          }
+
+          // Check for Kraken API errors
+          if (data.error && data.error.length > 0) {
+            // 💡 GRACEFUL HANDLING: "Insufficient funds" for sell orders is a known state, not an error
+            if (data.error.some(err => err.includes('EOrder:Insufficient funds')) &&
+                endpoint === 'AddOrder' &&
+                params?.type === 'sell') {
+              console.log(`✅ Position close attempt: Insufficient funds (position likely already closed)`);
+              return {
+                result: {
+                  descr: { order: 'Position already closed or insufficient balance' },
+                  txid: ['position-already-closed']
+                },
+                error: []
+              };
+            }
+
+            // Check if error is retryable
+            const retryableErrors = ['EGeneral:Temporary lockout', 'EService:Unavailable', 'EQuery:Unknown asset pair'];
+            const isRetryable = data.error.some(err =>
+              retryableErrors.some(retryErr => err.includes(retryErr))
+            );
+
+            if (isRetryable && attempt < maxRetries) {
+              console.log(`⚠️ Retryable error for ${endpoint}, attempt ${attempt}/${maxRetries}: ${data.error.join(', ')}`);
+              const waitTime = Math.min(5000, attempt * 2000); // 2s, 4s, 5s
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              continue;
+            }
+
+            console.error(`🔄 Kraken Proxy: Kraken returned errors for ${endpoint}:`, data.error);
+            throw new Error(`Kraken API error: ${data.error.join(', ')}`);
+          }
+
+          // 🛡️ BULLETPROOF: Validate successful response
+          if (!data.result && endpoint !== 'AddOrder') {
+            throw new Error('Empty result from Kraken API');
+          }
+
+          console.log(`✅ Kraken Proxy: SUCCESS for ${endpoint} (attempt ${attempt})`);
+          return data;
+
+        } catch (error) {
+          lastError = error;
+          console.error(`❌ Kraken Proxy: FAILED for ${endpoint} (attempt ${attempt}):`, error);
+
+          // Don't retry on non-retryable errors
+          if (error.message.includes('API credentials not set') ||
+              error.message.includes('Invalid key') ||
+              error.message.includes('Invalid signature')) {
+            break;
+          }
+
+          // Wait before retry
+          if (attempt < maxRetries) {
+            const waitTime = Math.min(3000, attempt * 1500); // 1.5s, 3s
+            console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
         }
-
-        // Use the working proxy server approach
-        const requestBody = {
-          endpoint,
-          params: params || {},
-          apiKey: this.apiKey,
-          apiSecret: this.apiSecret,
-        };
-
-        console.log(`🔄 Kraken Proxy: Request for ${endpoint}`);
-
-        const response = await fetch('http://127.0.0.1:3002/api/kraken-proxy', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        });
-
-        console.log(`🔄 Kraken Proxy: Response status ${response.status} for ${endpoint}`);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`🔄 Kraken Proxy: Failed with ${response.status}:`, errorText);
-          throw new Error(`Proxy request failed: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log(`✅ Kraken Proxy: SUCCESS for ${endpoint}`);
-
-        // Check for Kraken API errors
-        if (data.error && data.error.length > 0) {
-          console.error(`🔄 Kraken Proxy: Kraken returned errors for ${endpoint}:`, data.error);
-          throw new Error(`Kraken API error: ${data.error.join(', ')}`);
-        }
-
-        return data;
-      } catch (error) {
-        console.error(`❌ Kraken Proxy: FAILED for ${endpoint}:`, error);
-        throw new Error(`Proxy API call failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
+
+      // All retries failed
+      console.error(`❌ All ${maxRetries} attempts failed for ${endpoint}`);
+      throw new Error(`Proxy API call failed after ${maxRetries} attempts: ${lastError instanceof Error ? lastError.message : 'Unknown error'}`);
     });
   }
 
