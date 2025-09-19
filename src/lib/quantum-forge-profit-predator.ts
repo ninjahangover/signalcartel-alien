@@ -19,6 +19,8 @@ import { UniversalSentimentEnhancer, BaseStrategySignal } from './sentiment/univ
 import { mathIntuitionEngine } from './mathematical-intuition-engine';
 import { gpuService } from './gpu-acceleration-service';
 import { mathematicalPairSelector } from './mathematical-pair-selector';
+import { sharedMarketDataCache } from './shared-market-data-cache';
+import { coinMarketCapService } from './coinmarketcap-service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -228,6 +230,14 @@ export class QuantumForgeProfitPredator {
       optimalPairs.slice(0, 5).forEach((pair, idx) => {
         this.logToFile(`   ${idx + 1}. ${pair.symbol}: ${(pair.expectedReturn * 100).toFixed(2)}% expected, ${(pair.probabilityOfProfit * 100).toFixed(1)}% win prob`);
       });
+
+      // Also output in JSON format for easy parsing
+      const jsonOpportunities = optimalPairs.slice(0, 10).map(pair => ({
+        symbol: pair.symbol,
+        expectedReturn: parseFloat((pair.expectedReturn * 100).toFixed(2)),
+        winProb: parseFloat((pair.probabilityOfProfit * 100).toFixed(1))
+      }));
+      this.logToFile(`🎯 JSON_OPPORTUNITIES: ${JSON.stringify(jsonOpportunities)}`);
     }
 
     // Evolution check - evolve if we've learned enough
@@ -264,8 +274,11 @@ export class QuantumForgeProfitPredator {
       ...newsHunts
     ];
 
+    // Enhance with CoinMarketCap intelligence
+    const enhancedHunts = await this.enhanceWithCMCIntelligence(allHunts);
+
     // Filter for high-expectancy opportunities only
-    const profitableHunts = allHunts.filter(hunt => 
+    const profitableHunts = enhancedHunts.filter(hunt =>
       hunt.expectancyRatio >= this.minExpectancy &&
       hunt.probabilityOfProfit > 0.3 &&
       hunt.signalStrength > 0.4
@@ -352,7 +365,7 @@ export class QuantumForgeProfitPredator {
 
     for (const symbol of pairBatch) {
       try {
-        const marketData = await this.getMarketData(symbol);
+        const marketData = this.getCachedMarketData(symbol);
         if (!marketData) continue;
 
         // Calculate mathematical metrics instead of volume filtering
@@ -414,6 +427,64 @@ export class QuantumForgeProfitPredator {
   }
 
   /**
+   * Enhance opportunities with CoinMarketCap intelligence
+   */
+  private async enhanceWithCMCIntelligence(hunts: ProfitHunt[]): Promise<ProfitHunt[]> {
+    if (hunts.length === 0) return hunts;
+
+    try {
+      this.logToFile('📊 CMC INTELLIGENCE: Enhancing opportunities with market data');
+
+      // Process up to 5 best opportunities to conserve API calls
+      const topHunts = hunts.slice(0, 5);
+
+      for (const hunt of topHunts) {
+        try {
+          const intelligence = await coinMarketCapService.getMarketIntelligence(hunt.symbol);
+
+          // Apply confidence boost
+          if (intelligence.confidence_boost > 0) {
+            hunt.expectedReturn *= (1 + intelligence.confidence_boost / 100);
+            hunt.signalStrength += intelligence.confidence_boost / 100;
+
+            this.logToFile(`🚀 CMC BOOST: ${hunt.symbol} enhanced by ${intelligence.confidence_boost.toFixed(1)}%`);
+
+            if (intelligence.opportunities.length > 0) {
+              this.logToFile(`💡 ${hunt.symbol} opportunities: ${intelligence.opportunities.join(', ')}`);
+            }
+          }
+
+          // Apply risk factors
+          if (intelligence.risk_factors.length > 0) {
+            hunt.maxDownside *= 1.2; // Increase downside risk
+            this.logToFile(`⚠️ ${hunt.symbol} risks: ${intelligence.risk_factors.join(', ')}`);
+          }
+
+          // Update hunt type if trending
+          if (intelligence.trending_score > 0) {
+            hunt.huntType = 'MOMENTUM_BREAKOUT';
+            hunt.uniquenessScore += 0.15; // Trending coins have higher uniqueness
+            this.logToFile(`📈 ${hunt.symbol} is trending with score ${intelligence.trending_score}`);
+          }
+
+        } catch (error) {
+          // Continue processing other hunts if CMC fails for one
+          this.logToFile(`⚠️ CMC enhancement failed for ${hunt.symbol}: ${error.message}`);
+        }
+      }
+
+      // Log CMC usage stats
+      const stats = coinMarketCapService.getUsageStats();
+      this.logToFile(`📊 CMC Usage: ${stats.monthlyCallCount}/${stats.monthlyLimit} calls (${stats.percentUsed}% used)`);
+
+    } catch (error) {
+      this.logToFile(`❌ CMC Intelligence Error: ${error.message}`);
+    }
+
+    return hunts;
+  }
+
+  /**
    * Hunt for volume spike opportunities
    */
   private async huntVolumeSpikes(): Promise<ProfitHunt[]> {
@@ -425,7 +496,7 @@ export class QuantumForgeProfitPredator {
 
     for (const symbol of pairBatch) {
       try {
-        const marketData = await this.getMarketData(symbol);
+        const marketData = this.getCachedMarketData(symbol);
         if (!marketData) continue;
 
         const volume = marketData.volume24h || 1000000;
@@ -498,7 +569,7 @@ export class QuantumForgeProfitPredator {
 
     for (const symbol of pairBatch) {
       try {
-        const marketData = await this.getMarketData(symbol);
+        const marketData = this.getCachedMarketData(symbol);
         if (!marketData) continue;
 
         // Get sentiment analysis
@@ -578,7 +649,7 @@ export class QuantumForgeProfitPredator {
     
     for (const symbol of pairBatch) {
       try {
-        const marketData = await this.getMarketData(symbol);
+        const marketData = this.getCachedMarketData(symbol);
         if (!marketData) continue;
 
         const mockSignal: BaseStrategySignal = {
@@ -660,7 +731,7 @@ export class QuantumForgeProfitPredator {
 
     for (const symbol of pairBatch) {
       try {
-        const marketData = await this.getMarketData(symbol);
+        const marketData = this.getCachedMarketData(symbol);
         if (!marketData) continue;
 
         const priceChange = marketData.change24h || 0;
@@ -739,7 +810,7 @@ export class QuantumForgeProfitPredator {
 
     for (const symbol of pairBatch) {
       try {
-        const marketData = await this.getMarketData(symbol);
+        const marketData = this.getCachedMarketData(symbol);
         if (!marketData) continue;
 
         const priceChange = marketData.change24h || 0;
@@ -816,29 +887,27 @@ export class QuantumForgeProfitPredator {
     const newsReactivePairs = [...this.getMajorCryptoPairs(), ...this.getMemeCoinPairs(), ...this.getAITechPairs()];
     
     try {
-      // STEP 1: Batch fetch market data to respect API limits
-      console.log(`🐅 PROFIT PREDATOR GPU: Batch fetching market data for ${newsReactivePairs.length} news-reactive pairs`);
+      // STEP 1: Use shared cache for instant market data access
+      console.log(`🐅 PROFIT PREDATOR GPU: Using cached market data for ${newsReactivePairs.length} news-reactive pairs`);
+      const allCachedData = sharedMarketDataCache.getAllMarketData();
       const marketDataBatch: { [symbol: string]: any } = {};
-      
-      // Fetch market data with rate limiting awareness
+
+      // Filter cached data for our target symbols
       for (const symbol of newsReactivePairs) {
-        try {
-          const data = await this.getMarketData(symbol);
-          if (data) {
-            marketDataBatch[symbol] = {
-              ...data,
-              momentum: data.change24h || 0,
-              volatility: Math.abs(data.change24h || 0) / 100 // Estimated volatility
-            };
-          }
-        } catch (error) {
-          console.log(`⚠️ Skipping ${symbol} due to API limit or data error`);
-          // Continue with other symbols
+        const cachedData = allCachedData[symbol];
+        if (cachedData && cachedData.isValid) {
+          marketDataBatch[symbol] = {
+            price: cachedData.price,
+            volume24h: cachedData.volume24h || 1000000,
+            change24h: cachedData.change24h || 0,
+            momentum: cachedData.change24h || 0,
+            volatility: Math.abs(cachedData.change24h || 0) / 100 // Estimated volatility
+          };
         }
       }
 
       const availableSymbols = Object.keys(marketDataBatch);
-      console.log(`📊 PROFIT PREDATOR: Got market data for ${availableSymbols.length}/${newsReactivePairs.length} symbols`);
+      console.log(`📊 PROFIT PREDATOR: Got cached data for ${availableSymbols.length}/${newsReactivePairs.length} symbols`);
 
       if (availableSymbols.length === 0) {
         console.log(`⏳ PROFIT PREDATOR: No market data available due to API limits, skipping news reactions`);
@@ -961,7 +1030,7 @@ export class QuantumForgeProfitPredator {
     
     for (const symbol of symbols) {
       try {
-        const marketData = await this.getMarketData(symbol);
+        const marketData = this.getCachedMarketData(symbol);
         if (!marketData) continue;
 
         const intuitionResult = await mathIntuitionEngine.analyzeIntuitively({
@@ -1312,7 +1381,7 @@ export class QuantumForgeProfitPredator {
 
     for (const symbol of pairs) {
       try {
-        const data = marketDataBatch[symbol] || await this.getMarketData(symbol);
+        const data = marketDataBatch[symbol] || this.getCachedMarketData(symbol);
         if (!data) continue;
 
         const price = data.price || 0;
@@ -1568,6 +1637,22 @@ export class QuantumForgeProfitPredator {
   private getCurrentMarketRegime(): string {
     // Simplified regime detection
     return 'NORMAL'; // Would be more sophisticated
+  }
+
+  /**
+   * Get cached market data instantly without API calls
+   */
+  private getCachedMarketData(symbol: string) {
+    const cachedData = sharedMarketDataCache.getMarketData(symbol);
+    if (!cachedData || !cachedData.isValid) {
+      return null;
+    }
+
+    return {
+      price: cachedData.price,
+      volume24h: cachedData.volume24h || 1000000,
+      change24h: cachedData.change24h || 0
+    };
   }
 
   private async getMarketData(symbol: string) {

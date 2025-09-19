@@ -21,6 +21,7 @@ interface ProcessConfig {
 
 const NTFY_TOPIC = process.env.NTFY_TOPIC || 'signal-cartel';
 const CHECK_INTERVAL = 30000; // 30 seconds
+const SYNC_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
 // Processes to monitor - matches tensor-start.sh exactly
 const MONITORED_PROCESSES: ProcessConfig[] = [
@@ -227,8 +228,40 @@ async function checkProcess(config: ProcessConfig): Promise<boolean> {
   return true;
 }
 
+async function runDatabaseSync(): Promise<boolean> {
+  try {
+    console.log('🔄 Running automated database sync...');
+
+    const command = `cd /home/telgkb9/depot/current && DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" npx tsx admin/robust-position-sync.ts`;
+    const { stdout, stderr } = await execAsync(command);
+
+    if (stderr && !stderr.includes('npm warn')) {
+      console.log(`⚠️ Database sync stderr: ${stderr}`);
+    }
+
+    // Check if sync was successful
+    if (stdout.includes('SYNC COMPLETED SUCCESSFULLY')) {
+      console.log('✅ Database sync completed successfully');
+      return true;
+    } else {
+      console.log('❌ Database sync may have failed');
+      console.log('Stdout:', stdout);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Database sync error:', error.message);
+    await sendNtfyAlert(
+      '⚠️ Database Sync Failed',
+      `Automated database sync failed: ${error.message}`,
+      'high'
+    );
+    return false;
+  }
+}
+
 async function monitoringLoop() {
   const processStatus = new Map<string, boolean>();
+  let lastSyncTime = 0;
 
   console.log('🛡️ SYSTEM GUARDIAN STARTED - ntfy alerts active');
   console.log(`📱 Alerts will be sent to: https://ntfy.sh/${NTFY_TOPIC}`);
@@ -237,6 +270,22 @@ async function monitoringLoop() {
   console.log('');
 
   while (true) {
+    // Check if database sync is needed (every 15 minutes)
+    const currentTime = Date.now();
+    if (currentTime - lastSyncTime >= SYNC_INTERVAL) {
+      const syncSuccess = await runDatabaseSync();
+      if (syncSuccess) {
+        lastSyncTime = currentTime;
+        await sendNtfyAlert(
+          '🔄 Database Sync Complete',
+          'Automated position sync completed successfully. Database is aligned with Kraken account.',
+          'default'
+        );
+      }
+      // Always update lastSyncTime to prevent spamming on failures
+      lastSyncTime = currentTime;
+    }
+
     for (const config of MONITORED_PROCESSES) {
       const isHealthy = await checkProcess(config);
       const wasHealthy = processStatus.get(config.name) !== false;
@@ -259,7 +308,8 @@ async function monitoringLoop() {
       processStatus.set(config.name, isHealthy);
     }
 
-    console.log(`⏰ Next check in ${CHECK_INTERVAL / 1000}s...\n`);
+    const nextSyncMinutes = Math.round((SYNC_INTERVAL - (currentTime - lastSyncTime)) / 60000);
+    console.log(`⏰ Next check in ${CHECK_INTERVAL / 1000}s | Next sync in ${nextSyncMinutes}min\n`);
     await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
   }
 }
@@ -278,7 +328,7 @@ process.on('SIGINT', async () => {
 // Send startup notification
 sendNtfyAlert(
   '🛡️ System Guardian Online',
-  'System Guardian is now monitoring your trading system. You will receive alerts if any processes fail.',
+  'System Guardian is now monitoring your trading system with automated database sync every 15 minutes.',
   'default'
 );
 
