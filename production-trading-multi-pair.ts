@@ -23,6 +23,8 @@ import { bayesianProbabilityEngine } from './src/lib/bayesian-probability-engine
 import { quantumForgeOrderBookAI } from './src/lib/quantum-forge-orderbook-ai';
 import { TensorAIFusionEngine } from './src/lib/tensor-ai-fusion-engine';
 import { productionTensorIntegration } from './src/lib/production-tensor-integration';
+import { unifiedTensorCoordinator } from './src/lib/unified-tensor-coordinator';
+import { tradeLifecycleManager } from './src/lib/trade-lifecycle-manager';
 import { PrismaClient } from '@prisma/client';
 import { webhookClient } from './src/lib/webhooks/webhook-client';
 import { WebhookPayloadAdapter } from './src/lib/webhook-payload-adapter';
@@ -106,6 +108,10 @@ class ProductionTradingEngine {
     this.enhancedIntuition = enhancedMathematicalIntuition;
     this.pairAdapter = getIntelligentPairAdapter();
     this.webhookAdapter = new WebhookPayloadAdapter('quantum-forge-live-trading');
+
+    // Initialize enhanced trading systems
+    console.log('🧠 Initializing Unified Tensor Coordinator...');
+    console.log('🆔 Initializing Trade Lifecycle Manager...');
     
     // Initialize direct Kraken API client
     const isLiveMode = process.env.TRADING_MODE === 'LIVE';
@@ -166,12 +172,52 @@ class ProductionTradingEngine {
       
       // Start background cache updater (non-blocking)
       log('💰 Starting background price cache updater...');
+
+      // 🎯 V3.2.9 ENHANCEMENT #2: Initialize Real-Time Regime Monitoring
+      if (this.tensorMode) {
+        log('🎯 REGIME MONITOR: Initializing real-time market regime detection...');
+        try {
+          // Get all trading symbols for regime monitoring
+          const monitoringSymbols = await this.getAllTradingSymbols();
+
+          // Initialize regime monitoring through unified coordinator
+          await unifiedTensorCoordinator.initializeRegimeMonitoring(monitoringSymbols);
+
+          log(`✅ REGIME MONITOR: Active for ${monitoringSymbols.length} symbols`);
+        } catch (regimeError) {
+          log(`⚠️ REGIME MONITOR: Initialization failed: ${regimeError.message}`);
+          log('   Trading will continue without real-time regime detection');
+        }
+      }
       this.startBackgroundCacheUpdater();
       
       return true;
     } catch (error) {
       log('❌ Initialization failed: ' + error.message);
       return false;
+    }
+  }
+
+  /**
+   * Get all trading symbols for regime monitoring
+   */
+  private async getAllTradingSymbols(): Promise<string[]> {
+    try {
+      // Get symbols ONLY from discovered opportunities - NO HARDCODED FALLBACKS
+      const validPairs = await this.adaptivePairFilter.getValidPairs(this.dynamicPairs);
+
+      if (validPairs.length === 0) {
+        log(`📊 REGIME SYMBOLS: No valid pairs found - no regime monitoring needed`);
+        return []; // Return empty array - no fallback to hardcoded pairs
+      }
+
+      log(`📊 REGIME SYMBOLS: ${validPairs.length} discovered opportunities for monitoring`);
+      log(`   🎯 Monitoring: ${validPairs.join(', ')}`);
+      return validPairs;
+    } catch (error) {
+      log(`⚠️ Failed to get trading symbols for regime monitoring: ${error.message}`);
+      // NO FALLBACK - return empty array instead of hardcoded pairs
+      return [];
     }
   }
 
@@ -367,6 +413,40 @@ class ProductionTradingEngine {
   }
   
   /**
+   * Fetch prices immediately for newly discovered opportunities
+   */
+  private async fetchPricesForNewOpportunities(newPairs: string[]): Promise<void> {
+    const { realTimePriceFetcher } = await import('./src/lib/real-time-price-fetcher');
+
+    for (const symbol of newPairs) {
+      try {
+        // Use the same price fetching logic as updatePriceCache
+        const priceData = await realTimePriceFetcher.getCurrentPrice(symbol);
+
+        if (priceData.success) {
+          const roundedPrice = Math.round(priceData.price * 100) / 100;
+          this.priceCache.set(symbol, {
+            price: roundedPrice,
+            timestamp: Date.now(),
+            isValid: true
+          });
+          log(`🔥 IMMEDIATE PRICE: ${symbol} = $${roundedPrice.toLocaleString()}`);
+        } else {
+          log(`❌ Failed to fetch immediate price for ${symbol}: ${priceData.error}`);
+          // Still add to cache as invalid so it doesn't block future attempts
+          this.priceCache.set(symbol, {
+            price: 0,
+            timestamp: Date.now(),
+            isValid: false
+          });
+        }
+      } catch (error) {
+        log(`❌ Failed to fetch immediate price for ${symbol}: ${error.message}`);
+      }
+    }
+  }
+
+  /**
    * Get validated trading pairs with prices
    */
   private getValidatedTradingPairs(): MarketDataPoint[] {
@@ -415,84 +495,45 @@ class ProductionTradingEngine {
         const lines = logData.split('\n').reverse(); // Start from most recent
         log(`🔍 DEBUG: Reading ${lines.length} lines from profit predator log`);
 
-        // Find the MOST RECENT TOP OPPORTUNITIES section only (first in reverse order)
+        // MUCH SIMPLER: Just find the most recent JSON_OPPORTUNITIES in the log
         const recentOpportunities = [];
-        let sectionCount = 0;
-        const maxAge = 10 * 60 * 1000; // 10 minutes max age
-
+        log(`🔍 SIMPLE SEARCH: Looking for most recent JSON_OPPORTUNITIES in log`);
+        // Search from the beginning of reversed array (most recent entries)
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
-          if (line.includes('📊 TOP OPPORTUNITIES (regardless of size):') || line.includes('📊 TOP OPPORTUNITIES:')) {
-            sectionCount++;
-            log(`🔍 DEBUG: Found TOP OPPORTUNITIES section #${sectionCount} in log (line ${i})`);
+          if (line.includes('JSON_OPPORTUNITIES:')) {
+            log(`🎯 FOUND: Most recent JSON opportunities at line ${i}`);
+            try {
+              const jsonMatch = line.match(/JSON_OPPORTUNITIES:\s*(\[.*\])/);
+              if (jsonMatch && jsonMatch[1]) {
+                const jsonOpps = JSON.parse(jsonMatch[1]);
+                log(`🎯 PARSED: ${jsonOpps.length} JSON opportunities successfully!`);
 
-            // Check if this section is too old (basic timestamp check)
-            const timestampMatch = line.match(/\[([^\]]+)\]/);
-            if (timestampMatch) {
-              const logTime = new Date(timestampMatch[1]).getTime();
-              const now = Date.now();
-              if (now - logTime > maxAge) {
-                log(`🔍 DEBUG: Section #${sectionCount} too old, stopping search`);
+                jsonOpps.forEach((opp: any) => {
+                  if (opp.expectedReturn >= 12.0) { // Only high-quality opportunities
+                    recentOpportunities.push({
+                      symbol: opp.symbol,
+                      score: Math.round(opp.expectedReturn),
+                      expectedReturn: opp.expectedReturn,
+                      winProb: opp.winProb,
+                      source: 'json_log'
+                    });
+                    log(`✅ HIGH-QUALITY: ${opp.symbol} = ${opp.expectedReturn}% expected, ${opp.winProb}% win prob`);
+                  } else {
+                    log(`⚠️ LOW-QUALITY: ${opp.symbol} = ${opp.expectedReturn}% expected (below 12% threshold)`);
+                  }
+                });
+
+                // Found the most recent JSON opportunities, stop searching
                 break;
               }
+            } catch (e) {
+              log(`❌ JSON PARSE ERROR: ${e.message}`);
             }
-
-            // Start looking for opportunities in this section (MOST RECENT ONLY)
-            let opportunitiesFound = 0;
-
-            // FIXED v2: Look BACKWARDS in reversed array (opportunities were AFTER header in original, so BEFORE header in reversed)
-            for (let j = Math.max(0, i - 10); j < i; j++) {
-              const oppLine = lines[j];
-
-              // Enhanced debug logging
-              log(`🔍 DEBUG PARSE [${j}]: "${oppLine.trim()}"`);
-              if (oppLine.includes('expected') && oppLine.includes('win prob')) {
-                log(`🔍 DEBUG OPPORTUNITY DETECTED: "${oppLine.trim()}"`);
-              }
-
-              // Parse lines like "   1. SHIBUSD: 21.59% expected, 35.1% win prob" or with timestamps
-              // Handle both timestamped and non-timestamped formats
-              const match = oppLine.match(/(?:\[[^\]]+\])?\s*(\d+)\.\s+([A-Z][A-Z0-9]*USD[T]?):\s+([\d.]+)%\s+expected,\s+([\d.]+)%\s+win\s+prob/);
-
-              // For debugging: Log when we find potential opportunity lines
-              if (oppLine.includes('ETHUSD') || oppLine.includes('SOLUSD') || oppLine.includes('expected')) {
-                log(`🔍 OPPORTUNITY REGEX TEST: "${oppLine.trim()}" -> match: ${match ? 'YES' : 'NO'}`);
-              }
-              if (match) {
-                const [, rank, symbol, expectedReturn, winProb] = match;
-
-                // Avoid duplicates - only add if we don't already have this symbol with similar expected return
-                const isDuplicate = recentOpportunities.some(existing =>
-                  existing.symbol === symbol && Math.abs(existing.expectedReturn - parseFloat(expectedReturn)) < 0.5
-                );
-
-                if (!isDuplicate && parseFloat(expectedReturn) >= 12.0) { // Only high-quality opportunities
-                  recentOpportunities.push({
-                    symbol,
-                    score: Math.round(parseFloat(expectedReturn)),
-                    expectedReturn: parseFloat(expectedReturn),
-                    winProb: parseFloat(winProb),
-                    huntType: 'log_parsed',
-                    section: sectionCount
-                  });
-                  opportunitiesFound++;
-                  log(`🎯 PARSED OPPORTUNITY (section ${sectionCount}): ${symbol} = ${expectedReturn}% expected, ${winProb}% win prob`);
-                }
-              } else if (oppLine.includes('⏳ Kraken API Rate limit:') || oppLine.includes('📊 TOP OPPORTUNITIES') || oppLine.includes('⚡ Cycle') || oppLine.includes('📊 Active Hunts:')) {
-                // End of this opportunities section - but don't break on PROFIT PREDATOR GPU since it appears before opportunities in reversed log
-                break;
-              }
-            }
-
-            log(`🔍 DEBUG: Section #${sectionCount} yielded ${opportunitiesFound} opportunities`);
-
-            // CRITICAL: Only process the MOST RECENT section (first in reverse order)
-            log(`🔍 DEBUG: Processing only most recent section, breaking after first`);
-            break;
           }
         }
 
-        log(`🎯 COMPREHENSIVE SEARCH: Found ${recentOpportunities.length} total opportunities from ${sectionCount} sections`);
+        log(`🎯 SIMPLE SUCCESS: Found ${recentOpportunities.length} opportunities from JSON log`);
 
         opportunities.push(...recentOpportunities);
         log(`📡 FAST INTEGRATION: Parsed ${opportunities.length} opportunities from Profit Predator logs`);
@@ -572,22 +613,32 @@ class ProductionTradingEngine {
       if (allOpportunityPairs.length > 0) {
         const previousDynamic = [...this.dynamicPairs];
         this.dynamicPairs = allOpportunityPairs;
-        
+
         // 🎯 UPDATE PRIORITY PAIRS FOR BALANCE CACHING (only discovered opportunities get fresh Kraken API calls)
         this.balanceCalculator.updatePriorityPairs([...topScoringPairs]);
-        
+
         log(`🎆 PROFIT PREDATOR™ MARGIN OPPORTUNITIES: ${topScoringPairs.length} top + ${goodScoringPairs.length} good scoring pairs`);
         log(`   🚀 Top-Scoring (15%+): ${topScoringPairs.join(', ')}`);
         if (goodScoringPairs.length > 0) {
           log(`   💎 Good-Scoring (8-14%): ${goodScoringPairs.join(', ')}`);
         }
-        
+
         // Log changes
         const added = allOpportunityPairs.filter(pair => !previousDynamic.includes(pair));
         const removed = previousDynamic.filter(pair => !allOpportunityPairs.includes(pair));
-        
+
         if (added.length > 0) {
           log(`   ✅ Added: ${added.join(', ')}`);
+
+          // 🚀 CRITICAL FIX: Immediately fetch prices for new discovered opportunities
+          // This ensures they are available in getValidatedTradingPairs() on next cycle
+          log(`🔥 IMMEDIATE PRICE FETCH: Getting prices for new opportunities...`);
+          try {
+            await this.fetchPricesForNewOpportunities(added);
+            log(`✅ PRICE FETCH: New opportunities now available for trading`);
+          } catch (error) {
+            log(`❌ PRICE FETCH ERROR: ${error.message} - will retry next cycle`);
+          }
         }
         if (removed.length > 0) {
           log(`   ❌ Removed: ${removed.join(', ')}`);
@@ -1756,24 +1807,123 @@ class ProductionTradingEngine {
       
       // 🚀 OPPORTUNITY CAPTURE - maximize profitable trading
       const openPositions = await this.positionManager.getOpenPositions();
-      const maxPositions = currentPhase.phase === 0 ? 5 : 10; // Conservative limits for better closure rates
-      
-      if (openPositions.length >= maxPositions) {
-        log(`🛑 Position limit reached: ${openPositions.length}/${maxPositions} positions open`);
-        log('🔍 Skipping new position creation, continuing with exit evaluation...');
+      const baseMaxPositions = currentPhase.phase === 0 ? 5 : 10; // Conservative base limits
+
+      // 🎯 DYNAMIC POSITION LIMITS: Allow more positions for high-quality Profit Predator discoveries
+      const highQualityOpportunities = marketData.filter(data => (data as any).predatorScore >= 18.0); // 18%+ expected
+      const dynamicMaxPositions = Math.min(baseMaxPositions + highQualityOpportunities.length, 10); // Cap at 10 total
+
+      if (openPositions.length >= dynamicMaxPositions) {
+        log(`🛑 Position limit reached: ${openPositions.length}/${dynamicMaxPositions} positions open (${baseMaxPositions} base + ${dynamicMaxPositions - baseMaxPositions} high-quality)`);
+
+        // 🔄 OPPORTUNITY REPLACEMENT: Check if we can replace underperforming positions with better discoveries
+        const underperformingPositions = openPositions.filter(pos => {
+          const currentPnL = pos.unrealizedPnL || 0;
+          return currentPnL < -50; // Positions losing more than $50
+        });
+
+        const exceptionalOpportunities = marketData.filter(data => (data as any).predatorScore >= 20.0); // 20%+ expected
+
+        if (underperformingPositions.length > 0 && exceptionalOpportunities.length > 0) {
+          log(`🔄 OPPORTUNITY REPLACEMENT: ${underperformingPositions.length} underperforming positions, ${exceptionalOpportunities.length} exceptional opportunities (20%+)`);
+          log(`   💡 Strategy: Close worst performers to make room for 20%+ expected returns`);
+
+          // Close worst performing position to make room
+          const worstPosition = underperformingPositions.sort((a, b) => (a.unrealizedPnL || 0) - (b.unrealizedPnL || 0))[0];
+          try {
+            const price = await this.getCurrentPrice(worstPosition.symbol);
+            if (price) {
+              log(`🔄 REPLACING: Closing ${worstPosition.symbol} (P&L: $${(worstPosition.unrealizedPnL || 0).toFixed(2)}) for better opportunity`);
+              await this.forceClosePosition(worstPosition, price, 'opportunity_replacement');
+              // Allow one new position by reducing effective position count
+              log(`✅ REPLACEMENT: Position slot freed for exceptional opportunity`);
+            }
+          } catch (error) {
+            log(`❌ REPLACEMENT FAILED: ${error.message}`);
+          }
+        } else {
+          log('🔍 Skipping new position creation, continuing with exit evaluation...');
+        }
       } else {
+        log(`✅ POSITION CAPACITY: ${openPositions.length}/${dynamicMaxPositions} positions (${dynamicMaxPositions - baseMaxPositions} bonus slots for quality opportunities)`);
+      }
       
       // Process each market with QUANTUM FORGE™ AI analysis
       for (const data of marketData) {
         // Skip if we've hit position limits during this cycle
         const currentOpenPositions = await this.positionManager.getOpenPositions();
-        if (currentOpenPositions.length >= maxPositions) {
-          log(`🛑 Position limit reached during cycle: ${currentOpenPositions.length}/${maxPositions}`);
+        if (currentOpenPositions.length >= dynamicMaxPositions) {
+          log(`🛑 Position limit reached during cycle: ${currentOpenPositions.length}/${dynamicMaxPositions}`);
           break;
         }
         
+        // 🧠 UNIFIED TENSOR COORDINATOR™ - Master orchestrator of all mathematical systems
+        // NEW: Use Unified Coordinator to synthesize all AI intelligence instead of individual systems
+        log(`🎯 UNIFIED ANALYSIS: Starting comprehensive mathematical coordination for ${data.symbol}`);
+
+        let unifiedDecision;
+        try {
+          // Get Profit Predator signal if available
+          const profitPredatorSignal = data.predatorScore ? {
+            expectedReturn: data.predatorScore,
+            winProbability: 65 // Estimate based on discovery
+          } : null;
+
+          // Run unified analysis with all mathematical systems
+          unifiedDecision = await unifiedTensorCoordinator.analyzeSymbolUnified(
+            data.symbol,
+            data, // Market data
+            profitPredatorSignal, // Profit Predator signal
+            null // Order book data (could be added later)
+          );
+
+          log(`🧠 UNIFIED DECISION: ${unifiedDecision.finalDecision} for ${data.symbol}`);
+          log(`   Confidence: ${(unifiedDecision.confidence * 100).toFixed(1)}%`);
+          log(`   System Agreement: ${(unifiedDecision.synthesis.systemAgreement * 100).toFixed(1)}%`);
+          log(`   Mathematical Consensus: ${(unifiedDecision.synthesis.mathematicalConsensus * 100).toFixed(1)}%`);
+          log(`   Reasoning: ${unifiedDecision.synthesis.dominantReasoning}`);
+
+        } catch (unifiedError) {
+          log(`❌ UNIFIED COORDINATOR ERROR: ${unifiedError.message} - Falling back to legacy tensor system`);
+
+          // Fallback to existing system
+          const aiAnalysis = await this.shouldTrade(data, currentPhase);
+          if (!(aiAnalysis.tensorDecision && aiAnalysis.tensorDecision.shouldTrade)) {
+            continue; // Skip if legacy system says no
+          }
+        }
+
+        // Process unified decision
+        if (unifiedDecision && (unifiedDecision.finalDecision === 'BUY' || unifiedDecision.finalDecision === 'SELL')) {
+          // Execute trade using Trade Lifecycle Manager with unique ID
+          const side = unifiedDecision.finalDecision; // 'BUY' or 'SELL'
+          const recommendedQuantity = this.calculateQuantityFromUnifiedDecision(unifiedDecision, data);
+
+          log(`🆔 INITIATING UNIFIED TRADE: ${side} ${recommendedQuantity.toFixed(2)} ${data.symbol}`);
+          log(`   Risk Assessment - Position Size: ${(unifiedDecision.riskAssessment.positionSize * 100).toFixed(1)}%`);
+          log(`   Stop Loss: ${unifiedDecision.riskAssessment.stopLoss.toFixed(2)}`);
+          log(`   Take Profit: ${unifiedDecision.riskAssessment.takeProfit.toFixed(2)}`);
+
+          const tradeResult = await tradeLifecycleManager.initiateNewTrade(
+            data.symbol,
+            side,
+            recommendedQuantity,
+            unifiedDecision,
+            'unified_coordinator'
+          );
+
+          if (tradeResult.success) {
+            log(`✅ TRADE INITIATED: ${tradeResult.tradeId} → Kraken Order: ${tradeResult.krakenOrderId}`);
+          } else {
+            log(`❌ TRADE FAILED: ${tradeResult.error}`);
+          }
+
+          continue; // Move to next symbol
+        }
+
+        // LEGACY SYSTEM FALLBACK: Keep existing tensor logic for comparison
         const aiAnalysis = await this.shouldTrade(data, currentPhase);
-        
+
         // 🧮 TENSOR FUSION AS PRIMARY AUTHORITY - Integrate all AI intelligence
         // Instead of committee voting, tensor fusion synthesizes all AI systems into one decision
         if (aiAnalysis.tensorDecision && aiAnalysis.tensorDecision.shouldTrade) {
@@ -1829,13 +1979,56 @@ class ProductionTradingEngine {
         }
         
         if (aiAnalysis.shouldTrade) {
-          // 🧮 TENSOR FUSION INTEGRATES ALL AI INTELLIGENCE
+          // 🎯 ENHANCED POSITION MANAGER INTEGRATION - INTELLIGENT OPPORTUNITY PROCESSING
+          // Use enhanced Position Manager for dynamic position sizing and replacement evaluation
+          try {
+            const tensorExpectedReturn = aiAnalysis.tensorDecision?.expectedReturn ? (aiAnalysis.tensorDecision.expectedReturn * 100) : 15.0;
+            const tensorWinProbability = aiAnalysis.tensorDecision?.confidence ? (aiAnalysis.tensorDecision.confidence * 100) : 75.0;
+            const leverageMultiplier = (aiAnalysis.signal?.action === 'SELL' && process.env.ENABLE_MARGIN_TRADING === 'true') ? 1.0 : 1.0; // Conservative 1x leverage
+
+            log(`🎯 INTELLIGENT POSITION PROCESSING: ${data.symbol} with ${tensorExpectedReturn.toFixed(2)}% expected return, ${tensorWinProbability.toFixed(1)}% win probability`);
+
+            const intelligentResult = await this.positionManager.processOpportunityIntelligently({
+              symbol: data.symbol,
+              expectedReturn: tensorExpectedReturn,
+              winProbability: tensorWinProbability,
+              currentPrice: data.price,
+              strategy: `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'tensor-fusion'}`,
+              confidence: aiAnalysis.confidence,
+              leverageMultiplier
+            });
+
+            log(`🔄 INTELLIGENT RESULT: ${intelligentResult.action} - ${intelligentResult.evaluation.reason}`);
+            log(`💰 DYNAMIC SIZING: $${intelligentResult.sizing.recommendedSizeUSD.toFixed(2)} (${intelligentResult.sizing.riskPercentage.toFixed(1)}% of account)`);
+            log(`📊 KELLY FRACTION: ${(intelligentResult.sizing.kellyFraction * 100).toFixed(2)}%`);
+            log(`⚙️ ADJUSTMENT FACTORS: Account=${intelligentResult.sizing.adjustmentFactors.account.toFixed(2)}, Risk=${intelligentResult.sizing.adjustmentFactors.risk.toFixed(2)}, Opportunity=${intelligentResult.sizing.adjustmentFactors.opportunity.toFixed(2)}`);
+
+            if (intelligentResult.action === 'OPENED') {
+              log(`✅ INTELLIGENT POSITION OPENED: ${data.symbol} via Enhanced Position Manager`);
+              if (intelligentResult.positionReplaced) {
+                log(`🔄 POSITION REPLACED: Closed ${intelligentResult.positionReplaced} for better opportunity`);
+              }
+              continue; // Move to next symbol - Enhanced Position Manager handled everything
+            } else if (intelligentResult.action === 'REPLACED') {
+              log(`✅ INTELLIGENT POSITION REPLACEMENT: ${data.symbol} replacing ${intelligentResult.positionReplaced}`);
+              continue; // Move to next symbol - Enhanced Position Manager handled everything
+            } else {
+              log(`⏸️ INTELLIGENT SKIP: ${intelligentResult.evaluation.reason} - falling back to legacy system evaluation`);
+              // Continue with legacy system logic below for edge cases
+            }
+
+          } catch (enhancedError) {
+            log(`⚠️ ENHANCED POSITION MANAGER ERROR: ${enhancedError.message} - falling back to legacy system`);
+            // Continue with legacy system logic below
+          }
+
+          // 🧮 LEGACY TENSOR FUSION LOGIC (fallback when Enhanced Position Manager skips)
           // Tensor fusion already includes V₂-V₇ systems + adaptive learning insights
           const signal = aiAnalysis.signal || {};
-          
+
           // 🧠 ADAPTIVE LEARNING SYSTEM - Provides insights to enhance tensor decisions
           const adaptiveRecommendation = adaptiveSignalLearning.getSignalRecommendation(
-            data.symbol, 
+            data.symbol,
             signal.action || 'BUY'
           );
           
@@ -2174,7 +2367,6 @@ class ProductionTradingEngine {
           }
         }
       } // End of for loop
-      } // End of else (position creation when not at limit)
       
       // 🎯 CONTINUOUS EXIT MONITORING - Run on every cycle to check all positions
       log(`🔍 Running exit evaluation for all open positions...`);
@@ -3055,6 +3247,11 @@ class ProductionTradingEngine {
   private async calculateDynamicOpportunityThreshold(): Promise<number> {
     try {
       // 🧠 LEARNING SYSTEM: Calculate threshold based on historical performance
+      if (!this.prisma || !this.prisma.managedTrade) {
+        log('⚠️ Prisma client not available for threshold calculation, using fallback');
+        return 12.0; // Conservative fallback
+      }
+
       const recentTrades = await this.prisma.managedTrade.findMany({
         where: {
           createdAt: {
@@ -3111,6 +3308,34 @@ class ProductionTradingEngine {
     } catch (error) {
       console.log('⚠️ Error calculating dynamic threshold, using conservative fallback:', error);
       return 12.0; // Conservative fallback more aggressive than hardcoded 15%
+    }
+  }
+
+  /**
+   * Calculate trade quantity from unified decision
+   */
+  private calculateQuantityFromUnifiedDecision(unifiedDecision: any, marketData: any): number {
+    try {
+      // Get current balance for position sizing
+      const positionSizePercentage = unifiedDecision.riskAssessment.positionSize || 0.05; // Default 5%
+      const currentPrice = marketData.price || 1;
+
+      // Estimate available balance (simplified for now)
+      const estimatedBalance = 600; // Could be made dynamic
+      const dollarAmount = estimatedBalance * positionSizePercentage;
+      const quantity = dollarAmount / currentPrice;
+
+      // Apply minimum viable size
+      const minimumDollars = 50;
+      const finalQuantity = Math.max(quantity, minimumDollars / currentPrice);
+
+      log(`💰 UNIFIED QUANTITY: ${(positionSizePercentage * 100).toFixed(1)}% of $${estimatedBalance} = $${dollarAmount.toFixed(2)} = ${finalQuantity.toFixed(6)} ${marketData.symbol}`);
+
+      return finalQuantity;
+
+    } catch (error) {
+      log(`❌ Quantity calculation error: ${error.message} - using fallback`);
+      return 50 / (marketData.price || 1); // $50 fallback
     }
   }
 

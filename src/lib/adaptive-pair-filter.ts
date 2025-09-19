@@ -318,6 +318,46 @@ export class AdaptivePairFilter {
   }
 
   /**
+   * Get valid trading pairs based on performance analysis
+   * Returns all non-blocked pairs for the system to trade
+   */
+  async getValidPairs(allPairs?: string[]): Promise<string[]> {
+    try {
+      // If no pairs provided, return empty array (system should provide discovered pairs)
+      if (!allPairs || allPairs.length === 0) {
+        console.log("📋 No pairs provided to adaptive filter");
+        return [];
+      }
+
+      const validPairs: string[] = [];
+
+      // Filter out blocked pairs and validate each one
+      for (const symbol of allPairs) {
+        const isAllowed = await this.shouldAllowPair(symbol);
+        if (isAllowed) {
+          validPairs.push(symbol);
+        }
+      }
+
+      console.log(`🎯 ADAPTIVE FILTER: ${validPairs.length}/${allPairs.length} pairs passed filter`);
+      if (validPairs.length > 0) {
+        console.log(`   ✅ Allowed: ${validPairs.join(', ')}`);
+      }
+
+      const blockedCount = allPairs.length - validPairs.length;
+      if (blockedCount > 0) {
+        console.log(`   🚫 Blocked: ${blockedCount} pairs due to poor performance`);
+      }
+
+      return validPairs;
+    } catch (error) {
+      console.error(`❌ AdaptivePairFilter.getValidPairs error:`, error);
+      // On error, return all pairs to avoid blocking trading
+      return allPairs || [];
+    }
+  }
+
+  /**
    * Initialize with current database state
    */
   async initialize(): Promise<void> {
