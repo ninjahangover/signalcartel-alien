@@ -32,8 +32,8 @@ export class AdaptiveSignalLearning {
   private performanceMap = new Map<string, SignalPerformance>();
   
   constructor() {
-    // Seed with high-performance historical data patterns (84% win rate baseline)
-    this.initializeHighPerformanceBaseline();
+    // PURE DYNAMIC V3.2.9: No hardcoded pairs - learn only from discovered opportunities
+    console.log('🎯 Adaptive Learning initialized with ZERO hardcoded pairs - Pure discovery-based learning');
   }
   
   /**
@@ -335,49 +335,10 @@ export class AdaptiveSignalLearning {
   }
   
   /**
-   * Initialize high-performance baseline data (84% win rate target)
-   * Uses mathematical models of successful trading patterns
+   * V3.2.9 ELIMINATED: initializeHighPerformanceBaseline()
+   * REASON: Removed hardcoded pairs initialization - system now learns purely from discovered opportunities
+   * PHILOSOPHY: "Pure dynamic trading - no hardcoded bias, only mathematical discoveries"
    */
-  private initializeHighPerformanceBaseline(): void {
-    // Major crypto pairs with historically proven patterns
-    const majorPairs = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'DOTUSD'];
-    
-    majorPairs.forEach(pair => {
-      // LONG direction - optimized for bull market conditions
-      this.performanceMap.set(`${pair}_LONG`, {
-        pair,
-        direction: 'LONG',
-        totalSignals: 50, // Sufficient sample size
-        correctPredictions: Math.floor(32 + Math.random() * 8), // 64-80% dynamic accuracy
-        accuracy: 0.64 + Math.random() * 0.16, // Dynamic 64-80% accuracy
-        avgPnL: 0.015, // 1.5% average profit
-        avgVolatility: 0.045, // 4.5% average volatility
-        avgVolume: 1000000, // $1M average volume
-        maxDrawdown: -0.025, // -2.5% max single loss
-        lastUpdated: new Date(),
-        riskScore: 0.3, // Low risk (30%)
-        recentTrades: this.generateOptimalTradeHistory(50, 0.64 + Math.random() * 0.16, 0.015)
-      });
-      
-      // SHORT direction - slightly lower win rate but still strong
-      this.performanceMap.set(`${pair}_SHORT`, {
-        pair,
-        direction: 'SHORT',
-        totalSignals: 35,
-        correctPredictions: Math.floor(22 + Math.random() * 6), // 63-80% dynamic accuracy
-        accuracy: 0.63 + Math.random() * 0.17, // Dynamic 63-80% accuracy
-        avgPnL: 0.012, // 1.2% average profit (shorts typically smaller gains)
-        avgVolatility: 0.055, // Higher volatility for short positions
-        avgVolume: 800000, // Lower volume for shorts
-        maxDrawdown: -0.030, // Slightly higher max loss for shorts
-        lastUpdated: new Date(),
-        riskScore: 0.35, // Slightly higher risk for shorts
-        recentTrades: this.generateOptimalTradeHistory(35, 0.63 + Math.random() * 0.17, 0.012)
-      });
-    });
-    
-    console.log('🎯 Adaptive Learning initialized with dynamic win rate baseline for major pairs');
-  }
   
   /**
    * Generate realistic high-performance trade history
