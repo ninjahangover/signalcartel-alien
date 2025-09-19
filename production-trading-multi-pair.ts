@@ -86,22 +86,16 @@ class ProductionTradingEngine {
   private lastPriceCacheUpdate = 0;
   private readonly PRICE_CACHE_TTL = 30000; // 30 seconds
   
-  // 🎯 CORE TRADING PAIRS (always active)
-  private readonly CORE_PAIRS = [
-    'BTCUSD', 'ETHUSD', 'SOLUSD',
-    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 
-    'ADAUSDT', 'BNBUSDT', 'XRPUSDT',
-    'AVAXUSD', 'DOTUSD', 'MATICUSD'
-  ];
+  // 🎯 ELIMINATED: No hardcoded pairs - 100% dynamic mathematical decisions
   
   // 🐅 DYNAMIC PAIRS from PROFIT PREDATOR™ (updated frequently for responsiveness)
   private dynamicPairs: string[] = [];
   private lastSmartHunterUpdate = 0;
   private readonly SMART_HUNTER_UPDATE_INTERVAL = 30000; // 30 seconds (more responsive)
   
-  // All potential trading pairs (core + dynamic)
+  // All potential trading pairs (100% dynamic - no hardcoded pairs)
   get ALL_PAIRS(): string[] {
-    return [...this.CORE_PAIRS, ...this.dynamicPairs];
+    return [...this.dynamicPairs];
   }
   
   constructor() {
@@ -428,7 +422,7 @@ class ProductionTradingEngine {
 
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
-          if (line.includes('📊 TOP OPPORTUNITIES (regardless of size):')) {
+          if (line.includes('📊 TOP OPPORTUNITIES (regardless of size):') || line.includes('📊 TOP OPPORTUNITIES:')) {
             sectionCount++;
             log(`🔍 DEBUG: Found TOP OPPORTUNITIES section #${sectionCount} in log (line ${i})`);
 
@@ -446,7 +440,7 @@ class ProductionTradingEngine {
             // Start looking for opportunities in this section (MOST RECENT ONLY)
             let opportunitiesFound = 0;
 
-            // Look at the PREVIOUS lines before this header (opportunities appear AFTER header in original log, so BEFORE header in reversed array)
+            // FIXED v2: Look BACKWARDS in reversed array (opportunities were AFTER header in original, so BEFORE header in reversed)
             for (let j = Math.max(0, i - 10); j < i; j++) {
               const oppLine = lines[j];
 
@@ -484,8 +478,8 @@ class ProductionTradingEngine {
                   opportunitiesFound++;
                   log(`🎯 PARSED OPPORTUNITY (section ${sectionCount}): ${symbol} = ${expectedReturn}% expected, ${winProb}% win prob`);
                 }
-              } else if (oppLine.includes('⏳ Kraken API Rate limit:') || oppLine.includes('🐅 PROFIT PREDATOR GPU:') || oppLine.includes('📊 TOP OPPORTUNITIES')) {
-                // End of this opportunities section
+              } else if (oppLine.includes('⏳ Kraken API Rate limit:') || oppLine.includes('📊 TOP OPPORTUNITIES') || oppLine.includes('⚡ Cycle') || oppLine.includes('📊 Active Hunts:')) {
+                // End of this opportunities section - but don't break on PROFIT PREDATOR GPU since it appears before opportunities in reversed log
                 break;
               }
             }
@@ -579,8 +573,8 @@ class ProductionTradingEngine {
         const previousDynamic = [...this.dynamicPairs];
         this.dynamicPairs = allOpportunityPairs;
         
-        // 🎯 UPDATE PRIORITY PAIRS FOR BALANCE CACHING (only top-scoring pairs get fresh Kraken API calls)
-        this.balanceCalculator.updatePriorityPairs([...this.CORE_PAIRS, ...topScoringPairs]);
+        // 🎯 UPDATE PRIORITY PAIRS FOR BALANCE CACHING (only discovered opportunities get fresh Kraken API calls)
+        this.balanceCalculator.updatePriorityPairs([...topScoringPairs]);
         
         log(`🎆 PROFIT PREDATOR™ MARGIN OPPORTUNITIES: ${topScoringPairs.length} top + ${goodScoringPairs.length} good scoring pairs`);
         log(`   🚀 Top-Scoring (15%+): ${topScoringPairs.join(', ')}`);
