@@ -208,7 +208,11 @@ export class QuantumForgeProfitPredator {
    * MAIN PREDATOR: Hunt for profits across all markets
    */
   async huntForProfits(): Promise<ProfitHunt[]> {
+    // Increment cycle count for CMC hunter tracking
+    this.cycleCount = (this.cycleCount || 0) + 1;
+
     this.logToFile('🐅 QUANTUM FORGE™ Profit Predator - HUNTING MODE ACTIVATED');
+    this.logToFile(`📈 Cycle #${this.cycleCount} - CMC hunt on cycle 3, 6, 9, etc.`);
     this.logToFile('🧮 MATHEMATICAL SELECTION: Using profit expectancy instead of volume bias');
     this.logToFile('💀 Accepting losses to optimize for maximum expectancy');
     this.logToFile('🔄 Evolving algorithms in real-time for continuous improvement');
@@ -247,6 +251,7 @@ export class QuantumForgeProfitPredator {
 
     // Hunt across all opportunity types simultaneously
     const [
+      cmcHunts,
       arbitrageHunts,
       volumeHunts,
       sentimentHunts,
@@ -255,6 +260,7 @@ export class QuantumForgeProfitPredator {
       reversionHunts,
       newsHunts
     ] = await Promise.all([
+      this.huntCMCOpportunities(),  // PRIMARY HUNTER - finds trending gainers
       this.huntArbitrage(),
       this.huntVolumeSpikes(),
       this.huntSentimentBombs(),
@@ -265,6 +271,7 @@ export class QuantumForgeProfitPredator {
     ]);
 
     const allHunts = [
+      ...cmcHunts,  // CMC opportunities get priority
       ...arbitrageHunts,
       ...volumeHunts,
       ...sentimentHunts,
@@ -274,8 +281,9 @@ export class QuantumForgeProfitPredator {
       ...newsHunts
     ];
 
-    // Enhance with CoinMarketCap intelligence
-    const enhancedHunts = await this.enhanceWithCMCIntelligence(allHunts);
+    // CMC is now a primary hunter, no need for enhancement
+    this.logToFile(`🔍 DEBUG: Total hunts found: ${allHunts.length} (CMC: ${cmcHunts.length})`);
+    const enhancedHunts = allHunts; // No enhancement needed - CMC is a primary hunter
 
     // Filter for high-expectancy opportunities only
     const profitableHunts = enhancedHunts.filter(hunt =>
@@ -352,6 +360,95 @@ export class QuantumForgeProfitPredator {
     if (volatility === 0) return 0;
     return (expectedReturn - riskFreeRate) / volatility;
   }
+
+  /**
+   * Hunt CMC trending and gaining coins - PRIMARY HUNTER
+   */
+  private async huntCMCOpportunities(): Promise<ProfitHunt[]> {
+    try {
+      // Only run CMC every 3 cycles to conserve API calls
+      if (this.cycleCount % 3 !== 0) {
+        return [];
+      }
+
+      this.logToFile('🚀 CMC HUNTER: Searching for trending gainers and hot opportunities');
+
+      // Get trending coins and categories
+      const [trending, categories] = await Promise.all([
+        coinMarketCapService.getTrendingCoins().catch(() => []),
+        coinMarketCapService.getCategories().catch(() => [])
+      ]);
+
+      const hunts: ProfitHunt[] = [];
+
+      // Process trending coins with massive gains
+      for (const coin of trending) {
+        // Focus on coins with significant 24h gains
+        if (coin.percent_change_24h > 10) {
+          const symbol = coin.symbol + 'USD';
+
+          // Check if this pair exists on Kraken
+          // Use CRYPTO_TRADING_PAIRS for validation
+          const symbolExists = CRYPTO_TRADING_PAIRS.some(p => p.symbol === symbol);
+          if (!symbolExists) {
+            // Try with USDT suffix
+            const symbolUSDT = coin.symbol + 'USDT';
+            if (!CRYPTO_TRADING_PAIRS.some(p => p.symbol === symbolUSDT)) {
+              continue;
+            }
+          }
+
+          // Calculate expected return based on momentum
+          const expectedReturn = Math.min(coin.percent_change_24h * 0.3, 50); // Cap at 50%
+          const winProbability = Math.min(0.25 + (coin.percent_change_24h / 100) * 0.2, 0.45); // 25-45% win prob
+
+          hunts.push({
+            symbol,
+            expectedReturn,
+            probabilityOfProfit: winProbability,
+            maxDownside: 15, // Conservative downside
+            timeframe: '5m',
+            huntType: 'CMC_TRENDING',
+            expectancyRatio: (expectedReturn * winProbability) / 15,
+            signalStrength: Math.min(coin.percent_change_24h / 50, 1), // Normalize to 0-1
+            uniquenessScore: 0.9, // High uniqueness for CMC discoveries
+            capitalRequired: 50,
+            metadata: {
+              source: 'CoinMarketCap',
+              marketCap: coin.market_cap,
+              volume24h: coin.volume_24h,
+              rank: coin.market_cap_rank,
+              change1h: coin.percent_change_1h,
+              change24h: coin.percent_change_24h,
+              change7d: coin.percent_change_7d
+            }
+          });
+
+          this.logToFile(`💎 CMC GAINER: ${symbol} +${coin.percent_change_24h.toFixed(1)}% (24h), Rank #${coin.market_cap_rank}`);
+        }
+      }
+
+      // Log hot categories for context
+      const hotCategories = categories
+        .filter(cat => cat.avg_price_change > 10)
+        .slice(0, 3);
+
+      if (hotCategories.length > 0) {
+        this.logToFile(`🔥 HOT CATEGORIES: ${hotCategories.map(c => `${c.name} +${c.avg_price_change.toFixed(1)}%`).join(', ')}`);
+      }
+
+      // Log CMC usage stats
+      const stats = coinMarketCapService.getUsageStats();
+      this.logToFile(`📊 CMC API: ${stats.monthlyCallCount}/${stats.monthlyLimit} calls used (${stats.percentUsed}%)`);
+
+      return hunts;
+    } catch (error) {
+      this.logToFile(`⚠️ CMC hunting error: ${error.message}`);
+      return [];
+    }
+  }
+
+  private cycleCount: number = 0;
 
   /**
    * Hunt for arbitrage opportunities
