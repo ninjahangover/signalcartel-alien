@@ -963,11 +963,60 @@ Tensor AI Fusion V3.3.1 represents the pinnacle of autonomous trading execution:
 4. **All systems operational** - Trading, Kraken, Dashboard, Profit Predator ✅
 
 ### 🔄 **DEV2 FAILOVER SETUP** (Critical for Contest):
-1. **Clone signalcartel-alien repo to dev2** - Get latest code
-2. **Setup PostgreSQL 15 database** - Same schema as dev1
-3. **Configure environment with same Kraken API keys** - CRITICAL!
-4. **Test database sync from dev1** - Run `./admin/sync-from-primary.sh`
-5. **Start failover monitoring** - Run `./failover-start.sh`
+
+#### **STEP-BY-STEP DEV2 SETUP COMMANDS:**
+```bash
+# 1. CLONE REPOSITORY (on dev2)
+cd ~
+git clone https://github.com/ninjahangover/signalcartel.git depot/current
+cd depot/current
+git pull origin main  # Get V3.4.0 with failover system
+
+# 2. INSTALL DEPENDENCIES
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs postgresql-15 postgresql-client-15
+npm install
+npm install -g tsx prisma
+
+# 3. DATABASE SETUP
+sudo -u postgres psql << EOF
+CREATE USER warehouse_user WITH PASSWORD 'quantum_forge_warehouse_2024';
+CREATE DATABASE signalcartel OWNER warehouse_user;
+ALTER USER warehouse_user CREATEDB;
+EOF
+
+npx prisma generate
+npx prisma db push
+
+# 4. ENVIRONMENT CONFIGURATION
+# Copy .env from dev1 or create with SAME Kraken API keys!
+# CRITICAL: Must use exact same KRAKEN_API_KEY and KRAKEN_API_SECRET
+
+# 5. TEST DATABASE SYNC
+./admin/sync-from-primary.sh  # Sync positions from dev1
+
+# 6. START FAILOVER MONITORING
+./failover-start.sh  # Will monitor dev1 and take over if it fails
+```
+
+#### **TODO LIST FOR DEV2 (IN ORDER):**
+- [ ] Clone https://github.com/ninjahangover/signalcartel.git to ~/depot/current
+- [ ] Install Node.js 22.x and PostgreSQL 15
+- [ ] Create database and user with exact same credentials
+- [ ] Run `npm install` to get all dependencies
+- [ ] Copy .env file with SAME Kraken API credentials from dev1
+- [ ] Test database sync with `./admin/sync-from-primary.sh`
+- [ ] Verify network connectivity between dev1 and dev2
+- [ ] Start failover monitor with `./failover-start.sh`
+- [ ] Verify health checks are working (check logs)
+- [ ] Test manual failover and failback procedures
+
+#### **VERIFICATION CHECKLIST:**
+- [ ] Can dev2 reach dev1 on network? (ping test)
+- [ ] Database sync successful? (check position count)
+- [ ] Kraken API keys working? (same as dev1)
+- [ ] Failover monitor running? (ps aux | grep failover)
+- [ ] Dashboard accessible? (http://dev2:3004 when active)
 
 ### 🏆 **Contest Readiness**:
 - **Win Rate**: 76.2% ✅ (Target: 76%+)
