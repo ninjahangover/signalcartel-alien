@@ -1,9 +1,14 @@
 /**
  * Adaptive Signal Learning System
- * 
+ *
  * Tracks signal accuracy by pair and direction, learns from failures,
  * and dynamically adjusts trading strategy based on performance data
+ *
+ * V3.4.0: Added database persistence for adaptive learning data
  */
+
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
 
 interface SignalPerformance {
   pair: string;
@@ -30,16 +35,127 @@ interface SignalPerformance {
 
 export class AdaptiveSignalLearning {
   private performanceMap = new Map<string, SignalPerformance>();
-  
+  private isLoaded = false;
+
   constructor() {
     // PURE DYNAMIC V3.2.9: No hardcoded pairs - learn only from discovered opportunities
     console.log('🎯 Adaptive Learning initialized with ZERO hardcoded pairs - Pure discovery-based learning');
+    console.log('🗄️ V3.4.0: Database persistence enabled for adaptive learning data');
+  }
+
+  /**
+   * Load performance data from database into memory for fast access
+   */
+  private async loadFromDatabase(): Promise<void> {
+    if (this.isLoaded) return;
+
+    try {
+      const records = await prisma.adaptiveLearningPerformance.findMany();
+      console.log(`🗄️ Loading ${records.length} adaptive learning records from database`);
+
+      for (const record of records) {
+        const key = `${record.symbol}_${record.category.toUpperCase()}`;
+
+        // Create SignalPerformance object from database record
+        const performance: SignalPerformance = {
+          pair: record.symbol,
+          direction: record.category.toUpperCase() as 'LONG' | 'SHORT',
+          totalSignals: record.totalSignals,
+          correctPredictions: record.correctSignals,
+          accuracy: record.accuracy,
+          avgPnL: record.avgPnL,
+          avgVolatility: 0, // Legacy field, will be recalculated
+          avgVolume: 0, // Legacy field, will be recalculated
+          maxDrawdown: 0, // Legacy field, will be recalculated
+          lastUpdated: record.updatedAt,
+          riskScore: 1 - record.confidence, // Convert confidence to risk score
+          recentTrades: [] // Will be populated as new trades come in
+        };
+
+        this.performanceMap.set(key, performance);
+      }
+
+      this.isLoaded = true;
+      console.log(`✅ Loaded ${this.performanceMap.size} performance records from database`);
+    } catch (error) {
+      console.error('❌ Failed to load adaptive learning data from database:', error);
+      this.isLoaded = true; // Set to true to prevent retry loops
+    }
+  }
+
+  /**
+   * Save or update performance data to database
+   */
+  private async saveToDatabase(key: string, performance: SignalPerformance): Promise<void> {
+    try {
+      const category = performance.direction.toLowerCase();
+
+      await prisma.adaptiveLearningPerformance.upsert({
+        where: {
+          category_symbol: {
+            category: category,
+            symbol: performance.pair
+          }
+        },
+        update: {
+          totalSignals: performance.totalSignals,
+          correctSignals: performance.correctPredictions,
+          accuracy: performance.accuracy,
+          totalPnL: performance.avgPnL * performance.totalSignals, // Approximate total P&L
+          avgPnL: performance.avgPnL,
+          lastSignalTime: new Date(),
+          lastOutcome: performance.recentTrades[0]?.correct ? 'win' : 'loss',
+          lastPnL: performance.recentTrades[0]?.pnl || null,
+          confidence: Math.max(0, 1 - performance.riskScore),
+          recentStreak: this.calculateStreak(performance.recentTrades),
+          updatedAt: new Date()
+        },
+        create: {
+          category: category,
+          symbol: performance.pair,
+          totalSignals: performance.totalSignals,
+          correctSignals: performance.correctPredictions,
+          accuracy: performance.accuracy,
+          totalPnL: performance.avgPnL * performance.totalSignals,
+          avgPnL: performance.avgPnL,
+          lastSignalTime: new Date(),
+          lastOutcome: performance.recentTrades[0]?.correct ? 'win' : 'loss',
+          lastPnL: performance.recentTrades[0]?.pnl || null,
+          confidence: Math.max(0, 1 - performance.riskScore),
+          recentStreak: this.calculateStreak(performance.recentTrades)
+        }
+      });
+
+      console.log(`💾 Saved ${performance.pair} ${performance.direction} to database: ${performance.totalSignals} signals, ${(performance.accuracy * 100).toFixed(1)}% accuracy`);
+    } catch (error) {
+      console.error(`❌ Failed to save ${key} to database:`, error);
+    }
+  }
+
+  /**
+   * Calculate winning/losing streak from recent trades
+   */
+  private calculateStreak(recentTrades: Array<{correct: boolean}>): number {
+    if (!recentTrades.length) return 0;
+
+    let streak = 0;
+    const isWinning = recentTrades[0].correct;
+
+    for (const trade of recentTrades) {
+      if (trade.correct === isWinning) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+
+    return isWinning ? streak : -streak;
   }
   
   /**
    * Record a signal prediction and its outcome
    */
-  recordSignalOutcome(
+  async recordSignalOutcome(
     pair: string,
     direction: 'LONG' | 'SHORT',
     predicted: 'UP' | 'DOWN',
@@ -47,10 +163,13 @@ export class AdaptiveSignalLearning {
     pnl: number,
     volatility: number = 0,
     volume: number = 0
-  ): void {
+  ): Promise<void> {
+    // Ensure data is loaded from database first
+    await this.loadFromDatabase();
+
     const key = `${pair}_${direction}`;
     const correct = predicted === actual;
-    
+
     if (!this.performanceMap.has(key)) {
       this.performanceMap.set(key, {
         pair,
@@ -67,34 +186,34 @@ export class AdaptiveSignalLearning {
         recentTrades: []
       });
     }
-    
+
     const performance = this.performanceMap.get(key)!;
-    
+
     // Update totals
     performance.totalSignals++;
     if (correct) performance.correctPredictions++;
-    
+
     // Update accuracy
     performance.accuracy = performance.correctPredictions / performance.totalSignals;
-    
+
     // Update rolling averages
     const alpha = 0.1; // Weight for new data
     performance.avgPnL = performance.avgPnL * (1 - alpha) + pnl * alpha;
     performance.avgVolatility = performance.avgVolatility * (1 - alpha) + volatility * alpha;
     performance.avgVolume = performance.avgVolume * (1 - alpha) + volume * alpha;
-    
+
     // Track maximum drawdown
     if (pnl < 0 && Math.abs(pnl) > performance.maxDrawdown) {
       performance.maxDrawdown = Math.abs(pnl);
     }
-    
+
     // Calculate risk score (higher = more risky)
     // Factors: volatility, max drawdown, volume (lower volume = higher risk)
     const volatilityRisk = Math.min(performance.avgVolatility / 20, 1); // 20% volatility = max risk
     const drawdownRisk = Math.min(performance.maxDrawdown / 1000, 1); // $1000 loss = max risk
     const volumeRisk = performance.avgVolume < 1000000 ? 0.5 : 0; // Low volume penalty
     performance.riskScore = (volatilityRisk * 0.4) + (drawdownRisk * 0.4) + (volumeRisk * 0.2);
-    
+
     // Add to recent trades (keep last 10)
     performance.recentTrades.unshift({
       timestamp: new Date(),
@@ -108,21 +227,26 @@ export class AdaptiveSignalLearning {
     if (performance.recentTrades.length > 10) {
       performance.recentTrades.pop();
     }
-    
+
     performance.lastUpdated = new Date();
-    
+
     console.log(`📊 ADAPTIVE LEARNING: ${pair} ${direction} - Accuracy: ${(performance.accuracy * 100).toFixed(1)}%, Avg P&L: $${performance.avgPnL.toFixed(2)}`);
+
+    // Save to database after updating
+    await this.saveToDatabase(key, performance);
   }
   
   /**
    * Get signal recommendation based on historical performance
    */
-  getSignalRecommendation(pair: string, aiSignal: 'BUY' | 'SELL'): {
+  async getSignalRecommendation(pair: string, aiSignal: 'BUY' | 'SELL'): Promise<{
     shouldTrade: boolean;
     reason: string;
     confidence: number;
     recommendedDirection?: 'LONG' | 'SHORT';
-  } {
+  }> {
+    // Ensure data is loaded from database first
+    await this.loadFromDatabase();
     const direction = aiSignal === 'BUY' ? 'LONG' : 'SHORT';
     const key = `${pair}_${direction}`;
     const performance = this.performanceMap.get(key);
@@ -209,12 +333,14 @@ export class AdaptiveSignalLearning {
   /**
    * Get adaptive analysis for a symbol with dynamic win rates
    */
-  getAdaptiveAnalysis(symbol: string): {
+  async getAdaptiveAnalysis(symbol: string): Promise<{
     winRate: number;
     directionBias: 'LONG' | 'SHORT' | 'NEUTRAL';
     avgReturn: number;
     reliability: number;
-  } {
+  }> {
+    // Ensure data is loaded from database first
+    await this.loadFromDatabase();
     // Calculate dynamic win rate based on all performance data for the symbol
     const longKey = `${symbol}_LONG`;
     const shortKey = `${symbol}_SHORT`;
@@ -263,12 +389,14 @@ export class AdaptiveSignalLearning {
   /**
    * Get pairs that should be avoided or prioritized
    */
-  getPairRecommendations(): {
+  async getPairRecommendations(): Promise<{
     avoid: string[];
     prioritize: string[];
     longOnly: string[];
     shortOnly: string[];
-  } {
+  }> {
+    // Ensure data is loaded from database first
+    await this.loadFromDatabase();
     const avoid: string[] = [];
     const prioritize: string[] = [];
     const longOnly: string[] = [];
@@ -295,23 +423,30 @@ export class AdaptiveSignalLearning {
     for (const [pair, data] of pairMap) {
       const longPerf = data.long;
       const shortPerf = data.short;
-      
+
       // Both directions poor - avoid pair
       if (longPerf?.accuracy < 0.3 && shortPerf?.accuracy < 0.3) {
         avoid.push(pair);
         continue;
       }
-      
+
       // One direction good, one poor - specialize
       if (longPerf?.accuracy > 0.7 && shortPerf?.accuracy < 0.4) {
         longOnly.push(pair);
       } else if (shortPerf?.accuracy > 0.7 && longPerf?.accuracy < 0.4) {
         shortOnly.push(pair);
       }
-      
+
       // Both directions good - prioritize
       if (longPerf?.accuracy > 0.6 && shortPerf?.accuracy > 0.6) {
         prioritize.push(pair);
+      }
+
+      // Special case: only one direction with good performance and no data for the other
+      if (longPerf?.accuracy > 0.7 && !shortPerf) {
+        longOnly.push(pair);
+      } else if (shortPerf?.accuracy > 0.7 && !longPerf) {
+        shortOnly.push(pair);
       }
     }
     
@@ -321,13 +456,22 @@ export class AdaptiveSignalLearning {
   /**
    * Get performance summary for monitoring
    */
-  getPerformanceSummary(): string {
-    const recommendations = this.getPairRecommendations();
-    
+  async getPerformanceSummary(): Promise<string> {
+    // Ensure data is loaded from database first
+    await this.loadFromDatabase();
+
+    const recommendations = await this.getPairRecommendations();
+
+    // Debug logging to see what's in the performance map
+    console.log(`🔍 DEBUG ADAPTIVE LEARNING: Performance map size: ${this.performanceMap.size}`);
+    for (const [key, perf] of this.performanceMap) {
+      console.log(`  ${key}: ${perf.totalSignals} signals, ${(perf.accuracy * 100).toFixed(1)}% accuracy, $${perf.avgPnL.toFixed(2)} avg P&L`);
+    }
+
     return `
 🧠 ADAPTIVE LEARNING SUMMARY:
 📈 Priority Pairs (both directions good): ${recommendations.prioritize.join(', ') || 'None'}
-📊 Long-Only Pairs: ${recommendations.longOnly.join(', ') || 'None'}  
+📊 Long-Only Pairs: ${recommendations.longOnly.join(', ') || 'None'}
 📉 Short-Only Pairs: ${recommendations.shortOnly.join(', ') || 'None'}
 🚫 Avoid Pairs: ${recommendations.avoid.join(', ') || 'None'}
 📊 Total Tracked: ${this.performanceMap.size} pair-direction combinations
