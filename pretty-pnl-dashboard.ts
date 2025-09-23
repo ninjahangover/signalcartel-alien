@@ -472,7 +472,7 @@ async function updateRealValues() {
     } catch (error) {
       console.log('⚠️ Update failed:', error.message);
     }
-  }, 25000); // 25 seconds
+  }, 60000); // 60 seconds
 }
 
 // Start updating immediately and get initial value
@@ -489,7 +489,7 @@ analyzeLogPerformance().then(() => {
   console.log('📊 Initial log analysis complete');
 });
 
-console.log('📡 Started real Kraken API updates every 25 seconds');
+console.log('📡 Started real Kraken API updates every 60 seconds');
 
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url!, true);
@@ -876,19 +876,22 @@ async function getLevel2Analytics() {
       };
     }
 
-    const closedTrades = await prisma.trade.findMany({
-      where: { status: 'closed' },
-      orderBy: { created_at: 'desc' },
+    const closedTrades = await prisma.liveTrade.findMany({
+      where: {
+        pnl: { not: null },
+        executedAt: { not: null }
+      },
+      orderBy: { executedAt: 'desc' },
       take: 1000
     });
 
-    const wins = closedTrades.filter(trade => Number(trade.realized_pnl) > 0);
-    const losses = closedTrades.filter(trade => Number(trade.realized_pnl) < 0);
-    const totalPnL = closedTrades.reduce((sum, trade) => sum + Number(trade.realized_pnl), 0);
+    const wins = closedTrades.filter(trade => Number(trade.pnl) > 0);
+    const losses = closedTrades.filter(trade => Number(trade.pnl) < 0);
+    const totalPnL = closedTrades.reduce((sum, trade) => sum + Number(trade.pnl), 0);
 
     const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const trades24h = closedTrades.filter(trade =>
-      new Date(trade.created_at) >= last24Hours
+      new Date(trade.executedAt) >= last24Hours
     );
 
     const pairStats = {};
@@ -898,8 +901,8 @@ async function getLevel2Analytics() {
         pairStats[pair] = { total: 0, wins: 0, totalPnL: 0 };
       }
       pairStats[pair].total++;
-      pairStats[pair].totalPnL += Number(trade.realized_pnl);
-      if (Number(trade.realized_pnl) > 0) {
+      pairStats[pair].totalPnL += Number(trade.pnl);
+      if (Number(trade.pnl) > 0) {
         pairStats[pair].wins++;
       }
     });
@@ -921,8 +924,8 @@ async function getLevel2Analytics() {
       totalPnL,
       trades24h: trades24h.length,
       bestPairs,
-      biggestWin: wins.length > 0 ? Math.max(...wins.map(t => Number(t.realized_pnl))) : 0,
-      biggestLoss: losses.length > 0 ? Math.min(...losses.map(t => Number(t.realized_pnl))) : 0
+      biggestWin: wins.length > 0 ? Math.max(...wins.map(t => Number(t.pnl))) : 0,
+      biggestLoss: losses.length > 0 ? Math.min(...losses.map(t => Number(t.pnl))) : 0
     };
   } catch (error) {
     console.error('❌ Error fetching Level 2 analytics:', error);

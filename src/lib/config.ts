@@ -47,7 +47,7 @@ export const TRADING_CONFIG = {
     API_SECRET: process.env.KRAKEN_API_SECRET || null,
     
     // Rate limiting - Kraken allows 15 private API calls per minute = 4 seconds between calls (increased for safety)
-    REQUEST_RATE_LIMIT: 8000, // 8 seconds between private API calls to prevent rate limiting (increased from 5s)
+    REQUEST_RATE_LIMIT: 12000, // 12 seconds between private API calls to prevent rate limiting (enhanced stability)
     MAX_REQUESTS_PER_MINUTE: 30,
   },
   
