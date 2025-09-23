@@ -3,7 +3,7 @@
  * Calculates actual available balance by subtracting open positions from total balance
  */
 
-import { krakenApiService } from './kraken-api-service.js';
+import { createByBitDualClient, ByBitDualClient } from './bybit-dual-client.js';
 import { PositionManager, Position } from './position-management/position-manager.js';
 import { balanceApiCircuitBreaker } from './circuit-breaker.js';
 
@@ -17,12 +17,14 @@ export interface AvailableBalanceResult {
 
 export class AvailableBalanceCalculator {
   private positionManager: PositionManager;
+  private bybitClient: ByBitDualClient;
   private cachedBalance: AvailableBalanceResult | null = null;
   private lastBalanceUpdate: number = 0;
   private balanceCacheTime: number = 300000; // 5 minutes cache to reduce API calls
   private priorityPairs: Set<string> = new Set();
   private static lastApiCall: number = 0;
-  private static minApiInterval: number = 10000; // 10 seconds minimum between Kraken API calls
+  private static minApiInterval: number = 10000; // 10 seconds minimum between ByBit API calls
+  private portfolioPeak: number = 0; // Track account peak for drawdown calculation
   
   constructor(positionManager: PositionManager) {
     // BULLETPROOF: Validate positionManager
@@ -35,14 +37,15 @@ export class AvailableBalanceCalculator {
       throw new Error('PositionManager must have getOpenPositions method');
     }
     this.positionManager = positionManager;
+    this.bybitClient = createByBitDualClient();
   }
 
   /**
-   * Update priority pairs from profit predator (only these get fresh Kraken API calls)
+   * Update priority pairs from profit predator (only these get fresh ByBit API calls)
    */
   updatePriorityPairs(pairs: string[]) {
     this.priorityPairs = new Set(pairs);
-    console.log(`🎯 Priority pairs for Kraken API: ${Array.from(this.priorityPairs).join(', ')}`);
+    console.log(`🎯 Priority pairs for ByBit API: ${Array.from(this.priorityPairs).join(', ')}`);
   }
 
   /**
@@ -72,11 +75,11 @@ export class AvailableBalanceCalculator {
       AvailableBalanceCalculator.lastApiCall = now;
 
       // Only make API call if cache is truly stale AND enough time has passed
-      console.log(`🔄 Making Kraken API call (cache ${Math.round(cacheAge / 1000)}s old, last API ${Math.round(timeSinceLastApiCall / 1000)}s ago)`);
+      console.log(`🔄 Making ByBit API call (cache ${Math.round(cacheAge / 1000)}s old, last API ${Math.round(timeSinceLastApiCall / 1000)}s ago)`);
 
       // 🛡️ BULLETPROOF: Use circuit breaker for balance API calls
       const accountInfo = await balanceApiCircuitBreaker.execute(
-        async () => await krakenApiService.getAccountInfo(),
+        async () => await this.bybitClient.getAccountInfo(),
         async () => {
           console.log(`⚡ Circuit breaker fallback: Using cached balance if available`);
           if (this.cachedBalance) {
@@ -86,17 +89,25 @@ export class AvailableBalanceCalculator {
             };
           }
 
-          // 🛡️ EMERGENCY FALLBACK: Provide safe default balance to prevent system crash
-          console.log(`🛡️ EMERGENCY FALLBACK: Using conservative default balance for contest safety`);
-          return {
-            balance: { ZUSD: '100.00' } // Conservative fallback for contest mode
-          };
+          // 🛡️ Check if evaluation mode allows fallback
+          const evaluationMode = process.env.CFT_EVALUATION_MODE === 'true' || process.env.CFT_MODE === 'true';
+          if (evaluationMode) {
+            console.log(`⚠️ CFT API FALLBACK: Using evaluation mode balance for testing`);
+            const evalBalance = process.env.CFT_ACCOUNT_SIZE || '10000';
+            return {
+              balance: { ZUSD: evalBalance }
+            };
+          }
+
+          // Production mode - no fallback
+          console.log(`🛑 CFT API FAILURE: Cannot get real account balance - stopping trading for safety`);
+          throw new Error('CFT API unavailable - cannot determine real account balance');
         }
       );
 
       const totalBalance = parseFloat(accountInfo.balance?.ZUSD || '0');
-      
-      console.log(`💰 Kraken Balance (FRESH API CALL): $${totalBalance.toFixed(2)} for ${symbol || 'system'}`);
+
+      console.log(`💰 ByBit Balance (CFT EVALUATION): $${totalBalance.toFixed(2)} for ${symbol || 'system'}`);
 
       // BULLETPROOF: Get all open positions with error handling
       let openPositions: Position[] = [];
@@ -300,7 +311,7 @@ export class AvailableBalanceCalculator {
   ): number {
     // Base profit target scales with account size (larger accounts can take smaller profits)
     let baseTarget: number;
-    
+
     if (accountBalance < 500) {
       baseTarget = 0.025; // 2.5% for small accounts (more selective)
     } else if (accountBalance < 2000) {
@@ -310,18 +321,75 @@ export class AvailableBalanceCalculator {
     } else {
       baseTarget = 0.012; // 1.2% for very large accounts (more opportunities)
     }
-    
+
     // Adjust based on confidence (higher confidence = can accept lower profit targets)
     const confidenceAdjustment = Math.max(0.7, Math.min(1.3, (100 - confidence) / 50));
-    
+
     // Adjust based on volatility (higher volatility = higher profit targets needed)
     const volatilityAdjustment = Math.max(0.8, Math.min(1.5, volatility * 10));
-    
+
     const finalTarget = baseTarget * confidenceAdjustment * volatilityAdjustment;
-    
+
     console.log(`🎯 Dynamic Profit Target: ${(finalTarget * 100).toFixed(2)}% (base: ${(baseTarget * 100).toFixed(2)}%, confidence adj: ${confidenceAdjustment.toFixed(2)}x, volatility adj: ${volatilityAdjustment.toFixed(2)}x)`);
-    
+
     return finalTarget;
+  }
+
+  /**
+   * Determine if trading should be halted based on risk management criteria
+   */
+  shouldHaltTrading(): boolean {
+    try {
+      // If no cached balance, halt trading for safety
+      if (!this.cachedBalance) {
+        console.log('🛑 HALT: No balance data available');
+        return true;
+      }
+
+      // CFT Risk Management: 5% daily loss limit, 12% total loss limit
+      const totalBalance = this.cachedBalance.totalBalance;
+      const availableBalance = this.cachedBalance.availableBalance;
+
+      // Halt if available balance is too low (less than 10% of total)
+      const balanceRatio = availableBalance / Math.max(totalBalance, 1);
+      if (balanceRatio < 0.1) {
+        console.log(`🛑 HALT: Available balance too low: ${(balanceRatio * 100).toFixed(1)}% of total`);
+        return true;
+      }
+
+      // Halt if available balance is below minimum trading threshold
+      if (availableBalance < 25) {
+        console.log(`🛑 HALT: Available balance below minimum: $${availableBalance.toFixed(2)}`);
+        return true;
+      }
+
+      // For CFT evaluation: use actual CFT config limits
+      // Get the configured daily and overall loss limits from CFT config
+      const dailyLossLimit = 500;  // $500 (5% of $10K) from CFT_CONFIG
+      const overallLossLimit = 1200; // $1200 (12% with add-on) from CFT_CONFIG
+
+      // Check against absolute dollar limits rather than percentage of unknown starting balance
+      // This way the system adapts if account grows to $200K or any other amount
+      const accountPeak = Math.max(totalBalance, this.portfolioPeak || totalBalance);
+      this.portfolioPeak = accountPeak;
+
+      const currentDrawdown = accountPeak - totalBalance;
+      const drawdownPercent = (currentDrawdown / accountPeak) * 100;
+
+      // Halt if drawdown exceeds 12% (CFT rule with add-on)
+      if (drawdownPercent > 12) {
+        console.log(`🛑 HALT: Drawdown exceeds 12%: ${drawdownPercent.toFixed(1)}% ($${currentDrawdown.toFixed(2)})`);
+        return true;
+      }
+
+      // All checks passed - trading allowed
+      return false;
+
+    } catch (error) {
+      console.error('❌ Error in shouldHaltTrading:', error);
+      // On error, halt trading for safety
+      return true;
+    }
   }
 }
 

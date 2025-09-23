@@ -586,8 +586,8 @@ export class ProductionTensorIntegration {
       }
       
       // USE PROPER API: getSignalRecommendation exists and provides the needed data
-      const buyRecommendation = adaptiveSignalLearning.getSignalRecommendation(symbol, 'BUY');
-      const sellRecommendation = adaptiveSignalLearning.getSignalRecommendation(symbol, 'SELL');
+      const buyRecommendation = await adaptiveSignalLearning.getSignalRecommendation(symbol, 'BUY');
+      const sellRecommendation = await adaptiveSignalLearning.getSignalRecommendation(symbol, 'SELL');
       
       // BULLETPROOF: Validate all numbers and map to expected V₅ tensor format
       const buyConfidence = typeof buyRecommendation.confidence === 'number' && isFinite(buyRecommendation.confidence) ? buyRecommendation.confidence : 0.5;

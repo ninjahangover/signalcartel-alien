@@ -476,38 +476,7 @@ export class TensorAIFusionEngine {
     this.checkAndAdjustThresholds()
     
     console.log(`🧠 Tensor Fusion: Processing ${validatedOutputs.length} validated AI systems`);
-
-    // 🤖 ENHANCED AI SYSTEMS LOGGING - Display all active AI systems
-    console.log(`🔬 AI Systems: ${validatedOutputs.map(output => {
-      const systemName = output.systemId || 'unknown-system';
-      return systemName;
-    }).join(', ')}`);
-
-    // 🤖 DETAILED AI SYSTEM ANALYSIS
-    const detectedSystems = [];
-    if (validatedOutputs.some(o => o.systemId?.includes('order') || o.systemId?.includes('book'))) {
-      detectedSystems.push('order-book-ai');
-    }
-    if (validatedOutputs.some(o => o.systemId?.includes('mathematical') || o.systemId?.includes('intuition'))) {
-      detectedSystems.push('mathematical-intuition');
-    }
-    if (validatedOutputs.some(o => o.systemId?.includes('markov') || o.systemId?.includes('chain'))) {
-      detectedSystems.push('markov-chain');
-    }
-    if (validatedOutputs.some(o => o.systemId?.includes('adaptive') || o.systemId?.includes('learning'))) {
-      detectedSystems.push('adaptive-learning');
-    }
-    if (validatedOutputs.some(o => o.systemId?.includes('bayesian') || o.systemId?.includes('probability'))) {
-      detectedSystems.push('bayesian-probability');
-    }
-    if (validatedOutputs.some(o => o.systemId?.includes('sentiment') || o.systemId?.includes('analysis'))) {
-      detectedSystems.push('sentiment-analysis');
-    }
-
-    if (detectedSystems.length > 0) {
-      console.log(`🤖 AI Systems: ${detectedSystems.join(', ')}`);
-    }
-
+    
     try {
       // Step 1: Generate Markov Chain predictions (with error handling)
       const markovPrediction = this.generateMarkovPredictions(marketData);
@@ -802,14 +771,7 @@ export class TensorAIFusionEngine {
     
     
     console.log(`✅ Tensor fusion complete: F = [${finalTensor.map(x => x.toFixed(4)).join(', ')}] ∈ ℝ_safe⁴`);
-
-    // 🧮 MATHEMATICAL PROOF DISPLAY - Enhanced tensor formula
-    const tensorFormula = numSystems >= 2 ?
-      `T(t) = W₂⊗V₂${numSystems >= 3 ? ' + W₃⊗V₃' : ''}${numSystems >= 4 ? ' + W₄⊗V₄' : ''}${numSystems >= 5 ? ' + W₅⊗V₅' : ''}${numSystems >= 6 ? ' + W₆⊗V₆' : ''}${numSystems >= 7 ? ' + W₇⊗V₇' : ''} ✅` :
-      `T(t) = Single System Tensor ✅`;
-
-    console.log(`[${new Date().toISOString()}] Mathematical Proof: ${tensorFormula}`);
-
+    
     return finalTensor;
   }
   

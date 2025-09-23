@@ -77,6 +77,7 @@ class ProductionTradingEngine {
   private webhookAdapter: WebhookPayloadAdapter;
   private krakenInitialized: boolean = false;
   private adaptivePairFilter: any; // AdaptivePairFilter instance
+  private prisma: PrismaClient; // Add Prisma client property
   
   // 🧮 TENSOR FUSION MODE (gradual rollout)
   private tensorMode: boolean = process.env.TENSOR_MODE === 'true';
@@ -102,6 +103,7 @@ class ProductionTradingEngine {
   }
   
   constructor() {
+    this.prisma = prisma; // Assign the prisma client
     this.positionManager = new PositionManager(prisma);
     this.balanceCalculator = new AvailableBalanceCalculator(this.positionManager);
     this.enhancedMarkovPredictor2 = new EnhancedMarkovPredictor();
@@ -815,6 +817,7 @@ class ProductionTradingEngine {
           action: 'NEUTRAL',
           confidence: 0.5,
           strategy: 'tensor-ai-pure',
+          symbol: marketData.symbol,
           price: marketData.price,
           timestamp: new Date()
         };
@@ -1587,7 +1590,12 @@ class ProductionTradingEngine {
               
               // Now also run the Mathematical Intuition analysis
               const analysis = await this.shouldTrade(marketData, phase);
-              const mathAnalysis = await this.mathEngine.analyzeIntuitively(analysis.signal || {}, marketData);
+              // Ensure signal has symbol property for Bayesian analysis
+              const signal = analysis.signal || {};
+              if (!signal.symbol && marketData.symbol) {
+                signal.symbol = marketData.symbol;
+              }
+              const mathAnalysis = await this.mathEngine.analyzeIntuitively(signal, marketData);
               
               if (mathAnalysis) {
                 const currentConfidence = analysis.confidence || 0.5;
@@ -1752,7 +1760,7 @@ class ProductionTradingEngine {
               const volatility = Math.abs(priceMovement);
               
               // Record the learning data
-              adaptiveSignalLearning.recordSignalOutcome(
+              await adaptiveSignalLearning.recordSignalOutcome(
                 position.symbol,
                 originalDirection,
                 predictedMove,
@@ -2070,7 +2078,7 @@ class ProductionTradingEngine {
           const signal = aiAnalysis.signal || {};
 
           // 🧠 ADAPTIVE LEARNING SYSTEM - Provides insights to enhance tensor decisions
-          const adaptiveRecommendation = adaptiveSignalLearning.getSignalRecommendation(
+          const adaptiveRecommendation = await adaptiveSignalLearning.getSignalRecommendation(
             data.symbol,
             signal.action || 'BUY'
           );
@@ -2429,7 +2437,7 @@ class ProductionTradingEngine {
       }
       
       // Update trade count and check for phase transitions (only every 10 cycles to avoid DB overload)
-      if (this.cycleCount % 10 === 0) {
+      if (this.cycleCount % 2 === 0) { // Temporarily show every 2 cycles for debugging
         try {
           await phaseManager.updateTradeCount();
           const newPhase = await phaseManager.getCurrentPhase();
@@ -2438,10 +2446,8 @@ class ProductionTradingEngine {
           log(`📊 Total Managed Trades: ${progress.currentTrades}`);
           
           // 🧠 ADAPTIVE LEARNING PERFORMANCE SUMMARY (every 10 cycles)
-          const learningReport = adaptiveSignalLearning.getPerformanceSummary();
-          if (learningReport.includes('Priority Pairs') && learningReport.length > 100) {
-            log('\n' + learningReport);
-          }
+          const learningReport = await adaptiveSignalLearning.getPerformanceSummary();
+          log('\n' + learningReport);
           
           // Show phase transition if occurred
           if (newPhase.phase > currentPhase.phase) {
@@ -3290,26 +3296,26 @@ class ProductionTradingEngine {
   private async calculateDynamicOpportunityThreshold(): Promise<number> {
     try {
       // 🧠 LEARNING SYSTEM: Calculate threshold based on historical performance
-      if (!this.prisma || !this.prisma.managedTrade) {
+      if (!this.prisma) {
         log('⚠️ Prisma client not available for threshold calculation, using fallback');
         return 12.0; // Conservative fallback
       }
 
       const recentTrades = await this.prisma.managedTrade.findMany({
         where: {
-          createdAt: {
+          executedAt: {
             gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
           }
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { executedAt: 'desc' },
         take: 100
       });
 
       // Calculate system performance metrics
-      const winningTrades = recentTrades.filter(trade => trade.realizedPnL > 0);
+      const winningTrades = recentTrades.filter(trade => (trade.pnl || 0) > 0);
       const systemWinRate = recentTrades.length > 0 ? winningTrades.length / recentTrades.length : 0.5;
       const avgPnL = recentTrades.length > 0 ?
-        recentTrades.reduce((sum, trade) => sum + trade.realizedPnL, 0) / recentTrades.length : 0;
+        recentTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0) / recentTrades.length : 0;
 
       // Get current market volatility
       const marketVolatility = this.calculateAverageVolatility();

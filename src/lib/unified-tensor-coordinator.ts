@@ -172,7 +172,7 @@ export class UnifiedTensorCoordinator {
       maxCorrelation: 0.7,          // 70% max correlation
       maxDailyVaR: 5.0,            // 5% daily VaR limit
       emergencyStopLevel: 10.0,     // 10% emergency stop
-      minLiquidityScore: 0.6        // 60% minimum liquidity
+      minLiquidityScore: 0.3        // 30% minimum liquidity (crypto-friendly)
     });
 
     // Listen for risk alerts

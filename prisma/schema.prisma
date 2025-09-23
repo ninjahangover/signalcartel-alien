@@ -1091,24 +1091,49 @@ model PairStrategyOptimization {
   id                String   @id @default(cuid())
   strategyName      String
   symbol            String
-  
+
   // Optimization Parameters (JSON)
   originalParams    String   // JSON: original strategy parameters
   optimizedParams   String   // JSON: new optimized parameters
-  
+
   // Optimization Results
   backtestPeriod    Int      // Days of backtest
   originalScore     Float
   optimizedScore    Float
   improvement       Float
-  
+
   // Implementation
   isApplied         Boolean  @default(false)
   appliedAt         DateTime?
-  
+
   createdAt         DateTime @default(now())
-  
+
   @@index([strategyName, symbol])
   @@index([isApplied])
   @@index([improvement])
+}
+
+// Adaptive Signal Learning Persistence
+model AdaptiveLearningPerformance {
+  id              String   @id @default(cuid())
+  category        String   // e.g., "tensor", "breakout", "momentum", etc.
+  symbol          String   // Trading pair symbol
+  totalSignals    Int      @default(0)
+  correctSignals  Int      @default(0)
+  accuracy        Float    @default(0.0)
+  totalPnL        Float    @default(0.0)
+  avgPnL          Float    @default(0.0)
+  lastSignalTime  DateTime?
+  lastOutcome     String?  // "win" or "loss"
+  lastPnL         Float?
+  confidence      Float    @default(0.5)
+  recentStreak    Int      @default(0) // positive for win streak, negative for loss streak
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([category, symbol])
+  @@index([category])
+  @@index([symbol])
+  @@index([accuracy])
+  @@index([updatedAt])
 }

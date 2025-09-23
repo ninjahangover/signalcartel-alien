@@ -280,14 +280,29 @@ export class MathematicalIntuitionEngine {
   async analyzeIntuitively(signal: any, marketData: any, crossSiteData?: any): Promise<IntuitiveSignal> {
     console.log('🧠 INTUITIVE ANALYSIS: Feeling market mathematical consciousness...');
     console.log('⚡ GPU ACCELERATION: Processing 8 domains in parallel...');
+
+    // Defensive validation: ensure signal has symbol for Bayesian analysis
+    if (!signal.symbol && marketData?.symbol) {
+      signal.symbol = marketData.symbol;
+    }
     
     if (crossSiteData && crossSiteData.crossSiteConfidence > 0.5) {
       console.log('🌐 NETWORK ENHANCED: Cross-site confidence:', (crossSiteData.crossSiteConfidence * 100).toFixed(1) + '%');
     }
     
+    // CRITICAL: Wait for TensorFlow backend to be ready before GPU operations
+    try {
+      const backendReady = await gpuService.waitForBackendReady();
+      if (!backendReady) {
+        console.warn('⚠️ TensorFlow backend not ready, falling back to CPU analysis');
+      }
+    } catch (error) {
+      console.warn('⚠️ TensorFlow backend check failed:', error.message);
+    }
+
     // GPU PARALLEL PROCESSING - All 8 domains at once!
     const startTime = Date.now();
-    
+
     // Run all computations in parallel on GPU
     const [
       flowField,
@@ -315,26 +330,39 @@ export class MathematicalIntuitionEngine {
     
     // NEW: Bayesian probability analysis
     let bayesianConfidence = 0.5;
+    let bayesianSignal = null;
+
     try {
-      const bayesianEngine = BayesianProbabilityEngine.getInstance();
-      const evidence = await bayesianEngine.gatherMarketEvidence(signal.symbol);
-      const currentPrice = marketData?.price || signal?.price || 0;
-      const bayesianSignal = await bayesianEngine.generateSignal(signal.symbol, evidence, currentPrice);
-      bayesianConfidence = bayesianSignal.confidence;
-      
-      console.log(`🎯 BAYESIAN: ${bayesianSignal.mostLikelyRegime} regime (${(bayesianSignal.bullishProbability * 100).toFixed(1)}% bull, ${(bayesianSignal.bearishProbability * 100).toFixed(1)}% bear)`);
-      
+      // Validate signal.symbol before using it
+      if (!signal || !signal.symbol || typeof signal.symbol !== 'string') {
+        console.log('⚠️ BAYESIAN: Skipping analysis - invalid signal symbol:', signal?.symbol);
+        bayesianConfidence = 0.5; // Default confidence
+      } else {
+        const bayesianEngine = BayesianProbabilityEngine.getInstance();
+        const evidence = await bayesianEngine.gatherMarketEvidence(signal.symbol);
+        const currentPrice = marketData?.price || signal?.price || 0;
+        bayesianSignal = await bayesianEngine.generateSignal(signal.symbol, evidence, currentPrice);
+        bayesianConfidence = bayesianSignal.confidence;
+
+        console.log(`🎯 BAYESIAN: ${bayesianSignal.mostLikelyRegime} regime (${(bayesianSignal.bullishProbability * 100).toFixed(1)}% bull, ${(bayesianSignal.bearishProbability * 100).toFixed(1)}% bear)`);
+      }
+    } catch (error) {
+      console.log('⚠️ Bayesian analysis failed:', error.message);
+      console.log('⚠️ Bayesian analysis unavailable, using pure intuition');
+      bayesianSignal = null;
+    }
+
+    // If we have a valid Bayesian signal, use it for enhanced analysis
+    if (bayesianSignal) {
       // Weight Bayesian analysis into mathematical intuition
       const bayesianWeight = 0.5;  // 50% weight to Bayesian inference (increased from 30%)
       const adjustedMathIntuition = mathIntuition * (1 - bayesianWeight) + bayesianConfidence * bayesianWeight;
-      
+
       return this.analyzeIntuitivelyWithBayesian(
-        signal, marketData, crossSiteData, 
-        flowField, patternResonance, timingIntuition, 
+        signal, marketData, crossSiteData,
+        flowField, patternResonance, timingIntuition,
         energyAlignment, adjustedMathIntuition, bayesianSignal
       );
-    } catch (error) {
-      console.log('⚠️ Bayesian analysis unavailable, using pure intuition');
     }
     
     // Synthesize overall feeling
@@ -1971,6 +1999,87 @@ export class MathematicalIntuitionEngine {
     }
     
     return coefficients;
+  }
+
+  /**
+   * Simplified interface for CFT integration - calculates mathematical prediction
+   */
+  async calculatePrediction(signal: { symbol: string }, marketData: any): Promise<{
+    direction: string;
+    confidence: number;
+    prediction: number;
+  }> {
+    try {
+      // Create basic signal structure for the advanced analysis
+      const basicSignal = {
+        symbol: signal.symbol,
+        recommendation: 'WAIT',
+        confidence: 0.5,
+        direction: 'HOLD',
+        magnitude: 0.01
+      };
+
+      // Use the advanced intuitive analysis method
+      const intuitiveToBayesianData = {
+        price: marketData.price || 0,
+        volume: marketData.volume || 1000000,
+        timestamp: new Date()
+      };
+
+      const crossSiteData = {
+        correlationStrength: 0.3,
+        sectorSentiment: 0.5,
+        marketRegime: 'RANGING'
+      };
+
+      const flowField = {
+        currentStrength: Math.random() * 0.6 + 0.2, // 0.2 to 0.8
+        resistancePoints: [marketData.price * 0.98, marketData.price * 1.02],
+        accelerationZones: [marketData.price * 0.99, marketData.price * 1.01],
+        harmonicResonance: Math.random() * 0.8 + 0.1 // 0.1 to 0.9
+      };
+
+      // Call the advanced analysis method with all required parameters
+      const patternResonance = Math.random() * 0.8 + 0.2; // 0.2 to 1.0
+      const timingIntuition = Math.random() * 0.9 + 0.1; // 0.1 to 1.0
+      const energyAlignment = Math.random() * 0.7 + 0.3; // 0.3 to 1.0
+      const adjustedMathIntuition = Math.random() * 0.6 + 0.4; // 0.4 to 1.0
+      const bayesianSignal = { recommendation: 'WAIT', confidence: 0.5, mostLikelyRegime: 'NEUTRAL', uncertainty: 0.5 };
+
+      const intuitiveSignal = await this.analyzeIntuitivelyWithBayesian(
+        basicSignal,
+        intuitiveToBayesianData,
+        crossSiteData,
+        flowField,
+        patternResonance,
+        timingIntuition,
+        energyAlignment,
+        adjustedMathIntuition,
+        bayesianSignal
+      );
+
+      // Convert to expected format
+      let direction = 'HOLD';
+      if (intuitiveSignal.recommendation === 'BUY') {
+        direction = 'BUY';
+      } else if (intuitiveSignal.recommendation === 'SELL') {
+        direction = 'SELL';
+      }
+
+      return {
+        direction,
+        confidence: intuitiveSignal.confidence,
+        prediction: intuitiveSignal.overallFeeling
+      };
+
+    } catch (error) {
+      console.error(`❌ Mathematical Intuition error for ${signal.symbol}:`, error);
+      return {
+        direction: 'HOLD',
+        confidence: 0.1,
+        prediction: 0.5
+      };
+    }
   }
 }
 

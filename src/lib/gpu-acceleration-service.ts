@@ -17,7 +17,11 @@ try {
   // Log GPU backend info
   if (tf) {
     const backend = tf.backend();
-    console.log(`🎮 TensorFlow backend: ${backend.backendName}`);
+    if (backend && backend.backendName) {
+      console.log(`🎮 TensorFlow backend: ${backend.backendName}`);
+    } else {
+      console.log(`🎮 TensorFlow backend: GPU initialization in progress`);
+    }
   }
 } catch (e) {
   try {
@@ -33,26 +37,66 @@ try {
 let gpu: any = null;
 const useNativeGPU = !!tf;
 
+// Global backend initialization promise
+let backendInitialized: Promise<boolean> | null = null;
+
 // Configure TensorFlow to use GPU with optimized memory allocation
 if (tf) {
   try {
-    // Enhanced GPU memory configuration for GTX 1080 (8GB)
-    tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
-    tf.env().set('WEBGL_PACK', true);
-    tf.env().set('WEBGL_EXP_CONV', true);
-    
-    // Memory optimization for trading algorithms
-    tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0); // Disable texture deletion threshold
-    tf.env().set('WEBGL_MAX_TEXTURE_SIZE', 8192); // Increase texture size for large batch processing
-    tf.env().set('WEBGL_RENDER_FLOAT32_ENABLED', true); // Enable float32 for precision
-    
-    // Set memory growth and pre-allocation for consistent performance
-    if (process.env.ENABLE_GPU_STRATEGIES === 'true') {
-      // Trading-optimized memory settings
-      tf.env().set('WEBGL_BUFFER_SUPPORTED', true);
-      tf.env().set('WEBGL_CPU_FORWARD', false); // Force GPU execution
-      console.log('🚀 GPU MEMORY: Configured for high-performance trading (targeting 2-4GB usage)');
-    }
+    // Initialize TensorFlow backend properly for Node.js
+    backendInitialized = tf.ready().then(() => {
+      try {
+        // Enhanced GPU memory configuration for GTX 1080 (8GB)
+        tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+        tf.env().set('WEBGL_PACK', true);
+        tf.env().set('WEBGL_EXP_CONV', true);
+
+        // Memory optimization for trading algorithms
+        tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0); // Disable texture deletion threshold
+        tf.env().set('WEBGL_MAX_TEXTURE_SIZE', 8192); // Increase texture size for large batch processing
+        tf.env().set('WEBGL_RENDER_FLOAT32_ENABLED', true); // Enable float32 for precision
+
+        // Set memory growth and pre-allocation for consistent performance
+        if (process.env.ENABLE_GPU_STRATEGIES === 'true') {
+          // Trading-optimized memory settings
+          tf.env().set('WEBGL_BUFFER_SUPPORTED', true);
+          tf.env().set('WEBGL_CPU_FORWARD', false); // Force GPU execution
+          console.log('🚀 GPU MEMORY: Configured for high-performance trading (targeting 2-4GB usage)');
+        }
+
+        // Force backend initialization with a small operation
+        const testTensor = tf.scalar(1.0);
+        const result = testTensor.add(tf.scalar(1.0));
+        result.dataSync(); // Force GPU operation synchronously
+        testTensor.dispose();
+        result.dispose();
+
+        // Verify backend is ready
+        const backend = tf.backend();
+        console.log('🔍 BACKEND DEBUG - backend object:', {
+          backend: backend,
+          type: typeof backend,
+          backendName: backend?.backendName,
+          keys: backend ? Object.keys(backend) : 'null'
+        });
+
+        if (backend && (backend.backendName || backend.name || backend.isGPUPackage || backend.isUsingGpuDevice)) {
+          const name = backend.backendName || backend.name ||
+                      (backend.isUsingGpuDevice ? 'tensorflow-gpu' : 'tensorflow-cpu');
+          console.log(`✅ TensorFlow backend initialized: ${name} (GPU: ${backend.isUsingGpuDevice})`);
+          return true;
+        } else {
+          console.warn('⚠️ TensorFlow backend not properly initialized - backend object:', backend);
+          return false;
+        }
+      } catch (error) {
+        console.warn('⚠️ TensorFlow GPU configuration failed:', error.message);
+        return false;
+      }
+    }).catch((error) => {
+      console.warn('⚠️ TensorFlow initialization failed:', error.message);
+      return false;
+    });
     
     // Configure GPU device with memory growth for dynamic allocation
     const gpuDevices = tf.engine().backend?.getGPGPUContext?.() || null;
@@ -159,6 +203,17 @@ export class GPUAccelerationService {
   }
 
   /**
+   * Wait for TensorFlow backend to be properly initialized
+   * This ensures all GPU operations have a ready backend
+   */
+  async waitForBackendReady(): Promise<boolean> {
+    if (backendInitialized) {
+      return await backendInitialized;
+    }
+    return false;
+  }
+
+  /**
    * Initialize GPU context for efficient dynamic allocation across services
    * This sets up memory growth mode for shared GPU utilization
    */
@@ -257,17 +312,68 @@ export class GPUAccelerationService {
     // Try TensorFlow GPU acceleration first (limit batch size to avoid memory issues)
     if (tf && useNativeGPU && symbols.length <= 50) {
       try {
+        // Wait for proper backend initialization
+        if (backendInitialized) {
+          const isReady = await backendInitialized;
+          if (!isReady) {
+            throw new Error('TensorFlow backend initialization failed');
+          }
+        } else {
+          throw new Error('TensorFlow backend not initialized');
+        }
+
+        // Verify TensorFlow is still available before operations
+        if (!tf) {
+          throw new Error('TensorFlow object unavailable');
+        }
+
+        // Safe backend verification - check if backend is available
+        try {
+          // Different ways TensorFlow exposes backend information
+          let backendName = null;
+
+          if (tf && tf.getBackend) {
+            backendName = tf.getBackend();
+          } else if (tf && tf.engine && typeof tf.engine === 'function') {
+            const engine = tf.engine();
+            if (engine && engine.backend) {
+              backendName = engine.backend.name || engine.backend.backendName || 'unknown';
+            }
+          } else if (tf && typeof tf.backend === 'function') {
+            const backendObj = tf.backend();
+            if (backendObj) {
+              backendName = backendObj.name || backendObj.backendName || 'unknown';
+            }
+          }
+
+          // Log backend info for debugging but don't fail if unavailable
+          if (backendName) {
+            console.log(`🎮 TensorFlow backend: ${backendName}`);
+          }
+        } catch (backendError) {
+          // Don't throw error - just log and continue with computation
+          // Silently continue - backend info is not critical for operation
+        }
+
         // Use TensorFlow GPU for parallel computation
         const intuitionScores = await tf.tidy(() => {
-          // Extract price and volume data
+          // Extract price and volume data with defensive null checking
           const pricesArray = marketData.map(data => {
+            // Defensive null checking to prevent undefined access
+            if (!data) {
+              return Array(20).fill(100); // Default price array
+            }
             const prices = data.priceHistory || data.prices || [data.price || 100];
             // Ensure we have at least 20 prices for calculations
             while (prices.length < 20) prices.unshift(prices[0] || 100);
             return prices.slice(-20); // Use last 20 prices
           });
-          
+
           const volumesArray = marketData.map(data => {
+            // Defensive null checking to prevent undefined access
+            if (!data) {
+              return Array(20).fill(1000); // Default volume array
+            }
             const volumes = data.volumeHistory || data.volumes || [data.volume || 1000];
             while (volumes.length < 20) volumes.unshift(volumes[0] || 1000);
             return volumes.slice(-20);
@@ -330,8 +436,10 @@ export class GPUAccelerationService {
           const chaos = tf.add(tf.mul(tf.tanh(tf.mul(priceVariance, 0.01)), 0.5), 0.5);
           
           // 8. Bayesian Beliefs - trend probability
-          const recentPrices = pricesTensor.slice([0, 10], [-1, 10]);
-          const olderPrices = pricesTensor.slice([0, 0], [-1, 10]);
+          const tensorShape = pricesTensor.shape;
+          const batchSizeFromTensor = tensorShape[0];
+          const recentPrices = pricesTensor.slice([0, 10], [batchSizeFromTensor, 10]);
+          const olderPrices = pricesTensor.slice([0, 0], [batchSizeFromTensor, 10]);
           const recentMean = tf.mean(recentPrices, 1);
           const olderMean = tf.mean(olderPrices, 1);
           const priceStdSqueezed = tf.squeeze(priceStd);
@@ -376,7 +484,8 @@ export class GPUAccelerationService {
         
         return Array.isArray(scores) ? scores : [scores];
       } catch (error) {
-        console.warn('⚠️ TensorFlow GPU computation failed, falling back to CPU:', error.message);
+        const errorMessage = error?.message || error?.toString() || 'Unknown error';
+        console.warn('⚠️ TensorFlow GPU computation failed, falling back to CPU:', errorMessage);
       }
     }
     
@@ -1091,6 +1200,21 @@ export class GPUAccelerationService {
         ];
       });
 
+      // Wait for proper backend initialization
+      if (backendInitialized) {
+        const isReady = await backendInitialized;
+        if (!isReady) {
+          throw new Error('TensorFlow backend initialization failed');
+        }
+      } else {
+        throw new Error('TensorFlow backend not initialized');
+      }
+
+      // Verify TensorFlow is still available before operations
+      if (!tf || !tf.backend || typeof tf.backend !== 'function') {
+        throw new Error('TensorFlow object or backend method unavailable');
+      }
+
       // Create TensorFlow tensors for parallel processing
       const pricesTensor = tf.tensor2d(priceMatrices);
       const symbolCount = symbols.length;
@@ -1263,6 +1387,21 @@ export class GPUAccelerationService {
       // Default uniform priors if not provided
       const uniformPriors = [1/6, 1/6, 1/6, 1/6, 1/6, 1/6]; // 6 regimes
       const priorsMatrix = priorsBatch || evidenceBatch.map(() => uniformPriors);
+
+      // Wait for proper backend initialization
+      if (backendInitialized) {
+        const isReady = await backendInitialized;
+        if (!isReady) {
+          throw new Error('TensorFlow backend initialization failed');
+        }
+      } else {
+        throw new Error('TensorFlow backend not initialized');
+      }
+
+      // Verify TensorFlow is still available before operations
+      if (!tf || !tf.backend || typeof tf.backend !== 'function') {
+        throw new Error('TensorFlow object or backend method unavailable');
+      }
 
       // Create TensorFlow tensors
       const evidenceTensor = tf.tensor2d(evidenceMatrix);
@@ -1480,6 +1619,21 @@ export class GPUAccelerationService {
         askPrices.push(askPriceRow);
         askVolumes.push(askVolumeRow);
       });
+
+      // Wait for proper backend initialization
+      if (backendInitialized) {
+        const isReady = await backendInitialized;
+        if (!isReady) {
+          throw new Error('TensorFlow backend initialization failed');
+        }
+      } else {
+        throw new Error('TensorFlow backend not initialized');
+      }
+
+      // Verify TensorFlow is still available before operations
+      if (!tf || !tf.backend || typeof tf.backend !== 'function') {
+        throw new Error('TensorFlow object or backend method unavailable');
+      }
 
       // Create TensorFlow tensors
       const bidPricesTensor = tf.tensor2d(bidPrices);
@@ -1743,6 +1897,21 @@ export class GPUAccelerationService {
         volatilities.push(volatility);
       });
 
+      // Wait for proper backend initialization
+      if (backendInitialized) {
+        const isReady = await backendInitialized;
+        if (!isReady) {
+          throw new Error('TensorFlow backend initialization failed');
+        }
+      } else {
+        throw new Error('TensorFlow backend not initialized');
+      }
+
+      // Verify TensorFlow is still available before operations
+      if (!tf || !tf.backend || typeof tf.backend !== 'function') {
+        throw new Error('TensorFlow object or backend method unavailable');
+      }
+
       // Create TensorFlow tensors for GPU processing
       const pricesTensor = tf.tensor1d(prices);
       const volumesTensor = tf.tensor1d(volumes);
@@ -1932,6 +2101,21 @@ export class GPUAccelerationService {
         currentStateIndices.push(currentIdx !== -1 ? currentIdx : 0);
       });
 
+      // Wait for proper backend initialization
+      if (backendInitialized) {
+        const isReady = await backendInitialized;
+        if (!isReady) {
+          throw new Error('TensorFlow backend initialization failed');
+        }
+      } else {
+        throw new Error('TensorFlow backend not initialized');
+      }
+
+      // Verify TensorFlow is still available before operations
+      if (!tf || !tf.backend || typeof tf.backend !== 'function') {
+        throw new Error('TensorFlow object or backend method unavailable');
+      }
+
       // Create TensorFlow tensors for GPU processing
       const transitionTensor = tf.tensor3d(transitionCounts); // [symbols, fromState, toState]
       const metricsTensor = tf.tensor2d(stateMetrics);        // [symbols, metrics]
@@ -1955,9 +2139,11 @@ export class GPUAccelerationService {
 
         // 🚀 Calculate expected returns based on state transitions and metrics
         // High momentum states get higher expected returns
-        const momentumBoosts = tf.abs(tf.slice(metricsTensor, [0, 0], [-1, 1])); // Extract momentum
-        const volatilityPenalties = tf.slice(metricsTensor, [0, 1], [-1, 1]);    // Extract volatility
-        const trendBoosts = tf.slice(metricsTensor, [0, 2], [-1, 1]);           // Extract trend strength
+        const metricsShape = metricsTensor.shape;
+        const metricsBatchSize = metricsShape[0];
+        const momentumBoosts = tf.abs(tf.slice(metricsTensor, [0, 0], [metricsBatchSize, 1])); // Extract momentum
+        const volatilityPenalties = tf.slice(metricsTensor, [0, 1], [metricsBatchSize, 1]);    // Extract volatility
+        const trendBoosts = tf.slice(metricsTensor, [0, 2], [metricsBatchSize, 1]);           // Extract trend strength
 
         // Expected returns: momentum boost - volatility penalty + trend boost
         const baseReturns = tf.add(
@@ -1980,10 +2166,10 @@ export class GPUAccelerationService {
         // 💪 Calculate current state strength based on transition consistency
         const stateStrengths = tf.mul(
           tf.add(
-            tf.mul(tf.abs(tf.slice(metricsTensor, [0, 0], [-1, 1])), tf.scalar(40)), // Momentum contribution
+            tf.mul(tf.abs(tf.slice(metricsTensor, [0, 0], [metricsBatchSize, 1])), tf.scalar(40)), // Momentum contribution
             tf.add(
-              tf.mul(tf.slice(metricsTensor, [0, 2], [-1, 1]), tf.scalar(35)), // Trend contribution
-              tf.mul(tf.sub(tf.scalar(1), tf.slice(metricsTensor, [0, 1], [-1, 1])), tf.scalar(25)) // Low volatility bonus
+              tf.mul(tf.slice(metricsTensor, [0, 2], [metricsBatchSize, 1]), tf.scalar(35)), // Trend contribution
+              tf.mul(tf.sub(tf.scalar(1), tf.slice(metricsTensor, [0, 1], [metricsBatchSize, 1])), tf.scalar(25)) // Low volatility bonus
             )
           ),
           tf.scalar(1)

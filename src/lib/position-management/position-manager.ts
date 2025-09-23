@@ -393,23 +393,29 @@ export class PositionManager {
         // Step 3: DASHBOARD POSITION FIX - Update LivePosition to closed status first
         const livePositionId = `live-pos-${positionId}`;
         try {
-          await tx.livePosition.update({
-            where: { id: livePositionId },
-            data: {
-              status: 'closed',
-              exitPrice: exitPrice,
-              exitValue: exitTrade.value,
-              exitTime: exitTrade.executedAt,
-              exitTradeIds: exitTrade.id,
-              realizedPnL: pnl,
-              netPnL: pnl, // Same as realized for simplicity
-              updatedAt: new Date()
-            }
+          // Check if livePosition exists first, if not skip update
+          const existingLivePosition = await tx.livePosition.findUnique({
+            where: { id: livePositionId }
           });
-          console.log(`✅ DASHBOARD: Updated LivePosition ${livePositionId} to closed`);
 
-          // Step 4: DASHBOARD FIX - Create LiveTrade for exit/close AFTER position exists
-          await tx.liveTrade.create({
+          if (existingLivePosition) {
+            await tx.livePosition.update({
+              where: { id: livePositionId },
+              data: {
+                status: 'closed',
+                exitPrice: exitPrice,
+                exitValue: exitTrade.value,
+                exitTime: exitTrade.executedAt,
+                exitTradeIds: exitTrade.id,
+                realizedPnL: pnl,
+                netPnL: pnl, // Same as realized for simplicity
+                updatedAt: new Date()
+              }
+            });
+            console.log(`✅ DASHBOARD: Updated LivePosition ${livePositionId} to closed`);
+
+            // Step 4: DASHBOARD FIX - Create LiveTrade for exit/close AFTER position exists
+            await tx.liveTrade.create({
             data: {
               id: `live-exit-${exitTrade.id}`,
               sessionId: process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208',
@@ -443,8 +449,11 @@ export class PositionManager {
               tradeNotes: `Automated exit: ${reason}`,
               updatedAt: exitTrade.executedAt
             }
-          });
-          console.log(`✅ DASHBOARD: Created LiveTrade exit record for ${exitTrade.symbol}`);
+            });
+            console.log(`✅ DASHBOARD: Created LiveTrade exit record for ${exitTrade.symbol}`);
+          } else {
+            console.log(`⚠️ LivePosition ${livePositionId} not found - skipping dashboard update`);
+          }
         } catch (livePositionUpdateError) {
           console.log(`⚠️ LivePosition/LiveTrade update failed (non-critical): ${livePositionUpdateError.message}`);
         }

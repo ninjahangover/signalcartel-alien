@@ -792,8 +792,75 @@ export class EnhancedMarkovPredictor {
   private getStateTransitionHistory(symbol: string, fromState: EnhancedMarketState, toState: EnhancedMarketState): any[] {
     const history = this.transitionHistories.get(symbol);
     if (!history) return [];
-    
+
     return history.filter(h => h.fromState === fromState && h.toState === toState);
+  }
+
+  /**
+   * Simplified interface for CFT integration - predicts next price move
+   */
+  async predictNextMove(symbol: string, priceHistory: number[]): Promise<{
+    direction: string;
+    confidence: number;
+    expectedReturn: number;
+  }> {
+    try {
+      // Create simple market data from price
+      const currentPrice = priceHistory[priceHistory.length - 1];
+      const previousPrice = priceHistory.length > 1 ? priceHistory[priceHistory.length - 2] : currentPrice;
+
+      const marketData: MarketDataOHLC = {
+        symbol,
+        timestamp: new Date(),
+        open: previousPrice,
+        high: Math.max(currentPrice, previousPrice),
+        low: Math.min(currentPrice, previousPrice),
+        close: currentPrice,
+        volume: 1000000 // Default volume
+      };
+
+      // Create basic market intelligence
+      const intelligence: MarketIntelligenceData = {
+        symbol,
+        regime: 'RANGING',
+        confidence: 0.5,
+        trendStrength: 0.5,
+        volatility: 0.02,
+        sentiment: 'NEUTRAL',
+        keyLevels: {
+          support: currentPrice * 0.98,
+          resistance: currentPrice * 1.02
+        },
+        timestamp: new Date()
+      };
+
+      // Process with enhanced markov analysis
+      const prediction = this.processMarketData(symbol, marketData, intelligence, [marketData]);
+
+      // Convert to expected format
+      let direction = 'HOLD';
+      if (prediction.expectedState === EnhancedMarketState.BULL_MOMENTUM ||
+          prediction.expectedState === EnhancedMarketState.BULL_BREAKOUT) {
+        direction = 'BUY';
+      } else if (prediction.expectedState === EnhancedMarketState.BEAR_MOMENTUM ||
+                 prediction.expectedState === EnhancedMarketState.BEAR_BREAKOUT) {
+        direction = 'SELL';
+      }
+
+      return {
+        direction,
+        confidence: prediction.confidence,
+        expectedReturn: prediction.expectedReturn || 0
+      };
+
+    } catch (error) {
+      console.error(`❌ Markov prediction error for ${symbol}:`, error);
+      return {
+        direction: 'HOLD',
+        confidence: 0.1,
+        expectedReturn: 0
+      };
+    }
   }
 }
 

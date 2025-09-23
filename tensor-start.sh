@@ -8,14 +8,48 @@
 echo "🚀 TENSOR AI FUSION V2.9 - COMPLETE ECOSYSTEM STARTUP"
 echo "=============================================="
 
-# Step 1: Clean shutdown of existing processes
-echo "🧹 STEP 1: Cleaning up existing processes..."
-pkill -f "npx tsx production-trading" 2>/dev/null || true
-pkill -f "kraken-proxy-server" 2>/dev/null || true
+# Step 1: Comprehensive process cleanup
+echo "🧹 STEP 1: Comprehensive cleanup of existing processes..."
+
+# Kill all known trading processes
+echo "  🔍 Stopping production trading processes..."
+pkill -f "production-trading" 2>/dev/null || true
+pkill -f "profit-predator" 2>/dev/null || true
+
+echo "  🔍 Stopping proxy and infrastructure..."
+pkill -f "kraken-proxy" 2>/dev/null || true
 pkill -f "system-guardian" 2>/dev/null || true
+pkill -f "dashboard" 2>/dev/null || true
+
+echo "  🔍 Stopping monitoring processes..."
 pkill -f "tail.*signalcartel" 2>/dev/null || true
-sleep 2
-echo "✅ Process cleanup completed"
+pkill -f "pretty-pnl" 2>/dev/null || true
+
+echo "  🔍 Comprehensive tsx process cleanup..."
+pkill -f "npx tsx" 2>/dev/null || true
+pkill -f "tsx.*trading" 2>/dev/null || true
+pkill -f "tsx.*kraken" 2>/dev/null || true
+pkill -f "tsx.*profit" 2>/dev/null || true
+
+# Wait for processes to fully terminate
+echo "  ⏳ Waiting for process termination..."
+sleep 5
+
+# Force kill any remaining processes
+echo "  🔨 Force cleanup any remaining processes..."
+pgrep -f "production-trading" | xargs -r kill -9 2>/dev/null || true
+pgrep -f "profit-predator" | xargs -r kill -9 2>/dev/null || true
+pgrep -f "kraken-proxy" | xargs -r kill -9 2>/dev/null || true
+
+# Final verification
+echo "  🔍 Verifying cleanup..."
+REMAINING=$(pgrep -f "npx tsx.*trading|kraken-proxy|profit-predator" | wc -l)
+if [ "$REMAINING" -eq 0 ]; then
+    echo "✅ Complete process cleanup verified - all trading processes stopped"
+else
+    echo "⚠️  Warning: $REMAINING processes may still be running"
+    pgrep -f "npx tsx.*trading|kraken-proxy|profit-predator" | head -5
+fi
 
 # Step 2: Verify required directories exist
 echo "📁 STEP 2: Ensuring log directories exist..."
@@ -43,19 +77,27 @@ else
     echo "⚠️  Robust position sync failed or timed out - continuing anyway"
 fi
 
-# Step 4: Start Kraken Proxy Server V2.6
+# Step 4: Start Kraken Proxy Server V2.6 (First to establish API connection)
 echo "🔧 STEP 4: Starting Kraken Proxy Server V2.6..."
+echo "   📡 Starting proxy server to establish Kraken API connection..."
 nohup npx tsx kraken-proxy-server.ts > /tmp/signalcartel-logs/kraken-proxy.log 2>&1 &
 PROXY_PID=$!
-sleep 3
 
-# Verify proxy is running
+# Wait for proxy to fully initialize
+echo "   ⏳ Waiting for proxy initialization (10 seconds)..."
+sleep 10
+
+# Verify proxy is running and ready
 if curl -s http://127.0.0.1:3002/api/queue-stats >/dev/null 2>&1; then
     echo "✅ Kraken Proxy V2.6 running (PID: $PROXY_PID)"
-    echo "📊 Queue stats: http://127.0.0.1:3002/api/queue-stats"
+    echo "📊 API connection established - ready for trading processes"
 else
-    echo "⚠️  Kraken Proxy startup in progress..."
+    echo "⚠️  Kraken Proxy still initializing... continuing anyway"
 fi
+
+# Critical: Wait for API rate limit reset before starting other processes
+echo "   🔄 Ensuring clean API state (waiting 10 seconds for any rate limits to clear)..."
+sleep 10
 
 # Step 5: Start System Guardian with ntfy alerts
 echo "🛡️ STEP 5: Starting System Guardian with critical failure alerts..."
@@ -73,10 +115,9 @@ else
     echo "⚠️  System Guardian startup failed"
 fi
 
-# Step 5.5: Start Profit Predator Engine (after proxy stabilization)
+# Step 5.5: Start Profit Predator Engine (Sequential startup for API safety)
 echo "🐅 STEP 5.5: Starting QUANTUM FORGE™ Profit Predator Engine..."
-echo "⏳ Waiting for Kraken Proxy and GPU Queue Manager initialization..."
-sleep 5
+echo "   ⏳ Sequential startup to prevent API flooding..."
 
 nohup env \
   DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
@@ -88,25 +129,34 @@ nohup env \
   TRADING_MODE="LIVE" \
   npx tsx production-trading-profit-predator.ts > /tmp/signalcartel-logs/profit-predator.log 2>&1 &
 PREDATOR_PID=$!
-sleep 8
+
+# Wait for Profit Predator to establish its API connections
+echo "   ⏳ Waiting for Profit Predator API authentication (15 seconds)..."
+sleep 15
 
 # Verify profit predator is running
 if ps -p $PREDATOR_PID > /dev/null; then
-    echo "✅ Profit Predator running (PID: $PREDATOR_PID) - hunting for opportunities"
-    echo "⏳ Waiting for GPU context stabilization..."
-    sleep 5
+    echo "✅ Profit Predator running (PID: $PREDATOR_PID) - API connections established"
+    # Additional wait for GPU context stabilization
+    echo "   🔥 Waiting for GPU context stabilization (10 seconds)..."
+    sleep 10
 else
     echo "⚠️  Profit Predator startup failed"
 fi
 
-# Step 6: Start Main Tensor AI Fusion V2.7 System
+# Critical: API spacing before starting main trading system
+echo "   🔄 API rate limit spacing before main trading system (10 seconds)..."
+sleep 10
+
+# Step 6: Start Main Tensor AI Fusion V2.7 System (Final component for API safety)
 echo "🧮 STEP 6: Launching Tensor AI Fusion V2.7..."
-echo "🔧 Environment Variables:"
+echo "   🔧 Environment Variables:"
 echo "   • TENSOR_MODE=true"
-echo "   • TRADING_MODE=LIVE" 
+echo "   • TRADING_MODE=LIVE"
 echo "   • ENABLE_GPU_STRATEGIES=true"
 echo "   • DATABASE_URL=configured"
 echo "   • GPU acceleration enabled"
+echo "   📡 Starting main trading system with established API connections..."
 
 nohup env \
   TENSOR_MODE=true \
@@ -120,7 +170,10 @@ nohup env \
   npx tsx production-trading-multi-pair.ts > /tmp/signalcartel-logs/production-trading.log 2>&1 &
 
 TRADING_PID=$!
-sleep 5
+
+# Extended wait for main trading system initialization
+echo "   ⏳ Waiting for main trading system initialization (20 seconds)..."
+sleep 20
 
 # Step 7: System validation
 echo "🔍 STEP 7: Validating system startup..."
@@ -200,7 +253,27 @@ echo "Emergency stop command:"
 echo "   pkill -f 'npx tsx'"
 echo ""
 
-# Step 10: Final status
+# Step 10: API Rate Limit Validation
+echo ""
+echo "🔍 STEP 10: API RATE LIMIT VALIDATION"
+echo "=============================================="
+echo "Checking for any rate limit errors in startup logs..."
+
+# Check for rate limit errors
+RATE_LIMIT_ERRORS=$(grep -c "Rate limit exceeded" /tmp/signalcartel-logs/*.log 2>/dev/null || echo "0")
+if [ "$RATE_LIMIT_ERRORS" -eq 0 ]; then
+    echo "✅ API Rate Limits: CLEAN - No rate limit violations detected"
+else
+    echo "⚠️  API Rate Limits: $RATE_LIMIT_ERRORS violations detected during startup"
+    echo "   This is normal for the first few minutes after restart"
+fi
+
+# Verify processes are still running
+ACTIVE_PROCESSES=$(pgrep -f "npx tsx.*trading|kraken-proxy|profit-predator" | wc -l)
+echo "📊 Active Trading Processes: $ACTIVE_PROCESSES"
+
+# Step 11: Final status
+echo ""
 echo "🎯 TENSOR AI FUSION V2.9 STARTUP COMPLETE"
 echo "=============================================="
 echo "Status: 🟢 COMPLETE ECOSYSTEM OPERATIONAL"
@@ -208,8 +281,12 @@ echo "Architecture: GPU-Accelerated + Mathematical Conviction + System Guardian"
 echo "Mode: LIVE TRADING ENABLED"
 echo "Infrastructure: V2.9 Dashboard Synchronization + V2.7 Database Mastery"
 echo "Protection: 24/7 System Guardian with ntfy critical failure alerts"
+echo "API Protection: Sequential startup with rate limit prevention"
 echo ""
 echo "System will continue running in background."
 echo "Use monitoring commands above to track performance."
 echo ""
 echo "🚀 Ready for Mathematical Conviction Trading! 🧮"
+echo ""
+echo "⚠️  IMPORTANT: If rate limit errors persist, wait 2-3 minutes"
+echo "   for Kraken API limits to fully reset before making API calls."

@@ -638,6 +638,63 @@ export class BayesianProbabilityEngine {
     this.beliefHistory = [];
     console.log('🔄 Bayesian beliefs reset to default priors');
   }
+
+  /**
+   * Simplified interface for CFT integration - calculates Bayesian probability
+   */
+  async calculateBayesianProbability(symbol: string, currentPrice: number, priorSignals: any[]): Promise<{
+    probability: number;
+    direction: string;
+    confidence: number;
+  }> {
+    try {
+      // Gather market evidence for the symbol
+      const evidence = await this.gatherMarketEvidence(symbol);
+
+      // Generate Bayesian signal using existing method
+      const signal = await this.generateSignal(symbol, evidence, currentPrice);
+
+      // Convert to expected format
+      let direction = 'HOLD';
+      let recommendation = 'WAIT';
+
+      if (signal.mostLikelyRegime === MarketRegime.STRONG_BULL) {
+        direction = 'BUY';
+        recommendation = 'STRONG_BUY';
+      } else if (signal.mostLikelyRegime === MarketRegime.BULL) {
+        direction = 'BUY';
+        recommendation = 'BUY';
+      } else if (signal.mostLikelyRegime === MarketRegime.STRONG_BEAR) {
+        direction = 'SELL';
+        recommendation = 'STRONG_SELL';
+      } else if (signal.mostLikelyRegime === MarketRegime.BEAR) {
+        direction = 'SELL';
+        recommendation = 'SELL';
+      } else {
+        direction = 'HOLD';
+        recommendation = 'WAIT';
+      }
+
+      return {
+        probability: signal.confidence,
+        direction,
+        confidence: signal.confidence,
+        recommendation,
+        mostLikelyRegime: signal.mostLikelyRegime,
+        uncertainty: 1 - signal.confidence
+      };
+    } catch (error) {
+      console.error(`❌ Bayesian calculation error for ${symbol}:`, error);
+      return {
+        probability: 0.5,
+        direction: 'HOLD',
+        confidence: 0.1,
+        recommendation: 'WAIT',
+        mostLikelyRegime: MarketRegime.NEUTRAL,
+        uncertainty: 0.9
+      };
+    }
+  }
 }
 
 // Export singleton instance for easy importing

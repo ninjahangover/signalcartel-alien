@@ -10,7 +10,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { gpuAccelerationService } from './gpu-acceleration-service';
+import { gpuService } from './gpu-acceleration-service';
 import { realTimeRegimeMonitor, RegimeContext } from './real-time-regime-monitor';
 import { mathIntuitionEngine } from './mathematical-intuition-engine';
 import { bayesianProbabilityEngine } from './bayesian-probability-engine';
@@ -71,7 +71,7 @@ export class AdvancedRiskOrchestrator extends EventEmitter {
     maxCorrelation: 0.7,            // 70% max correlation
     maxDailyVaR: 5.0,              // 5% daily VaR limit
     emergencyStopLevel: 10.0,       // 10% emergency stop
-    minLiquidityScore: 0.6          // 60% minimum liquidity
+    minLiquidityScore: 0.3          // 30% minimum liquidity (crypto-friendly)
   };
 
   private readonly RISK_UPDATE_INTERVAL = 15000; // 15 seconds
@@ -375,7 +375,7 @@ export class AdvancedRiskOrchestrator extends EventEmitter {
 
   private async calculateRiskGPU(features: number[]): Promise<number[]> {
     try {
-      return await gpuAccelerationService.calculatePortfolioRisk(features);
+      return await gpuService.calculatePortfolioRisk(features);
     } catch (error) {
       console.warn('⚠️ RISK ORCHESTRATOR: GPU calculation failed, using CPU fallback');
       // CPU fallback with simplified risk calculation
