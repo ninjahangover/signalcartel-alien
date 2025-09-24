@@ -504,14 +504,80 @@ class ProductionTradingEngine {
     }
 
     try {
-      log('🐅 QUANTUM FORGE™ Profit Predator - INTEGRATION STARTED (FAST LOG PARSING)');
+      log('🧠 INTELLIGENT PROFIT MAXIMIZER - MATHEMATICAL PROOF INTEGRATION STARTED');
+
+      // NEW: Use the intelligent profit maximizer with mathematical validation
+      const { intelligentProfitMaximizer } = await import('./src/lib/intelligent-profit-maximizer');
+
+      // Get available capital for intelligent position sizing
+      const availableCapital = await this.balanceCalculator.getAvailableBalance();
+      log(`💰 Available Capital for Analysis: $${availableCapital.freeBalance.toFixed(2)}`);
+
+      // Create comprehensive market intelligence context with mathematical validation
+      const marketContext = {
+        totalMarketCapital: availableCapital.freeBalance,
+        currentPositions: await this.getCurrentPositionCount(),
+        marketRegime: this.determineMarketRegime(),
+        volatilityLevel: this.calculateAverageVolatility(),
+        liquidityConditions: 'GOOD' as const,
+        competitiveThreats: []
+      };
+
+      // Get all available pairs for analysis
+      const allPairs = Array.from(this.priceCache.keys()).filter(symbol => {
+        const data = this.priceCache.get(symbol);
+        return data?.isValid && data.price > 0;
+      });
+
+      // Use intelligent analysis to find maximum profit opportunities
+      const maxProfitOpportunities = await intelligentProfitMaximizer.findMaximumProfitOpportunities(
+        allPairs,
+        marketContext,
+        5 // Top 5 maximum profit opportunities
+      );
+
+      log(`🧠 INTELLIGENT ANALYSIS: Found ${maxProfitOpportunities.length} maximum profit opportunities`);
+
+      // Log mathematical proof summary for each opportunity
+      maxProfitOpportunities.forEach((opp, index) => {
+        log(`🔬 MATHEMATICAL PROOF #${index + 1}: ${opp.symbol}`);
+        log(`   💰 Expected Profit: $${opp.expectedDollarProfit.toFixed(2)} (${(opp.profitProbability * 100).toFixed(1)}% probability)`);
+        log(`   📊 Proof Confidence: ${(opp.overallProofConfidence * 100).toFixed(1)}% across ${opp.mathematicalProofs.length} layers`);
+        log(`   🎯 Kelly Fraction: ${(opp.kellyFraction * 100).toFixed(2)}% of capital`);
+        log(`   📈 Sharpe Ratio: ${opp.sharpeRatio.toFixed(3)}`);
+        log(`   🏆 Recommendation: ${opp.recommendation} (Intelligence Score: ${opp.intelligenceScore.toFixed(0)})`);
+
+        // Log key mathematical proofs
+        opp.mathematicalProofs.forEach(proof => {
+          if (proof.confidence >= 0.9) {
+            log(`   ✅ ${proof.layerName}: ${proof.equation} → ${proof.result.toFixed(4)} (${(proof.confidence * 100).toFixed(1)}% confidence)`);
+          }
+        });
+      });
+
+      // Convert to opportunity format expected by the system
+      const intelligentOpportunities = maxProfitOpportunities.map(opp => ({
+        symbol: opp.symbol,
+        score: opp.expectedDollarProfit, // Use actual expected dollar profit as score
+        huntType: 'MAXIMUM_PROFIT_WITH_MATHEMATICAL_PROOF',
+        expectedReturn: (opp.expectedDollarProfit / marketContext.totalMarketCapital) * 100, // % return
+        mathematicalValidation: {
+          overallConfidence: opp.overallProofConfidence,
+          proofLayers: opp.mathematicalProofs.length,
+          kellyOptimal: opp.kellyFraction,
+          sharpeRatio: opp.sharpeRatio,
+          scientificValidation: opp.scientificValidation
+        },
+        signalStrength: opp.profitProbability
+      }));
 
       // BREAKTHROUGH: Read latest opportunities from standalone Profit Predator logs
       // This avoids timeout issues by using already-computed results
       const fs = await import('fs');
       const logPath = '/tmp/signalcartel-logs/profit-predator.log';
 
-      const opportunities: any[] = [];
+      // Start with intelligent opportunities from mathematical proof system
+      const opportunities: any[] = [...intelligentOpportunities];
 
       try {
         const logData = fs.readFileSync(logPath, 'utf8');
