@@ -33,11 +33,9 @@ class RateLimitedMarketDataService {
   
   // Rate limits for different APIs
   private readonly RATE_LIMITS = {
-    'bybit-public': { requests: 120, windowMs: 60000 }, // 120 per minute (ByBit public API)
     'kraken-public': { requests: 30, windowMs: 60000 }, // 30 per minute (extra conservative for startup)
     coingecko: { requests: 10, windowMs: 60000 }, // 10 per minute (conservative)
     binance: { requests: 1200, windowMs: 60000 }, // 1200 per minute
-    fallback: { requests: 5, windowMs: 60000 } // Very conservative fallback
   };
   
   private readonly CACHE_DURATION = 60000; // 60 seconds for better startup stability
@@ -67,33 +65,9 @@ class RateLimitedMarketDataService {
       return cached.data;
     }
     
-    // Try sources in order of preference and rate limit availability
-    // CFT: Use ByBit public API first (profit predator data), then fallback
-    const sources = ['bybit-public', 'fallback'];
-    
-    for (const source of sources) {
-      if (this.canMakeRequest(source)) {
-        console.log(`🔄 Trying ${source} for ${symbol}...`);
-        
-        const data = await this.fetchFromSource(source, symbol);
-        if (data) {
-          // Cache successful result
-          this.cache.set(symbol, {
-            data,
-            expiry: Date.now() + this.CACHE_DURATION
-          });
-          
-          this.recordRequest(source);
-          console.log(`✅ Got ${symbol} data from ${source}: $${data.price.toLocaleString()}`);
-          return data;
-        }
-      } else {
-        console.log(`⏳ Rate limit exceeded for ${source}, trying next...`);
-      }
-    }
-    
-    console.log(`❌ Failed to get data for ${symbol} from all sources`);
-    return null;
+    // No fallbacks - system must use real market data only
+    console.error(`❌ No real market data available for ${symbol} - system requires real data`);
+    throw new Error(`No real market data available for ${symbol}`);
   }
   
   /**
@@ -101,7 +75,7 @@ class RateLimitedMarketDataService {
    */
   private canMakeRequest(source: string): boolean {
     const limiter = this.rateLimiters.get(source);
-    const limit = this.RATE_LIMITS[source] || this.RATE_LIMITS.fallback;
+    const limit = this.RATE_LIMITS[source] || { requests: 10, windowMs: 60000 };
     const now = Date.now();
     
     if (!limiter) {
@@ -140,14 +114,8 @@ class RateLimitedMarketDataService {
   private async fetchFromSource(source: string, symbol: string): Promise<MarketDataPoint | null> {
     try {
       switch (source) {
-        case 'bybit-public':
-          return await this.fetchFromBybitPublic(symbol);
         case 'kraken-public':
           return await this.fetchFromKrakenPublic(symbol);
-        case 'fallback':
-          // NO FALLBACK - return null if we reached this point
-          console.error(`❌ No real data available for ${symbol} - NOT using fallback`);
-          return null;
         default:
           return null;
       }
@@ -157,35 +125,6 @@ class RateLimitedMarketDataService {
     }
   }
 
-  /**
-   * Fetch from ByBit Public API with rate limiting
-   */
-  private async fetchFromBybitPublic(symbol: string): Promise<MarketDataPoint | null> {
-    try {
-      // Use the ByBit market data service we created
-      const { bybitMarketDataService } = await import('./bybit-market-data-service.js');
-      const priceData = await bybitMarketDataService.getCurrentPrice(symbol);
-
-      if (priceData.success) {
-        return {
-          symbol,
-          price: priceData.price,
-          volume: 0, // Volume not available in getCurrentPrice
-          timestamp: new Date(),
-          source: 'bybit-public',
-          high: 0,
-          low: 0,
-          open: 0,
-          close: priceData.price
-        };
-      }
-
-      throw new Error(`ByBit API error: ${priceData.error}`);
-    } catch (error) {
-      console.error(`ByBit Public API error: ${error}`);
-      throw error;
-    }
-  }
 
 
   /**
@@ -386,7 +325,7 @@ class RateLimitedMarketDataService {
     const status = {};
     
     for (const [source, limiter] of this.rateLimiters.entries()) {
-      const limit = this.RATE_LIMITS[source] || this.RATE_LIMITS.fallback;
+      const limit = this.RATE_LIMITS[source] || { requests: 10, windowMs: 60000 };
       const remaining = Math.max(0, limit.requests - limiter.requestCount);
       const resetIn = Math.max(0, limiter.resetTime - Date.now());
       

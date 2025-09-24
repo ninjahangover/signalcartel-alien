@@ -10,6 +10,7 @@ import { MathematicalIntuitionEngine } from './mathematical-intuition-engine';
 import { enhancedMathematicalIntuition } from './enhanced-mathematical-intuition';
 import { EnhancedMarkovPredictor } from './enhanced-markov-predictor';
 import { adaptiveSignalLearning } from './adaptive-signal-learning';
+import { phase2Optimizer } from './phase2-mathematical-optimizer';
 
 export interface ProductionAIBundle {
   symbol: string;
@@ -407,16 +408,16 @@ export class ProductionTensorIntegration {
    */
   async makeDecision(bundle: ProductionAIBundle): Promise<TensorTradingDecision> {
     console.log(`🧮 Tensor Integration: Analyzing ${bundle.symbol} at $${bundle.currentPrice}`);
-    
+
     // Convert existing AI outputs to tensor format
     const aiOutputs = await this.convertToTensorInputs(bundle);
-    
+
     if (aiOutputs.length === 0) {
       throw new Error('No AI systems provided valid outputs for tensor fusion');
     }
-    
+
     console.log(`🎯 Tensor Fusion: Using ${aiOutputs.length} AI systems: ${aiOutputs.map(ai => ai.systemId).join(', ')}`);
-    
+
     // Apply strategy priority weights
     const priorityWeights = this.getStrategyPriorityWeights();
     const weightedOutputs = aiOutputs.map(output => {
@@ -431,31 +432,49 @@ export class ProductionTensorIntegration {
         }
       };
     });
-    
+
     console.log(`⚖️ Applied priority weights: Advanced strategies get 2-3x more influence`);
-    
+
     // Perform tensor fusion with weighted outputs
     const fusedDecision = await tensorAIFusion.fuseAIOutputs(weightedOutputs, bundle.currentPrice, bundle.marketData);
-    
-    // Create production-ready decision
+
+    // PHASE 2 OPTIMIZATION: Apply mathematical fixes
+    const enhancedDecision = await phase2Optimizer.enhanceDecision(
+      bundle.symbol,
+      fusedDecision.fusedConfidence,
+      bundle.marketData?.volatility || 0.02, // Default 2% daily volatility
+      bundle.marketData?.bankroll || 10000, // Use actual bankroll if available
+      bundle.currentPrice,
+      0 // Signal age in minutes (0 for fresh signals)
+    );
+
+    // Create production-ready decision with Phase 2 enhancements
     const decision: TensorTradingDecision = {
-      shouldTrade: fusedDecision.shouldTrade,
+      shouldTrade: enhancedDecision.shouldTrade, // Use enhanced filter
       direction: this.mapDirectionToString(fusedDecision.fusedDirection),
-      confidence: fusedDecision.fusedConfidence,
-      expectedMove: fusedDecision.fusedMagnitude,
-      positionSize: fusedDecision.positionSize,
-      expectedPnL: fusedDecision.expectedReturn,
-      expectedReturn: fusedDecision.expectedReturn, // Critical: Make the expected return accessible
-      
+      confidence: enhancedDecision.confidence, // Use decayed confidence
+      expectedMove: enhancedDecision.expectedMove, // FIXED: Realistic 0.5-3% range
+      positionSize: enhancedDecision.positionSizePercent, // FIXED: Dynamic 1-10% range
+      expectedPnL: enhancedDecision.expectedMove * fusedDecision.fusedDirection, // Directional P&L
+      expectedReturn: enhancedDecision.expectedMove, // Use realistic move
+
       fusedDecision,
       aiSystemsUsed: aiOutputs.map(ai => ai.systemId)
     };
-    
+
+    // Log Phase 2 optimization details
+    if (enhancedDecision.reasons.pairFilter && !enhancedDecision.shouldTrade) {
+      console.log(`🚫 PAIR FILTER: ${enhancedDecision.reasons.pairFilter}`);
+    }
+    if (enhancedDecision.reasons.volumeStatus.includes('below minimum')) {
+      console.log(`📉 VOLUME: ${enhancedDecision.reasons.volumeStatus}`);
+    }
+
     console.log(`🚀 TENSOR DECISION: ${decision.shouldTrade ? 'TRADE' : 'SKIP'} ${decision.direction}`);
     console.log(`   Confidence: ${(decision.confidence * 100).toFixed(1)}%`);
-    console.log(`   Expected Move: ${(decision.expectedMove * 100).toFixed(2)}%`);
+    console.log(`   Expected Move: ${(decision.expectedMove * 100).toFixed(2)}%`); // Now shows realistic 0.5-3%
     console.log(`   Expected PnL: ${(decision.expectedPnL * 100).toFixed(2)}%`);
-    console.log(`   Position Size: ${(decision.positionSize * 100).toFixed(1)}% of account`);
+    console.log(`   Position Size: ${(decision.positionSize * 100).toFixed(1)}% of account`); // Now shows 1-10% range
     console.log(`   Reason: ${fusedDecision.reason}`);
     
     return decision;

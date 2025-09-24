@@ -2911,13 +2911,22 @@ class ProductionTradingEngine {
         sentimentAnalysis = null;
       }
       
+      // Get current bankroll for Phase 2 optimization
+      let currentBankroll = 10000; // Default fallback
+      try {
+        const balanceInfo = await this.balanceCalculator.calculateAvailableBalance();
+        currentBankroll = balanceInfo?.availableBalance || 10000;
+      } catch (error) {
+        log(`⚠️ Failed to get bankroll, using default: ${error.message}`);
+      }
+
       // Create AI bundle with only valid systems (no hardcoded fallbacks)
       const aiBundle = {
         symbol: safeSymbol,
         currentPrice: safePrice,
         // Only include systems that provide actual data (null if system failed)
         mathematicalIntuition: enhancedAnalysis,      // V₂
-        bayesianProbability: bayesianAnalysis,        // V₃  
+        bayesianProbability: bayesianAnalysis,        // V₃
         markovPrediction: markovAnalysis,             // V₄
         adaptiveLearning: adaptiveLearning,           // V₅
         orderBookAIResult: orderBookAnalysis,        // V₆
@@ -2926,7 +2935,9 @@ class ProductionTradingEngine {
           symbol: safeSymbol,
           price: safePrice,
           volume: safeVolume,
-          timestamp: safeTimestamp
+          timestamp: safeTimestamp,
+          volatility: 0.02, // TODO: Calculate actual volatility
+          bankroll: currentBankroll
         },
         phase: phase?.phase || 0,
         timestamp: new Date()

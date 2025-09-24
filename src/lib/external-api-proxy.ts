@@ -110,7 +110,7 @@ export class ExternalAPIProxy {
     }
 
     try {
-      // Convert ByBit symbols to Binance format
+      // Convert symbols to Binance format
       const binanceSymbol = this.convertToBinanceSymbol(symbol);
 
       await this.binanceRateLimit.throttle();
@@ -226,7 +226,7 @@ export class ExternalAPIProxy {
   }
 
   /**
-   * Convert ByBit symbol to Binance symbol
+   * Convert symbol to Binance format
    */
   private convertToBinanceSymbol(symbol: string): string {
     // Most symbols are already compatible
