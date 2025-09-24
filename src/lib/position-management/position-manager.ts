@@ -694,16 +694,24 @@ export class PositionManager {
    */
   async getAccountSnapshot(): Promise<AccountSnapshot> {
     try {
-      // Get USD balance from Kraken
-      let availableUSD = 150; // Fallback default
+      // Get USD balance from Kraken - NO HARDCODED FALLBACKS
+      let availableUSD = 0; // Start with 0, only use real balance
 
       try {
-        const balances = await krakenApiService.getBalance();
-        const usdBalance = parseFloat(balances.USD || '0');
+        const balanceResponse = await krakenApiService.getAccountBalance();
+        const balances = balanceResponse?.result || {};
+        const usdBalance = parseFloat(balances.ZUSD || balances.USD || '0');
         const usdtBalance = parseFloat(balances.USDT || '0');
         availableUSD = usdBalance + usdtBalance;
+
+        // Only use the balance if we actually got it from API
+        if (!balanceResponse?.result) {
+          console.error(`❌ No balance data from Kraken API - returning 0 to prevent fake trades`);
+          availableUSD = 0;
+        }
       } catch (apiError) {
-        console.warn(`⚠️ Kraken API balance fetch failed, using fallback: ${apiError.message}`);
+        console.error(`❌ Kraken API balance fetch failed - returning 0: ${apiError.message}`);
+        availableUSD = 0; // NO FALLBACK - use 0 if API fails
       }
 
       // Calculate current position values

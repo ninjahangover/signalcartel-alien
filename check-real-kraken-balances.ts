@@ -14,7 +14,8 @@ async function checkRealBalances() {
     }
     
     await krakenApiService.authenticate(apiKey, apiSecret);
-    const balances = await krakenApiService.getBalance();
+    const balanceResponse = await krakenApiService.getAccountBalance();
+    const balances = balanceResponse?.result || {};
     
     const prices: Record<string, number> = {};
     const pairs = ['XBTUSD', 'ETHUSD', 'SOLUSD', 'DOTUSD', 'AVAXUSD', 'BNBUSD'];
