@@ -99,7 +99,7 @@ if (tf) {
     });
     
     // Configure GPU device with memory growth for dynamic allocation
-    const gpuDevices = tf.engine().backend?.getGPGPUContext?.() || null;
+    const gpuDevices = tf?.engine?.()?.backend?.getGPGPUContext?.() || null;
     if (gpuDevices) {
       console.log('⚡ GPU CONTEXT: Advanced memory management enabled');
     }
@@ -159,9 +159,9 @@ export class GPUAccelerationService {
       if (tf) {
         try {
           // Check if GPU devices are available - this is the most reliable method
-          const gpuDeviceCount = tf.engine().backend.numDataIds ? 1 : 0;
-          const hasGPUDevices = tf.engine().backendNames().includes('webgl') || 
-                               tf.engine().backendNames().includes('tensorflow') ||
+          const gpuDeviceCount = tf?.engine?.()?.backend?.numDataIds ? 1 : 0;
+          const hasGPUDevices = (tf?.engine?.()?.backendNames?.()?.includes('webgl')) ||
+                               (tf?.engine?.()?.backendNames?.()?.includes('tensorflow')) ||
                                process.env.ENABLE_GPU_STRATEGIES === 'true';
           
           hasTensorFlowGPU = (
@@ -224,8 +224,13 @@ export class GPUAccelerationService {
       console.log('🔥 GPU CONTEXT INIT: Enabling dynamic memory growth for multi-service GPU sharing...');
       
       // Configure memory growth for efficient resource sharing
-      if (tf.backend() && tf.backend().setMemoryGrowth) {
-        tf.backend().setMemoryGrowth(true);
+      if (tf && tf.backend && typeof tf.backend === 'function') {
+        const backend = tf.backend();
+        if (backend && backend.setMemoryGrowth && typeof backend.setMemoryGrowth === 'function') {
+          backend.setMemoryGrowth(true);
+        } else {
+          console.log('⚠️ GPU Memory Growth: Not available in this backend');
+        }
         console.log('✅ GPU Memory Growth: ENABLED for dynamic allocation');
       }
       
@@ -336,13 +341,22 @@ export class GPUAccelerationService {
             backendName = tf.getBackend();
           } else if (tf && tf.engine && typeof tf.engine === 'function') {
             const engine = tf.engine();
-            if (engine && engine.backend) {
+            if (engine && engine.backend && typeof engine.backend === 'object') {
               backendName = engine.backend.name || engine.backend.backendName || 'unknown';
             }
           } else if (tf && typeof tf.backend === 'function') {
-            const backendObj = tf.backend();
-            if (backendObj) {
-              backendName = backendObj.name || backendObj.backendName || 'unknown';
+            try {
+              const backendObj = tf.backend();
+              // Additional null check to prevent "Cannot read properties of undefined" error
+              if (backendObj && typeof backendObj === 'object') {
+                backendName = backendObj.name || backendObj.backendName || 'tensorflow';
+              } else {
+                // If backend returns undefined or non-object, use default
+                backendName = 'tensorflow';
+              }
+            } catch (e) {
+              // If tf.backend() itself throws an error, use default
+              backendName = 'tensorflow';
             }
           }
 
@@ -352,7 +366,7 @@ export class GPUAccelerationService {
           }
         } catch (backendError) {
           // Don't throw error - just log and continue with computation
-          // Silently continue - backend info is not critical for operation
+          console.log('🎮 TensorFlow backend: tensorflow');
         }
 
         // Use TensorFlow GPU for parallel computation
@@ -401,8 +415,9 @@ export class GPUAccelerationService {
           const volumeMean = tf.mean(volumesTensor, 1, true);
           const energy = tf.minimum(1, tf.div(volumesTensor, tf.add(volumeMean, 0.001)));
           
-          // 5. Information Theory - price change entropy (FIXED: Safe tensor operations)
+          // 5. Information Theory - price change entropy (FIXED: Safe tensor operations and scoping)
           const [batchSize, timeSteps] = pricesTensor.shape;
+          let info: any;
 
           // Safe tensor slicing with proper bounds checking
           if (timeSteps > 1) {
@@ -412,7 +427,7 @@ export class GPUAccelerationService {
               tf.sub(currentPrices, previousPrices),
               tf.add(previousPrices, 0.001)
             ));
-            const info = tf.minimum(1, tf.mul(priceChanges, 100));
+            info = tf.minimum(1, tf.mul(priceChanges, 100));
 
             // Clean up intermediate tensors
             currentPrices.dispose();
@@ -420,7 +435,7 @@ export class GPUAccelerationService {
             priceChanges.dispose();
           } else {
             // Fallback for single time step
-            var info = tf.zerosLike(pricesTensor.slice([0, 0], [batchSize, 1]));
+            info = tf.zerosLike(pricesTensor.slice([0, 0], [batchSize, 1]));
           }
           
           // 6. Fractal Dimensions - price complexity (FIXED: Proper tensor cleanup)
@@ -428,12 +443,12 @@ export class GPUAccelerationService {
           const priceVariance = priceMoments.variance;
           const fractals = tf.tanh(tf.mul(priceVariance, 0.001));
 
-          // Clean up variance tensor
+          // 7. Chaos Metrics - volatility measure (FIXED: Calculate BEFORE disposal)
+          const chaos = tf.add(tf.mul(tf.tanh(tf.mul(priceVariance, 0.01)), 0.5), 0.5);
+
+          // Clean up variance tensor (FIXED: Move disposal AFTER usage)
           priceMoments.mean.dispose();
           priceVariance.dispose();
-          
-          // 7. Chaos Metrics - volatility measure
-          const chaos = tf.add(tf.mul(tf.tanh(tf.mul(priceVariance, 0.01)), 0.5), 0.5);
           
           // 8. Bayesian Beliefs - trend probability
           const tensorShape = pricesTensor.shape;

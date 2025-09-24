@@ -542,10 +542,17 @@ class RealTimePriceFetcher {
       }
 
       const data = await response.json();
+
+      // Debug: Log what we actually received from CryptoCompare
+      if (!data || !data.USD) {
+        console.warn(`⚠️ CryptoCompare returned unexpected data for ${symbol}:`, JSON.stringify(data));
+        throw new Error(`Invalid price data from CryptoCompare: ${JSON.stringify(data)}`);
+      }
+
       const price = data.USD;
 
       if (!price || price <= 0) {
-        throw new Error('Invalid price data from CryptoCompare');
+        throw new Error(`Invalid price data from CryptoCompare: price=${price}, data=${JSON.stringify(data)}`);
       }
 
       // CRITICAL: Validate price before using it
@@ -872,19 +879,21 @@ class RealTimePriceFetcher {
       'DOLOUSD': 'DOLO', 'DOLUSDT': 'DOLO'
     };
     
-    // SAFER FALLBACK: Only use simple USD removal if symbol is reasonable
-    if (!map[symbol]) {
-      const fallback = symbol.replace(/USDT?$/, ''); // Remove USD or USDT
-      if (fallback.length >= 2 && fallback.length <= 6 && /^[A-Z0-9]+$/.test(fallback)) {
-        console.warn(`⚠️ Using fallback symbol for CryptoCompare: ${symbol} -> ${fallback}`);
-        return fallback;
-      } else {
-        console.warn(`❌ Cannot convert symbol for CryptoCompare: ${symbol}`);
-        return null;
-      }
+    // First check if symbol is in the mapping
+    const mappedSymbol = map[symbol];
+    if (mappedSymbol) {
+      return mappedSymbol;
     }
-    
-    return map[symbol];
+
+    // SAFER FALLBACK: Only use simple USD removal if symbol is reasonable
+    const fallback = symbol.replace(/USDT?$/, ''); // Remove USD or USDT
+    if (fallback.length >= 2 && fallback.length <= 6 && /^[A-Z0-9]+$/.test(fallback)) {
+      console.warn(`⚠️ Using fallback symbol for CryptoCompare: ${symbol} -> ${fallback}`);
+      return fallback;
+    } else {
+      console.warn(`❌ Cannot convert symbol for CryptoCompare: ${symbol}`);
+      return null;
+    }
   }
 
   /**
