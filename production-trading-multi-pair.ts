@@ -12,7 +12,7 @@ const telemetry = initProductionTelemetry({
 });
 
 import { PositionManager } from './src/lib/position-management/position-manager';
-import { AvailableBalanceCalculator } from './src/lib/available-balance-calculator';
+import { getAvailableBalanceCalculator } from './src/lib/available-balance-calculator';
 import { phaseManager } from './src/lib/quantum-forge-phase-config';
 import { EnhancedMarkovPredictor } from './src/lib/enhanced-markov-predictor';
 import { MathematicalIntuitionEngine } from './src/lib/mathematical-intuition-engine';
@@ -69,7 +69,7 @@ class ProductionTradingEngine {
   private isRunning = false;
   private cycleCount = 0;
   private positionManager: PositionManager;
-  private balanceCalculator: AvailableBalanceCalculator;
+  private balanceCalculator: ReturnType<typeof getAvailableBalanceCalculator>;
   private enhancedMarkovPredictor2: EnhancedMarkovPredictor;
   private mathEngine: MathematicalIntuitionEngine;
   private enhancedIntuition: typeof enhancedMathematicalIntuition;
@@ -105,7 +105,7 @@ class ProductionTradingEngine {
   constructor() {
     this.prisma = prisma; // Assign the prisma client
     this.positionManager = new PositionManager(prisma);
-    this.balanceCalculator = new AvailableBalanceCalculator(this.positionManager);
+    this.balanceCalculator = getAvailableBalanceCalculator();
     this.enhancedMarkovPredictor2 = new EnhancedMarkovPredictor();
     this.mathEngine = new MathematicalIntuitionEngine();
     this.enhancedIntuition = enhancedMathematicalIntuition;
@@ -516,9 +516,9 @@ class ProductionTradingEngine {
       // Create comprehensive market intelligence context with mathematical validation
       const marketContext = {
         totalMarketCapital: availableCapital.freeBalance,
-        currentPositions: await this.getCurrentPositionCount(),
-        marketRegime: this.determineMarketRegime(),
-        volatilityLevel: this.calculateAverageVolatility(),
+        currentPositions: (await this.positionManager.getOpenPositions()).length,
+        marketRegime: 'NORMAL', // Fallback market regime
+        volatilityLevel: 0.05, // 5% average volatility fallback
         liquidityConditions: 'GOOD' as const,
         competitiveThreats: []
       };
