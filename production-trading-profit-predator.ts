@@ -60,7 +60,7 @@ export class ProfitPredatorTradingEngine {
   private maxConcurrentHunts = 15;        // Hunt aggressively across multiple opportunities
   private baseCapitalAllocation = 800;    // Base $ per hunt
   private maxPortfolioRisk = 0.6;         // 60% of capital can be at risk
-  private minExpectancyRatio = 1.8;       // Only hunt opportunities with 1.8:1+ expectancy
+  private minExpectancyRatio = 1.2;       // Only hunt opportunities with 1.2:1+ expectancy (volatility optimized)
   private acceptableLossRate = 0.42;      // Accept 42% losses for exponential gains
   private evolutionFrequency = 25;        // Evolve every 25 hunts
   private totalCapital = 10000;
@@ -181,8 +181,8 @@ export class ProfitPredatorTradingEngine {
     // Filter for executable hunts with high expectancy
     const executableHunts = hunts.filter(hunt => {
       return hunt.expectancyRatio >= this.minExpectancyRatio &&
-             hunt.signalStrength > 0.5 &&
-             hunt.probabilityOfProfit > 0.35 &&
+             hunt.signalStrength > 0.4 &&
+             hunt.probabilityOfProfit > 0.25 &&
              !this.isSymbolAlreadyHunted(hunt.symbol);
     });
 

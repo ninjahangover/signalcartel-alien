@@ -2623,17 +2623,27 @@ export class TensorAIFusionEngine {
       const baseValidationNeed = 0.6; // Maximum threshold when strength approaches 0
       const minThreshold = 0.2; // Minimum threshold when strength is high
 
-      // Exponential decay formula: threshold = min + (base - min) * e^(-k * strength)
-      const threshold = minThreshold + (baseValidationNeed - minThreshold) * Math.exp(-decayConstant * combinedStrength);
-      
+      // FIX: Simplified formula to produce 15-35% threshold range
+      // Old exponential decay was producing 57-58% thresholds
+      const baseThreshold = 0.25; // 25% base (middle of 15-35% range)
+
+      // Adjustments based on conditions
+      const confAdjust = (0.5 - tensorConfidence) * 0.2; // ±10% based on confidence
+      const returnAdjust = expectedReturn > 0 ? -0.05 : 0.05; // ±5% based on returns
+      const reliabilityAdjust = (0.5 - avgReliability) * 0.1; // ±5% based on reliability
+
+      // Calculate final threshold
+      const threshold = Math.max(0.15, Math.min(0.35,
+        baseThreshold + confAdjust + returnAdjust + reliabilityAdjust
+      ));
+
       console.log(`🧮 DYNAMIC THRESHOLD: tensor_conf=${(tensorConfidence*100).toFixed(1)}% profit=${(expectedReturn*100).toFixed(2)}% reliability=${(avgReliability*100).toFixed(1)}% → threshold=${(threshold*100).toFixed(1)}%`);
-      
-      console.log(`📊 Dynamic validation threshold: ${(threshold * 100).toFixed(1)}% (avg reliability: ${(avgReliability * 100).toFixed(1)}%)`);
-      
-      return Math.max(0.2, Math.min(0.6, threshold)); // Cap at 60% max (down from 90%)
+      console.log(`   Adjustments: conf ${(confAdjust*100).toFixed(1)}%, return ${(returnAdjust*100).toFixed(1)}%, reliability ${(reliabilityAdjust*100).toFixed(1)}%`);
+
+      return threshold; // Now returns 15-35% range instead of 57-58%
     } catch (error) {
       console.warn(`⚠️ Dynamic validation threshold calculation failed: ${error.message}`);
-      return 0.55; // 55% reasonable fallback
+      return 0.25; // 25% reasonable fallback (middle of 15-35% range)
     }
   }
 
@@ -3067,9 +3077,9 @@ export class TensorAIFusionEngine {
     
     // Step 12: Determine risk level
     let riskLevel: 'CONSERVATIVE' | 'MODERATE' | 'AGGRESSIVE' | 'MAXIMUM';
-    if (finalSize < 0.05) riskLevel = 'CONSERVATIVE';
-    else if (finalSize < 0.12) riskLevel = 'MODERATE';
-    else if (finalSize < 0.20) riskLevel = 'AGGRESSIVE';
+    if (finalSize < 0.08) riskLevel = 'CONSERVATIVE';
+    else if (finalSize < 0.18) riskLevel = 'MODERATE';
+    else if (finalSize < 0.30) riskLevel = 'AGGRESSIVE';
     else riskLevel = 'MAXIMUM';
     
     // Step 13: Generate sizing reason
@@ -3672,8 +3682,17 @@ export class TensorAIFusionEngine {
     
     // Analyze AI system consensus degradation
     const avgSystemConfidence = contributingSystems.reduce((sum, sys) => sum + sys.confidence, 0) / contributingSystems.length;
-    const systemsInAgreement = contributingSystems.filter(sys => 
-      contributingSystems.filter(other => Math.sign(other.direction) === Math.sign(sys.direction)).length >= contributingSystems.length * 0.6
+
+    // FIX: Count systems that agree with the majority direction
+    // First, find the majority direction
+    const bullishCount = contributingSystems.filter(sys => sys.direction > 0).length;
+    const bearishCount = contributingSystems.filter(sys => sys.direction < 0).length;
+    const neutralCount = contributingSystems.filter(sys => sys.direction === 0).length;
+    const majorityDirection = bullishCount > bearishCount ? 1 : (bearishCount > bullishCount ? -1 : 0);
+
+    // Now count how many systems agree with majority
+    const systemsInAgreement = contributingSystems.filter(sys =>
+      Math.sign(sys.direction) === majorityDirection || sys.direction === 0
     ).length;
     
     // 🧠 MATHEMATICAL CONVICTION 1: MASSIVE consensus deterioration - ALL systems turning against position
@@ -3686,8 +3705,9 @@ export class TensorAIFusionEngine {
     
     // 🧠 MATHEMATICAL CONVICTION 2: Direction reversal - majority of systems now pointing opposite direction
     // This is like when ALL your manual trading validations flip to the other side
-    const systemsPointingOpposite = contributingSystems.filter(sys => 
-      contributingSystems.filter(other => Math.sign(other.direction) === -Math.sign(sys.direction)).length > contributingSystems.length * 0.7
+    // FIX: Simply count systems pointing opposite to majority
+    const systemsPointingOpposite = contributingSystems.filter(sys =>
+      majorityDirection !== 0 && Math.sign(sys.direction) === -majorityDirection
     ).length;
     
     if (systemsPointingOpposite > contributingSystems.length * 0.7) {

@@ -30,9 +30,13 @@ export class AdaptivePairFilter {
   
   // MATHEMATICAL INTUITION: All thresholds calculated dynamically using proven tensor formulas
   private async calculateDynamicFilterCriteria(marketVolatility: number, systemConfidence: number): Promise<FilterCriteria> {
+    // FIX: Implement strict 30% minimum accuracy requirement
+    // This prevents trading pairs with proven poor performance (like DOTUSD at 9.3%)
+    const MINIMUM_ACCURACY_THRESHOLD = 30; // Hard floor - never trade below this
+
     // Mathematical formula for dynamic win rate threshold based on market conditions
     // Higher volatility = lower required win rate, Higher AI confidence = higher standards
-    const dynamicWinRate = Math.max(30, Math.min(80, 
+    const dynamicWinRate = Math.max(MINIMUM_ACCURACY_THRESHOLD, Math.min(80,
       50 + (systemConfidence * 30) - (marketVolatility * 20)
     ));
     
@@ -69,6 +73,14 @@ export class AdaptivePairFilter {
    */
   async shouldAllowPair(symbol: string, marketVolatility: number = 0.05, systemConfidence: number = 0.5): Promise<boolean> {
     try {
+      // FIX: Check AdaptiveLearningPerformance table for historical accuracy
+      const adaptivePerformance = await this.checkAdaptiveLearningAccuracy(symbol);
+      if (adaptivePerformance && adaptivePerformance.accuracy < 0.30 && adaptivePerformance.totalSignals > 50) {
+        console.log(`🚫 BLACKLISTED: ${symbol} - Adaptive learning shows ${(adaptivePerformance.accuracy * 100).toFixed(1)}% accuracy over ${adaptivePerformance.totalSignals} signals`);
+        this.blockPair(symbol, `Poor adaptive learning accuracy: ${(adaptivePerformance.accuracy * 100).toFixed(1)}%`);
+        return false;
+      }
+
       // Calculate dynamic criteria using mathematical formulas
       const dynamicCriteria = await this.calculateDynamicFilterCriteria(marketVolatility, systemConfidence);
 
@@ -147,6 +159,31 @@ export class AdaptivePairFilter {
     }
 
     return true;
+  }
+
+  /**
+   * Check adaptive learning accuracy from database
+   */
+  private async checkAdaptiveLearningAccuracy(symbol: string): Promise<{accuracy: number, totalSignals: number} | null> {
+    try {
+      if (!this.prismaClient) return null;
+
+      const adaptiveData = await this.prismaClient.adaptiveLearningPerformance.findFirst({
+        where: {
+          symbol: symbol,
+          category: 'long' // Check long performance for spot trading
+        },
+        select: {
+          accuracy: true,
+          totalSignals: true
+        }
+      });
+
+      return adaptiveData;
+    } catch (error) {
+      console.error(`❌ Error checking adaptive learning for ${symbol}:`, error);
+      return null;
+    }
   }
 
   /**
