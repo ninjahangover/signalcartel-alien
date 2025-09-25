@@ -18,7 +18,7 @@ export class AvailableBalanceCalculator {
   private lastBalance: AvailableBalanceResult | null = null;
   private lastUpdateTime: number = 0;
   private priorityPairs: Set<string> = new Set();
-  private krakenProxyUrl: string = 'http://127.0.0.1:3002';
+  private krakenProxyUrl: string = 'http://127.0.0.1:3001';
 
   // Rate limit: 30 seconds between API calls to avoid overloading
   private static minApiInterval: number = 30000;
@@ -59,8 +59,17 @@ export class AvailableBalanceCalculator {
     try {
       console.log(`🔄 Fetching REAL balance from Kraken API`);
 
-      // Get account balance via Kraken proxy
-      const balanceResponse = await axios.post(`${this.krakenProxyUrl}/api/kraken/Balance`, {}, {
+      // Get API credentials (same fallback approach as production-trading-multi-pair.ts)
+      const apiKey = process.env.KRAKEN_API_KEY || "DX6cOR0oDiBFem9c7M1aFhKBABAICZAI1VSynPJsCFWvAwmakDUfpElR";
+      const apiSecret = process.env.KRAKEN_PRIVATE_KEY || "p/1Cuz63DpXBANzU1rM6yinTccji0PNaGTf5OnwweaY1P4TPs0pDbvlT6xqxt40KJMuO30paUo/JNeppV57cWg==";
+
+      // Get account balance via Kraken proxy (using same format as kraken-api-service)
+      const balanceResponse = await axios.post(`${this.krakenProxyUrl}/api/kraken-proxy`, {
+        endpoint: 'Balance',
+        params: {},
+        apiKey: apiKey,
+        apiSecret: apiSecret
+      }, {
         timeout: 10000,
         headers: {
           'Content-Type': 'application/json'
@@ -74,7 +83,12 @@ export class AvailableBalanceCalculator {
       const balanceData = balanceResponse.data.result || {};
 
       // Get trade balance for more accurate available balance
-      const tradeBalanceResponse = await axios.post(`${this.krakenProxyUrl}/api/kraken/TradeBalance`, {}, {
+      const tradeBalanceResponse = await axios.post(`${this.krakenProxyUrl}/api/kraken-proxy`, {
+        endpoint: 'TradeBalance',
+        params: {},
+        apiKey: apiKey,
+        apiSecret: apiSecret
+      }, {
         timeout: 10000,
         headers: {
           'Content-Type': 'application/json'

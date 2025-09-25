@@ -92,7 +92,7 @@ class KrakenApiService {
 
           console.log(`🔄 Kraken Proxy: Request for ${endpoint} (attempt ${attempt})`);
 
-          const response = await fetch('http://127.0.0.1:3002/api/kraken-proxy', {
+          const response = await fetch('http://127.0.0.1:3001/api/kraken-proxy', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

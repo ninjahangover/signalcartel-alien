@@ -2611,9 +2611,20 @@ export class TensorAIFusionEngine {
       const profitabilityFactor = Math.max(0.1, Math.min(1.0, Math.abs(expectedReturn) + 0.1)); // Always positive, bounded
       const reliabilityFactor = Math.max(0.5, avgReliability); // System reliability
 
-      // Dynamic threshold = base_validation / (tensor_strength * profitability * reliability)
-      const baseValidationNeed = 0.35; // Base validation requirement
-      const threshold = baseValidationNeed / (tensorStrengthFactor * profitabilityFactor * reliabilityFactor);
+      // MATHEMATICAL FIX: Use logarithmic scaling to prevent overflow
+      // Instead of direct division, use exponential decay function
+      // threshold = base * e^(-k * combined_strength) where k is decay constant
+      const combinedStrength = tensorStrengthFactor * profitabilityFactor * reliabilityFactor;
+
+      // Logarithmic approach prevents division by very small numbers
+      // When combinedStrength is small (~0.014), we get a high but bounded threshold
+      // When combinedStrength is large (~1.0), we get a low threshold
+      const decayConstant = 2.0; // Controls how quickly threshold decreases with strength
+      const baseValidationNeed = 0.6; // Maximum threshold when strength approaches 0
+      const minThreshold = 0.2; // Minimum threshold when strength is high
+
+      // Exponential decay formula: threshold = min + (base - min) * e^(-k * strength)
+      const threshold = minThreshold + (baseValidationNeed - minThreshold) * Math.exp(-decayConstant * combinedStrength);
       
       console.log(`🧮 DYNAMIC THRESHOLD: tensor_conf=${(tensorConfidence*100).toFixed(1)}% profit=${(expectedReturn*100).toFixed(2)}% reliability=${(avgReliability*100).toFixed(1)}% → threshold=${(threshold*100).toFixed(1)}%`);
       
