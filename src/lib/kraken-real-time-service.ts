@@ -4,6 +4,9 @@
  * Uses WebSocket for sub-second price updates during trading
  */
 
+import { priceLogger } from './price-logger';
+import { krakenPairValidator } from './kraken-pair-validator';
+
 interface KrakenTicker {
   c: [string, string]; // Last trade closed array, price, lot volume
   a: [string, string, string]; // Ask array, price, whole lot volume, lot volume
@@ -83,7 +86,10 @@ class KrakenRealTimeService {
       };
 
       this.ws.onmessage = (event) => {
-        this.handleWebSocketMessage(event.data);
+        // Handle async WebSocket messages
+        this.handleWebSocketMessage(event.data).catch(error => {
+          console.error('❌ Error handling WebSocket message:', error);
+        });
       };
 
       this.ws.onclose = () => {
@@ -108,7 +114,7 @@ class KrakenRealTimeService {
       return; // Already subscribed
     }
 
-    const krakenPair = this.symbolToKrakenPair(symbol);
+    const krakenPair = await krakenPairValidator.getKrakenPair(symbol);
     if (!krakenPair) {
       console.warn(`⚠️ Cannot map ${symbol} to Kraken pair`);
       return;
@@ -130,22 +136,22 @@ class KrakenRealTimeService {
   /**
    * Handle incoming WebSocket messages
    */
-  private handleWebSocketMessage(data: string): void {
+  private async handleWebSocketMessage(data: string): Promise<void> {
     try {
       const message = JSON.parse(data);
-      
+
       // Handle ticker updates
       if (Array.isArray(message) && message.length >= 4) {
         const [channelID, tickerData, channelName, pair] = message;
-        
+
         if (channelName === 'ticker') {
-          const symbol = this.krakenPairToSymbol(pair);
+          const symbol = await krakenPairValidator.getSymbolFromKrakenPair(pair);
           if (symbol && typeof tickerData === 'object') {
             this.updatePriceCache(symbol, tickerData);
           }
         }
       }
-      
+
     } catch (error) {
       console.error('❌ Error parsing WebSocket message:', error);
     }
@@ -194,12 +200,12 @@ class KrakenRealTimeService {
     }
 
     try {
-      const krakenPair = this.symbolToKrakenPair(symbol);
+      const krakenPair = await krakenPairValidator.getKrakenPair(symbol);
       if (!krakenPair) {
         return null;
       }
 
-      console.log(`📊 Fetching ${symbol} from Kraken REST API...`);
+      priceLogger.info(`📊 Fetching ${symbol} from Kraken REST API...`);
       this.lastRestApiCall = Date.now();
       
       const response = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${krakenPair}`, {
@@ -243,7 +249,7 @@ class KrakenRealTimeService {
       // Cache for WebSocket fallback
       this.priceCache.set(symbol, priceData);
       
-      console.log(`✅ ${symbol}: $${price.toFixed(6)} (REST API)`);
+      priceLogger.success(`✅ ${symbol}: $${price.toFixed(6)} (REST API)`);
       return priceData;
 
     } catch (error) {
@@ -252,89 +258,7 @@ class KrakenRealTimeService {
     }
   }
 
-  /**
-   * Convert our symbol format to Kraken pair format
-   */
-  private symbolToKrakenPair(symbol: string): string | null {
-    const mapping: Record<string, string> = {
-      // USD pairs - Primary Kraken pairs
-      'BTCUSD': 'XXBTZUSD',
-      'ETHUSD': 'XETHZUSD',
-      'SOLUSD': 'SOLUSD',
-      'AVAXUSD': 'AVAXUSD',
-      'XRPUSD': 'XXRPZUSD',
-      'ADAUSD': 'ADAUSD',
-      'DOTUSD': 'DOTUSD',
-      'LINKUSD': 'LINKUSD',
-      'UNIUSD': 'UNIUSD',
-      'LTCUSD': 'XLTCZUSD',
-      'BCHUSD': 'BCHZUSD',
-      'USDTUSD': 'USDTZUSD',
-      'USDCUSD': 'USDCZUSD',
-      'BNBUSD': 'BNBUSD',
-      'NEARUSD': 'NEARUSD',
-      'MATICUSD': 'MATICUSD',
-      'ATOMUSD': 'ATOMUSD',
-      'ALGOUSD': 'ALGOUSD',
-      'TRXUSD': 'TRXUSD',
-      'APTUSD': 'APTUSD',
-      
-      // USDT pairs - More liquid alternatives
-      'BTCUSDT': 'XBTUSDT',
-      'ETHUSDT': 'ETHUSDT',
-      'SOLUSDT': 'SOLUSDT',
-      'XRPUSDT': 'XRPUSDT',
-      'ADAUSDT': 'ADAUSDT',
-      'DOTUSDT': 'DOTUSDT',
-      'LINKUSDT': 'LINKUSDT',
-      'UNIUSDT': 'UNIUSDT',
-      'LTCUSDT': 'LTCUSDT',
-      'BCHUSDT': 'BCHUSDT',
-      'BNBUSDT': 'BNBUSDT',
-      'NEARUSDT': 'NEARUSDT',
-      'MATICUSDT': 'MATICUSDT',
-      'ATOMUSDT': 'ATOMUSDT',
-      'ALGOUSDT': 'ALGOUSDT',
-      'TRXUSDT': 'TRXUSDT',
-      'APTUSDT': 'APTUSDT',
-      
-      // Popular meme/alt coins - map to closest available or USD equivalent
-      'WLFIUSD': 'WLFIUSD',
-      'SOMIUSD': null, // Not available on Kraken, will fall back to other APIs
-      'JITOSOLUSD': null,
-      'BGBUSD': null,
-      'CARDSUSD': null,
-      'STETHUSD': null,
-      'NOTUSD': null,
-      'DOGSUSD': null,
-      'PUMPUSD': null
-    };
-
-    return mapping[symbol] || null;
-  }
-
-  /**
-   * Convert Kraken pair back to our symbol format
-   */
-  private krakenPairToSymbol(krakenPair: string): string | null {
-    const mapping: Record<string, string> = {
-      'XXBTZUSD': 'BTCUSD',
-      'XETHZUSD': 'ETHUSD',
-      'SOLUSD': 'SOLUSD',
-      'AVAXUSD': 'AVAXUSD',
-      'XXRPZUSD': 'XRPUSD',
-      'ADAUSD': 'ADAUSD',
-      'DOTUSD': 'DOTUSD',
-      'LINKUSD': 'LINKUSD',
-      'UNIUSD': 'UNIUSD',
-      'XLTCZUSD': 'LTCUSD',
-      'BCHZUSD': 'BCHUSD',
-      'XBTUSDT': 'BTCUSDT',
-      'ETHUSDT': 'ETHUSDT'
-    };
-
-    return mapping[krakenPair] || null;
-  }
+  // Old hardcoded mapping functions removed - now using dynamic KrakenPairValidator
 
   /**
    * Check if we have access to authenticated endpoints

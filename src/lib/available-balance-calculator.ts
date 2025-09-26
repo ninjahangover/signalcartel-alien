@@ -18,7 +18,7 @@ export class AvailableBalanceCalculator {
   private lastBalance: AvailableBalanceResult | null = null;
   private lastUpdateTime: number = 0;
   private priorityPairs: Set<string> = new Set();
-  private krakenProxyUrl: string = 'http://127.0.0.1:3001';
+  private krakenProxyUrl: string = 'http://127.0.0.1:3002';
 
   // Rate limit: 30 seconds between API calls to avoid overloading
   private static minApiInterval: number = 30000;

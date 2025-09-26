@@ -78,7 +78,7 @@ export class OrderBookValidator {
 
       console.log(`📊 Fetching real-time order book data for ${symbol}...`);
       
-      const response = await fetch(`http://localhost:3001/api/order-book?symbol=${symbol}USD`);
+      const response = await fetch(`http://localhost:3002/api/order-book?symbol=${symbol}USD`);
       if (!response.ok) {
         throw new Error(`Order book API returned ${response.status}`);
       }
