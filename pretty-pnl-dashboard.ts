@@ -363,7 +363,7 @@ async function calculatePortfolioValue(balances: any) {
           console.log(`✅ ${displaySymbol}: ${bal.toFixed(6)} @ $${price.toFixed(2)} = $${value.toFixed(2)}`);
         }
       } catch (error) {
-        console.log(`❌ Could not get price for ${asset} (${pairSymbol}):`, error.message);
+        console.log(`❌ Could not get price for ${asset} (${pairSymbol || 'unknown pair'}):`, error.message);
       }
     }
   }

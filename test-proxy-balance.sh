@@ -2,7 +2,7 @@
 
 echo "Testing Kraken Proxy with Spot Account..."
 
-curl -X POST http://localhost:3001/api/kraken-proxy \
+curl -X POST http://localhost:3002/api/kraken-proxy \
   -H "Content-Type: application/json" \
   -d "{
     \"endpoint\": \"/0/private/Balance\",

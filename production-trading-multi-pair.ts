@@ -30,6 +30,12 @@ import { webhookClient } from './src/lib/webhooks/webhook-client';
 import { WebhookPayloadAdapter } from './src/lib/webhook-payload-adapter';
 import { krakenApiService } from './src/lib/kraken-api-service';
 import { sharedMarketDataCache } from './src/lib/shared-market-data-cache';
+// Dynamic System Components
+import { dynamicThresholdCalculator } from './src/lib/dynamic-threshold-calculator';
+import { dynamicConvictionCalculator } from './src/lib/dynamic-conviction-calculator';
+import { adaptiveLearningExpander } from './src/lib/adaptive-learning-expander';
+import { opportunityExecutionBridge } from './src/lib/opportunity-execution-bridge';
+import { realTimePositionUpdater } from './src/lib/real-time-position-updater';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -108,6 +114,11 @@ class ProductionTradingEngine {
     this.balanceCalculator = getAvailableBalanceCalculator();
     this.enhancedMarkovPredictor2 = new EnhancedMarkovPredictor();
     this.mathEngine = new MathematicalIntuitionEngine();
+
+    // 🚀 DYNAMIC SYSTEM: Start real-time position updates
+    log('🔄 Initializing dynamic trading components...');
+    realTimePositionUpdater.startMonitoring();
+    log('✅ Real-time position updater active');
     this.enhancedIntuition = enhancedMathematicalIntuition;
     this.pairAdapter = getIntelligentPairAdapter();
     this.webhookAdapter = new WebhookPayloadAdapter('quantum-forge-live-trading');
@@ -2094,42 +2105,62 @@ class ProductionTradingEngine {
         if (aiAnalysis.tensorDecision && aiAnalysis.tensorDecision.shouldTrade) {
           const tensorReturnPercent = (aiAnalysis.tensorDecision.expectedReturn || 0) * 100;
           const tensorConfidencePercent = (aiAnalysis.tensorDecision.confidence || 0) * 100;
-          
-          // 🎯 DYNAMIC PROFIT THRESHOLD - Based on market intelligence
-          const commissionCost = 0.42; // Kraken commission
-          const marketVolatility = Math.abs(data.price_change_24h || 0);
-          const dynamicReturnThreshold = Math.max(
-            commissionCost * 2.5, // Minimum: 2.5x commission cost
-            marketVolatility * 0.3, // Or 30% of daily volatility  
-            0.8 // Absolute minimum 0.8%
-          );
-          const dynamicConfidenceThreshold = Math.max(
-            25, // Minimum 25%
-            50 - (marketVolatility * 2), // Higher volatility = lower confidence needed
-            Math.min(70, tensorConfidencePercent * 0.6) // Adaptive to tensor's confidence
-          );
-          
-          // 🎯 COMPLEMENTARY POSITION SIZING: Mathematical proof enhances position size instead of blocking
-          // SINGLE DECISION MAKER: Tensor decides to trade, mathematical proof determines position size boost
-          const mathematicalProofMet = tensorReturnPercent >= dynamicReturnThreshold && tensorConfidencePercent >= dynamicConfidenceThreshold;
-          
-          if (mathematicalProofMet) {
-            log(`🧮 TENSOR MATHEMATICAL PROOF: ${data.symbol} - ${tensorReturnPercent.toFixed(2)}% expected return, ${tensorConfidencePercent.toFixed(1)}% confidence`);
-            log(`📊 Market Analysis: Return threshold ${dynamicReturnThreshold.toFixed(2)}%, Confidence threshold ${dynamicConfidenceThreshold.toFixed(1)}% (volatility: ${marketVolatility.toFixed(2)}%)`);
-            log(`🧠 AI Systems Consensus: ${aiAnalysis.tensorDecision.aiSystemsUsed.join(', ')} - Mathematical proof validated`);
-            
-            // Calculate consensus position size multiplier (1.2x to 2.0x boost when both systems agree)
-            const returnStrength = Math.min(2.0, tensorReturnPercent / dynamicReturnThreshold); // How much return exceeds threshold
-            const confidenceStrength = Math.min(2.0, tensorConfidencePercent / dynamicConfidenceThreshold); // How much confidence exceeds threshold
-            const consensusMultiplier = 1.0 + (returnStrength * confidenceStrength * 0.3); // 1.0x to 1.6x boost
-            
-            // Store for position sizing logic below
-            aiAnalysis.consensusMultiplier = Math.max(1.2, Math.min(2.0, consensusMultiplier));
-            log(`🚀 CONSENSUS BOOST: ${(aiAnalysis.consensusMultiplier * 100 - 100).toFixed(0)}% position size increase (Tensor + Mathematical Proof agreement)`);
-          } else {
-            log(`📊 TENSOR ANALYSIS: ${data.symbol} - Mathematical proof not met (Return: ${tensorReturnPercent.toFixed(2)}%, Confidence: ${tensorConfidencePercent.toFixed(1)}%)`);
-            log(`🎯 SINGLE DECISION MAKER: Tensor authority proceeds with base position size`);
-            aiAnalysis.consensusMultiplier = 1.0; // Base position size, no boost
+
+          // 🚀 DYNAMIC SYSTEM INTEGRATION: Use new dynamic threshold calculator
+          try {
+            // Create opportunity for execution bridge
+            const opportunity = {
+              symbol: data.symbol,
+              expectedReturn: tensorReturnPercent,
+              winProbability: tensorConfidencePercent,
+              source: 'tensor-ai-fusion',
+              urgency: 0.8,
+              detectedAt: new Date(),
+              marketData: { price: data.price, priceChange24h: data.price_change_24h || 0 }
+            };
+
+            // Get dynamic execution decision
+            const executionDecision = await opportunityExecutionBridge.processOpportunity(opportunity);
+
+            if (executionDecision.execute) {
+              log(`🎯 DYNAMIC EXECUTION: ${data.symbol} approved - ${executionDecision.reason}`);
+              log(`   Expected Return: ${tensorReturnPercent.toFixed(2)}%`);
+              log(`   Dynamic Threshold: ${(executionDecision.dynamicThreshold * 100).toFixed(2)}%`);
+              log(`   Position Size: $${executionDecision.quantity.toFixed(2)}`);
+              log(`   Execution Speed: ${executionDecision.executionSpeed}`);
+
+              // Calculate consensus multiplier based on execution decision
+              const baseSize = 100; // Standard base size
+              const dynamicMultiplier = executionDecision.quantity / baseSize;
+              aiAnalysis.consensusMultiplier = Math.max(1.0, Math.min(3.0, dynamicMultiplier));
+
+              log(`🚀 DYNAMIC BOOST: ${((aiAnalysis.consensusMultiplier - 1) * 100).toFixed(0)}% position size adjustment`);
+            } else {
+              log(`📊 DYNAMIC ANALYSIS: ${data.symbol} - ${executionDecision.reason}`);
+              log(`🎯 SKIP: Expected return ${tensorReturnPercent.toFixed(2)}% below dynamic threshold`);
+              aiAnalysis.consensusMultiplier = 1.0;
+              continue; // Skip this opportunity
+            }
+
+            // Mathematical proof met through dynamic system
+            const mathematicalProofMet = executionDecision.execute;
+
+          } catch (dynamicError) {
+            log(`⚠️ Dynamic system error for ${data.symbol}: ${dynamicError.message}`);
+            log(`🔄 Falling back to standard tensor evaluation`);
+
+            // Fallback to original logic if dynamic system fails
+            const tensorReturnPercent = (aiAnalysis.tensorDecision.expectedReturn || 0) * 100;
+            const tensorConfidencePercent = (aiAnalysis.tensorDecision.confidence || 0) * 100;
+
+            const mathematicalProofMet = tensorReturnPercent >= 8.0 && tensorConfidencePercent >= 25;
+
+            if (mathematicalProofMet) {
+              aiAnalysis.consensusMultiplier = 1.2;
+              log(`🧮 FALLBACK PROOF: ${data.symbol} meets basic criteria`);
+            } else {
+              aiAnalysis.consensusMultiplier = 1.0;
+            }
           }
           
           // ALWAYS allow tensor decisions to proceed (single decision maker authority)
@@ -2604,7 +2635,10 @@ class ProductionTradingEngine {
     
     this.isRunning = true;
     log('🟢 Production trading engine started!');
-    
+
+    // 🧠 DYNAMIC LEARNING: Track cycles for periodic expansion
+    let cycleCount = 0;
+
     while (this.isRunning) {
       try {
         // Add timeout protection for the entire trading cycle - EXTENDED FOR CACHE OPTIMIZATION
@@ -2616,7 +2650,19 @@ class ProductionTradingEngine {
           this.executeTradingCycle(),
           cycleTimeout
         ]);
-        
+
+        // 🧠 DYNAMIC LEARNING: Expand learning every 20 cycles
+        cycleCount++;
+        if (cycleCount % 20 === 0) {
+          try {
+            log(`🧠 ADAPTIVE LEARNING EXPANSION: Cycle ${cycleCount} - expanding learning opportunities...`);
+            await adaptiveLearningExpander.expandLearning();
+            log(`✅ Learning expansion complete`);
+          } catch (learningError) {
+            log(`⚠️ Learning expansion error: ${learningError.message}`);
+          }
+        }
+
         // Wait 30 seconds between cycles (prevent runaway trading)
         await new Promise(resolve => setTimeout(resolve, 30000));
         

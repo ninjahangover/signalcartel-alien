@@ -1593,7 +1593,7 @@ export class QuantumForgeProfitPredator {
                    'LINKUSD', 'LINKUSDT', 'LINKUSDC', 'AVAXUSD', 'AVAXUSDT', 'AVAXUSDC',
                    'ATOMUSD', 'ATOMUSDT', 'ATOMUSDC', 'NEARUSD', 'LTCUSD', 'LTCUSDT',
                    'LTCUSDC', 'BCHUSD', 'BCHUSDT', 'BCHUSDC', 'TRXUSD'];
-    return majors.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+    return majors.filter(pair => CRYPTO_TRADING_PAIRS && CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
   }
 
   private getMemeCoinPairs(): string[] {
