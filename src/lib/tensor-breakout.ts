@@ -3627,7 +3627,7 @@ export class TensorAIFusionEngine {
     const timeBoost = 1 + phi * Math.log(1 + timeHeld / tau);
     
     // Dynamic exit threshold that DECREASES over time (easier to hold)
-    const baseThreshold = 0.8;
+    const baseThreshold = 0.65; // Lowered from 0.8 for more dynamic capital rotation
     const dynamicThreshold = baseThreshold / Math.sqrt(timeBoost);
     
     console.log(`⏱️ TIME-WEIGHTED CONVICTION: ${timeHeld.toFixed(1)} min held → Boost: ${timeBoost.toFixed(2)}x → Threshold: ${dynamicThreshold.toFixed(2)} (was ${baseThreshold})`);
