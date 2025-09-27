@@ -1,12 +1,14 @@
 /**
  * Real-Time Price Fetcher
- * 
+ *
  * ONLY fetches REAL prices from REAL APIs
  * NO MOCK DATA - if APIs fail, we show that clearly
  * Uses rate-limited service to prevent API errors
  */
 
 import RateLimitedMarketDataService from './rate-limited-market-data';
+import { priceLogger } from './price-logger';
+import { krakenRealTimeService } from './kraken-real-time-service';
 
 export interface RealPriceData {
   symbol: string;
@@ -147,7 +149,7 @@ class RealTimePriceFetcher {
     if (breaker.state === 'OPEN') {
       if (now >= breaker.nextAttempt) {
         breaker.state = 'HALF_OPEN';
-        console.log(`🔓 Circuit breaker HALF_OPEN for ${api} - testing recovery`);
+        priceLogger.info(`🔓 Circuit breaker HALF_OPEN for ${api} - testing recovery`);
       }
     }
     
@@ -160,7 +162,7 @@ class RealTimePriceFetcher {
     
     breaker.failures = 0;
     breaker.state = 'CLOSED';
-    console.log(`✅ Circuit breaker CLOSED for ${api} - API recovered`);
+    priceLogger.success(`✅ Circuit breaker CLOSED for ${api} - API recovered`);
   }
 
   private recordFailure(api: string): void {
@@ -174,7 +176,7 @@ class RealTimePriceFetcher {
     if (breaker.failures >= this.CIRCUIT_BREAKER_THRESHOLD) {
       breaker.state = 'OPEN';
       breaker.nextAttempt = now + this.CIRCUIT_BREAKER_TIMEOUT;
-      console.warn(`🚨 Circuit breaker OPEN for ${api} - too many failures (${breaker.failures}), blocked for ${this.CIRCUIT_BREAKER_TIMEOUT / 1000}s`);
+      priceLogger.warn(`🚨 Circuit breaker OPEN for ${api} - too many failures (${breaker.failures}), blocked for ${this.CIRCUIT_BREAKER_TIMEOUT / 1000}s`);
     }
   }
 
@@ -191,7 +193,7 @@ class RealTimePriceFetcher {
   private validatePrice(symbol: string, price: number, source: string): boolean {
     // Basic validation
     if (!price || price <= 0 || !isFinite(price)) {
-      console.error(`❌ Invalid price for ${symbol}: ${price} from ${source}`);
+      priceLogger.error(`❌ Invalid price for ${symbol}: ${price} from ${source}`);
       return false;
     }
 
@@ -240,13 +242,33 @@ class RealTimePriceFetcher {
       }
     }
 
-    console.log(`📊 Fetching REAL price data for ${symbol} with rate-limited service...`);
-    
-    // Use rate-limited market data service instead of direct API calls
+    console.log(`📊 Fetching REAL price data for ${symbol} - prioritizing Kraken...`);
+
+    // PRIORITY 1: Try Kraken first (our working proxy with no rate limit issues)
+    try {
+      const krakenPrice = await krakenRealTimeService.getRealTimePrice(symbol);
+      if (krakenPrice && krakenPrice.price > 0) {
+        const result: RealPriceData = {
+          symbol,
+          price: krakenPrice.price,
+          timestamp: krakenPrice.timestamp,
+          source: 'kraken-proxy',
+          success: true
+        };
+
+        this.cache.set(symbol, { price: krakenPrice.price, timestamp: krakenPrice.timestamp });
+        priceLogger.success(`✅ Kraken price: ${symbol} = $${krakenPrice.price.toLocaleString()}`);
+        return result;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Kraken failed for ${symbol}:`, error.message);
+    }
+
+    // PRIORITY 2: Try rate-limited service (fallback)
     try {
       const rateLimitedService = RateLimitedMarketDataService.getInstance();
       const marketData = await rateLimitedService.getMarketData(symbol);
-      
+
       if (marketData) {
         const result: RealPriceData = {
           symbol,
@@ -255,7 +277,7 @@ class RealTimePriceFetcher {
           source: marketData.source,
           success: true
         };
-        
+
         this.cache.set(symbol, { price: marketData.price, timestamp: marketData.timestamp });
         return result;
       }
@@ -263,7 +285,7 @@ class RealTimePriceFetcher {
       console.warn(`⚠️ Rate-limited service failed for ${symbol}:`, error.message);
     }
     
-    // Fallback to original APIs with circuit breaker protection
+    // PRIORITY 3: Fallback to external APIs with circuit breaker protection (last resort)
     const apis = [
       { name: 'coingecko', fetch: () => this.fetchFromCoinGecko(symbol) },
       { name: 'binance', fetch: () => this.fetchFromBinance(symbol) },
@@ -310,10 +332,10 @@ class RealTimePriceFetcher {
           
           if (price && price > 0) {
             if (!this.validatePrice(symbol, price, 'coinbase-emergency')) {
-              console.error(`Emergency price validation failed for ${symbol}: $${price}`);
+              priceLogger.error(`Emergency price validation failed for ${symbol}: $${price}`);
               this.recordFailure('coinbase');
             } else {
-              console.log(`🆘 Emergency price from Coinbase: ${symbol} = $${price.toLocaleString()}`);
+              priceLogger.info(`🆘 Emergency price from Coinbase: ${symbol} = $${price.toLocaleString()}`);
               this.recordSuccess('coinbase');
               this.cache.set(symbol, { price, timestamp: new Date() });
               return {
@@ -443,7 +465,7 @@ class RealTimePriceFetcher {
       
       if (timeSinceLastRequest < this.COINGECKO_RATE_LIMIT_MS) {
         const waitTime = this.COINGECKO_RATE_LIMIT_MS - timeSinceLastRequest;
-        console.log(`⏳ CoinGecko rate limit: waiting ${waitTime}ms before request for ${symbol}`);
+        priceLogger.info(`⏳ CoinGecko rate limit: waiting ${waitTime}ms before request for ${symbol}`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
       
@@ -483,7 +505,7 @@ class RealTimePriceFetcher {
         throw new Error(`Price validation failed for ${symbol}: $${price}`);
       }
 
-      console.log(`✅ Real price from CoinGecko: ${symbol} = $${price.toLocaleString()}`);
+      priceLogger.success(`✅ Real price from CoinGecko: ${symbol} = $${price.toLocaleString()}`);
 
       return {
         symbol,
@@ -494,7 +516,7 @@ class RealTimePriceFetcher {
       };
 
     } catch (error) {
-      console.error(`CoinGecko API error for ${symbol}:`, error);
+      priceLogger.error(`CoinGecko API error for ${symbol}: ${error.message}`);
       return {
         symbol,
         price: 0,
@@ -754,7 +776,7 @@ class RealTimePriceFetcher {
     
     // CRITICAL FIX: Don't default to bitcoin! Return null if not found
     if (!map[symbol]) {
-      console.warn(`❌ Unknown symbol for CoinGecko: ${symbol} - cannot fetch price`);
+      priceLogger.warn(`❌ Unknown symbol for CoinGecko: ${symbol} - cannot fetch price`);
       return null;
     }
     
