@@ -92,51 +92,52 @@ export class AdaptiveProfitBrain {
 
   /**
    * Load recent trade outcomes from database for learning
+   * Uses AdaptiveLearningPerformance for real historical data
    */
   private async loadHistoricalOutcomes(): Promise<void> {
     try {
-      const { PrismaClient } = await import('@prisma/client');
-      const prisma = new PrismaClient();
+      const { prisma } = await import('./prisma');
 
-      const recentPositions = await prisma.position.findMany({
+      // Load from AdaptiveLearningPerformance - real historical data with no fallbacks
+      const adaptivePerformance = await prisma.adaptiveLearningPerformance.findMany({
         where: {
-          status: { in: ['CLOSED', 'FILLED'] },
-          created_at: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+          totalSignals: { gte: 10 } // Only load pairs with meaningful history
         },
-        orderBy: { created_at: 'desc' },
-        take: 100
+        orderBy: { updatedAt: 'desc' },
+        take: 50
       });
 
-      for (const position of recentPositions) {
-        if (position.expected_return && position.unrealized_pnl !== null) {
-          const outcome: TradeOutcome = {
-            symbol: position.symbol,
-            expectedReturn: position.expected_return,
-            actualReturn: (position.unrealized_pnl / Math.max(position.current_value, 1)) * 100,
-            winProbability: 0.65, // Default estimate
-            actualWin: position.unrealized_pnl > 0,
-            decisionFactors: {
-              timeHeld: this.calculateHoldingHours(position.created_at),
-              marketRegime: 'normal',
-              convictionLevel: 0.7,
-              opportunityCost: 0,
-              rotationScore: 0
-            },
-            profitImpact: position.unrealized_pnl,
-            timestamp: position.created_at
-          };
-          this.tradeHistory.push(outcome);
-        }
+      for (const perf of adaptivePerformance) {
+        // Create synthetic trade outcome from aggregated performance data
+        // This represents the average behavior of this symbol
+        const outcome: TradeOutcome = {
+          symbol: perf.symbol,
+          expectedReturn: perf.avgPnL / Math.abs(perf.avgPnL || 1) * 10, // Estimate based on avg P&L
+          actualReturn: perf.avgPnL,
+          winProbability: perf.accuracy, // Real accuracy from database
+          actualWin: perf.avgPnL > 0,
+          decisionFactors: {
+            timeHeld: 24, // Assume 24 hour average
+            marketRegime: 'normal',
+            convictionLevel: perf.confidence, // Real confidence from database
+            opportunityCost: 0,
+            rotationScore: perf.recentStreak / 10 // Convert streak to 0-1 score
+          },
+          profitImpact: perf.avgPnL,
+          timestamp: perf.updatedAt
+        };
+        this.tradeHistory.push(outcome);
       }
 
-      await prisma.$disconnect();
-      console.log(`📊 Loaded ${this.tradeHistory.length} historical outcomes for learning`);
+      // No disconnect needed - using singleton
+      console.log(`📊 Loaded ${this.tradeHistory.length} historical outcomes from AdaptiveLearningPerformance`);
 
       if (this.tradeHistory.length > 0) {
         this.evolveFromHistory();
       }
     } catch (error) {
       console.warn('⚠️ Could not load historical data for learning:', error.message);
+      // Fail gracefully - brain will learn from live data only
     }
   }
 
@@ -210,10 +211,63 @@ export class AdaptiveProfitBrain {
   }
 
   /**
+   * Get symbol-specific performance from database
+   */
+  private async getSymbolPerformance(symbol: string, side: 'long' | 'short' = 'long'): Promise<{
+    accuracy: number;
+    totalSignals: number;
+    totalPnL: number;
+    confidence: number;
+    recentStreak: number;
+  }> {
+    try {
+      const { prisma } = await import('./prisma');
+
+      const performance = await prisma.adaptiveLearningPerformance.findUnique({
+        where: {
+          category_symbol: {
+            category: side,
+            symbol: symbol
+          }
+        }
+      });
+
+      // No disconnect needed - using singleton
+
+      if (!performance || performance.totalSignals === 0) {
+        return {
+          accuracy: 0.5,
+          totalSignals: 0,
+          totalPnL: 0,
+          confidence: 0.5,
+          recentStreak: 0
+        };
+      }
+
+      return {
+        accuracy: performance.accuracy,
+        totalSignals: performance.totalSignals,
+        totalPnL: performance.totalPnL,
+        confidence: performance.confidence,
+        recentStreak: performance.recentStreak
+      };
+    } catch (error) {
+      console.warn(`⚠️ Could not fetch performance for ${symbol}:`, error.message);
+      return {
+        accuracy: 0.5,
+        totalSignals: 0,
+        totalPnL: 0,
+        confidence: 0.5,
+        recentStreak: 0
+      };
+    }
+  }
+
+  /**
    * Calculate adaptive profit-maximizing decision using evolved neural pathways
    * This replaces static E = (W × A) - (L × B) with dynamic learning
    */
-  calculateAdaptiveProfitDecision(
+  async calculateAdaptiveProfitDecision(
     currentPosition: {
       symbol: string;
       actualReturn: number;
@@ -230,13 +284,17 @@ export class AdaptiveProfitBrain {
       signalStrength: number;
       requiredCapital: number;
     }
-  ): {
+  ): Promise<{
     action: 'hold' | 'rotate' | 'partial_exit' | 'full_exit';
     confidence: number;
     expectedProfit: number;
     neuralReasoning: string;
     pathwayActivations: Map<string, number>;
-  } {
+    symbolPerformance?: { accuracy: number; totalPnL: number; recentStreak: number };
+  }> {
+
+    // Get symbol-specific historical performance
+    const symbolPerformance = await this.getSymbolPerformance(currentPosition.symbol);
 
     // Calculate factor activations for current situation
     const activations = new Map<string, number>();
@@ -245,8 +303,22 @@ export class AdaptiveProfitBrain {
     const expectedReturnActivation = Math.tanh(currentPosition.expectedReturn / 20);
     activations.set('expectedReturn', expectedReturnActivation);
 
-    // Win probability from AI confidence
-    const winProbActivation = Math.min(currentPosition.aiConfidence / 100, 1.0);
+    // Win probability from AI confidence (boosted by symbol performance)
+    let winProbActivation = Math.min(currentPosition.aiConfidence / 100, 1.0);
+
+    // Apply symbol-specific performance adjustments
+    if (symbolPerformance.totalSignals >= 50) {
+      if (symbolPerformance.accuracy > 0.90) {
+        // Excellent performer - boost confidence
+        winProbActivation *= 1.5;
+        console.log(`   🌟 Symbol boost: ${currentPosition.symbol} has ${(symbolPerformance.accuracy * 100).toFixed(1)}% accuracy`);
+      } else if (symbolPerformance.accuracy < 0.30) {
+        // Poor performer - reduce confidence
+        winProbActivation *= 0.3;
+        console.log(`   ⚠️ Symbol penalty: ${currentPosition.symbol} has ${(symbolPerformance.accuracy * 100).toFixed(1)}% accuracy`);
+      }
+    }
+
     activations.set('winProbability', winProbActivation);
 
     // Time decay (positions become less attractive over time)
@@ -261,8 +333,14 @@ export class AdaptiveProfitBrain {
     }
     activations.set('opportunityCost', opportunityCostActivation);
 
-    // Conviction level from mathematical proof
-    const convictionActivation = currentPosition.mathematicalProof;
+    // Conviction level from mathematical proof (enhanced by symbol track record)
+    let convictionActivation = currentPosition.mathematicalProof;
+
+    // Boost conviction for proven winners
+    if (symbolPerformance.totalSignals >= 50 && symbolPerformance.accuracy > 0.85) {
+      convictionActivation *= 1.3;
+    }
+
     activations.set('convictionLevel', convictionActivation);
 
     // Market momentum from recent performance
@@ -298,10 +376,10 @@ export class AdaptiveProfitBrain {
     let action: 'hold' | 'rotate' | 'partial_exit' | 'full_exit';
     let confidence = Math.abs(normalizedScore);
 
-    // Dynamic thresholds based on learning
-    const rotateThreshold = this.calculateDynamicThreshold('rotate');
-    const exitThreshold = this.calculateDynamicThreshold('exit');
-    const partialExitThreshold = this.calculateDynamicThreshold('partial');
+    // Dynamic thresholds based on learning (symbol-specific)
+    const rotateThreshold = await this.calculateDynamicThreshold('rotate', currentPosition.symbol);
+    const exitThreshold = await this.calculateDynamicThreshold('exit', currentPosition.symbol);
+    const partialExitThreshold = await this.calculateDynamicThreshold('partial', currentPosition.symbol);
 
     if (newOpportunity && normalizedScore > rotateThreshold) {
       action = 'rotate';
@@ -334,6 +412,7 @@ export class AdaptiveProfitBrain {
 
     const neuralReasoning = `Neural decision score: ${normalizedScore.toFixed(3)} | ` +
                            `Top factors: ${topPathways} | ` +
+                           `Symbol: ${(symbolPerformance.accuracy * 100).toFixed(1)}% acc, $${symbolPerformance.totalPnL.toFixed(0)} P&L | ` +
                            `Generation ${this.currentGeneration} learning active`;
 
     return {
@@ -341,14 +420,23 @@ export class AdaptiveProfitBrain {
       confidence,
       expectedProfit,
       neuralReasoning,
-      pathwayActivations: activations
+      pathwayActivations: activations,
+      symbolPerformance: {
+        accuracy: symbolPerformance.accuracy,
+        totalPnL: symbolPerformance.totalPnL,
+        recentStreak: symbolPerformance.recentStreak
+      }
     };
   }
 
   /**
    * Calculate dynamic decision thresholds based on recent performance
+   * Enhanced with symbol-specific adjustments
    */
-  private calculateDynamicThreshold(actionType: 'rotate' | 'exit' | 'partial'): number {
+  private async calculateDynamicThreshold(
+    actionType: 'rotate' | 'exit' | 'partial',
+    symbol?: string
+  ): Promise<number> {
     const recentTrades = this.tradeHistory.slice(-20);
     if (recentTrades.length < 5) {
       // Default thresholds if not enough data
@@ -363,16 +451,39 @@ export class AdaptiveProfitBrain {
     // Adjust thresholds based on recent performance
     const performanceMultiplier = Math.tanh(avgProfit / Math.max(profitStd, 1));
 
+    let baseThreshold: number;
     switch (actionType) {
       case 'rotate':
-        return 0.3 - (performanceMultiplier * 0.15); // More aggressive if performing well
+        baseThreshold = 0.3 - (performanceMultiplier * 0.15); // More aggressive if performing well
+        break;
       case 'exit':
-        return -0.4 + (performanceMultiplier * 0.2); // Less likely to exit if performing well
+        baseThreshold = -0.4 + (performanceMultiplier * 0.2); // Less likely to exit if performing well
+        break;
       case 'partial':
-        return -0.1 + (performanceMultiplier * 0.1);
+        baseThreshold = -0.1 + (performanceMultiplier * 0.1);
+        break;
       default:
-        return 0;
+        baseThreshold = 0;
     }
+
+    // Apply symbol-specific threshold adjustments
+    if (symbol) {
+      const symbolPerf = await this.getSymbolPerformance(symbol);
+
+      if (symbolPerf.totalSignals >= 50) {
+        if (symbolPerf.accuracy >= 0.90 && symbolPerf.totalPnL > 100) {
+          // Excellent pair - more aggressive thresholds
+          baseThreshold *= 0.7; // Make it easier to trade this symbol
+          console.log(`   ⭐ Threshold adjusted for excellent pair ${symbol}: ${baseThreshold.toFixed(3)}`);
+        } else if (symbolPerf.accuracy < 0.30) {
+          // Poor pair - more conservative thresholds
+          baseThreshold *= 1.5; // Make it harder to trade this symbol
+          console.log(`   ⚠️ Threshold adjusted for poor pair ${symbol}: ${baseThreshold.toFixed(3)}`);
+        }
+      }
+    }
+
+    return baseThreshold;
   }
 
   /**

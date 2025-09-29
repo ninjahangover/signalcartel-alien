@@ -25,7 +25,7 @@ import { TensorAIFusionEngine } from './src/lib/tensor-ai-fusion-engine';
 import { productionTensorIntegration } from './src/lib/production-tensor-integration';
 import { unifiedTensorCoordinator } from './src/lib/unified-tensor-coordinator';
 import { tradeLifecycleManager } from './src/lib/trade-lifecycle-manager';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './src/lib/prisma'; // Use singleton instead of new PrismaClient
 import { webhookClient } from './src/lib/webhooks/webhook-client';
 import { WebhookPayloadAdapter } from './src/lib/webhook-payload-adapter';
 import { krakenApiService } from './src/lib/kraken-api-service';
@@ -38,11 +38,6 @@ import { opportunityExecutionBridge } from './src/lib/opportunity-execution-brid
 import { realTimePositionUpdater } from './src/lib/real-time-position-updater';
 import * as fs from 'fs';
 import * as path from 'path';
-
-const prisma = new PrismaClient({
-  log: ['error'],
-  errorFormat: 'minimal'
-});
 
 // Logging setup
 const LOG_DIR = '/tmp/signalcartel-logs';

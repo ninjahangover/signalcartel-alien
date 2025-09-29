@@ -4,11 +4,9 @@
  * Focuses on high-gain potential while maintaining mathematical discipline
  */
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './prisma';
 import { krakenProxyService } from './kraken-proxy-service';
 import { EventEmitter } from 'events';
-
-const prisma = new PrismaClient();
 
 export interface LearningOpportunity {
   symbol: string;

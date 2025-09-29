@@ -14,7 +14,7 @@
 import { profitPredator, ProfitHunt, HuntResult } from './src/lib/quantum-forge-profit-predator';
 import { PositionService } from './src/lib/position-management/position-service';
 import { krakenApiService } from './src/lib/kraken-api-service';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './src/lib/prisma';
 
 interface PredatorMetrics {
   huntingCycles: number;
@@ -50,12 +50,11 @@ interface ActiveHunt {
 }
 
 export class ProfitPredatorTradingEngine {
-  private prisma: PrismaClient;
   private positionService: PositionService;
   private isHunting = false;
   private metrics: PredatorMetrics;
   private activeHunts: Map<string, ActiveHunt> = new Map();
-  
+
   // Predator configuration - optimized for maximum expectancy
   private maxConcurrentHunts = 15;        // Hunt aggressively across multiple opportunities
   private baseCapitalAllocation = 800;    // Base $ per hunt
@@ -66,7 +65,7 @@ export class ProfitPredatorTradingEngine {
   private totalCapital = 10000;
 
   constructor() {
-    this.prisma = new PrismaClient();
+    // Use singleton prisma client
     this.positionService = new PositionService();
     this.metrics = {
       huntingCycles: 0,
@@ -258,7 +257,7 @@ export class ProfitPredatorTradingEngine {
 
       if (orderResult.txid && orderResult.txid.length > 0) {
         // Save position to database
-        const position = await this.prisma.position.create({
+        const position = await prisma.position.create({
           data: {
             symbol: hunt.symbol,
             side: side.toUpperCase() as 'BUY' | 'SELL',
@@ -524,14 +523,14 @@ export class ProfitPredatorTradingEngine {
 
   private async getMarketData(symbol: string) {
     try {
-      const data = await this.prisma.marketDataCollection.findFirst({
+      const data = await prisma.marketDataCollection.findFirst({
         where: { symbol },
         orderBy: { newestData: 'desc' }
       });
       
       if (!data) return null;
       
-      const priceData = await this.prisma.marketData.findFirst({
+      const priceData = await prisma.marketData.findFirst({
         where: { symbol },
         orderBy: { timestamp: 'desc' }
       });

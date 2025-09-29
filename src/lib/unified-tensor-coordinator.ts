@@ -16,6 +16,7 @@ import { BayesianProbabilityEngine } from './bayesian-probability-engine';
 import { gpuService } from './gpu-acceleration-service';
 import { realTimeRegimeMonitor, RegimeContext } from './real-time-regime-monitor';
 import { advancedRiskOrchestrator, RiskMetrics } from './advanced-risk-orchestrator';
+import { dynamicPairFilter } from './dynamic-pair-filter';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -387,7 +388,24 @@ export class UnifiedTensorCoordinator {
     console.log(`🎯 UNIFIED ANALYSIS: Starting comprehensive analysis for ${symbol}`);
 
     try {
-      // 0. Get current regime context for enhanced analysis
+      // 0a. DYNAMIC PAIR FILTER: Check if pair should be traded based on performance
+      const filterResult = await dynamicPairFilter.shouldAllowPair(symbol, 'long');
+
+      if (!filterResult.allowed) {
+        console.log(`🚫 PAIR FILTERED: ${symbol} - ${filterResult.reason}`);
+        if (filterResult.performance) {
+          console.log(`   Performance: ${(filterResult.performance.accuracy * 100).toFixed(1)}% accuracy, $${filterResult.performance.totalPnL.toFixed(2)} P&L over ${filterResult.performance.totalSignals} signals`);
+        }
+        // Return WAIT decision for filtered pairs
+        return this.getBlockedDecision(symbol, filterResult.reason);
+      }
+
+      // Log excellent pairs for visibility
+      if (filterResult.category === 'excellent' && filterResult.performance) {
+        console.log(`⭐ EXCELLENT PAIR: ${symbol} - ${(filterResult.performance.accuracy * 100).toFixed(1)}% accuracy, $${filterResult.performance.totalPnL.toFixed(2)} P&L, ${filterResult.performance.recentStreak}+ streak`);
+      }
+
+      // 0b. Get current regime context for enhanced analysis
       const regimeContext = realTimeRegimeMonitor.getCurrentRegime(symbol);
       if (regimeContext) {
         console.log(`📊 REGIME CONTEXT: ${symbol} in ${regimeContext.primary.regime} (${(regimeContext.confidence * 100).toFixed(1)}% confidence)`);
@@ -945,6 +963,43 @@ export class UnifiedTensorCoordinator {
       strength: 0.5,
       reasoning: `${source} analysis unavailable - using neutral signal`,
       data: {}
+    };
+  }
+
+  /**
+   * Get blocked decision for filtered pairs
+   */
+  private getBlockedDecision(symbol: string, reason: string): UnifiedDecision {
+    return {
+      symbol,
+      timestamp: new Date(),
+      finalDecision: 'WAIT',
+      confidence: 0,
+      strength: 0,
+      urgency: 0,
+      synthesis: {
+        systemAgreement: 0,
+        mathematicalConsensus: 0,
+        conflictResolution: 'dynamic_filter_blocked',
+        dominantReasoning: `Pair blocked by dynamic filter: ${reason}`
+      },
+      systemContributions: {
+        mathematicalIntuition: { weight: 0, influence: 0 },
+        bayesianProbability: { weight: 0, influence: 0 },
+        profitPredator: { weight: 0, influence: 0 },
+        orderBook: { weight: 0, influence: 0 }
+      },
+      riskAssessment: {
+        positionSize: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        maxHoldTime: 0
+      },
+      execution: {
+        orderType: 'market',
+        timeInForce: 'GTC',
+        priority: 'low'
+      }
     };
   }
 

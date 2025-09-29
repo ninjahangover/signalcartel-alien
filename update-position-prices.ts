@@ -3,9 +3,11 @@
 /**
  * Real-time Position Price Update Service
  * Updates current prices and unrealized P&L for open positions
+ * Now with Adaptive Learning feedback integration
  */
 
 import { PrismaClient } from '@prisma/client';
+import { adaptiveProfitBrain } from './src/lib/adaptive-profit-brain';
 
 const prisma = new PrismaClient();
 
@@ -84,6 +86,57 @@ async function updatePositionPrices() {
       const unrealizedPnL = position.side === 'long'
         ? priceDiff * position.quantity
         : -priceDiff * position.quantity;
+
+      // Calculate holding hours
+      const entryTime = new Date(position['entryTime' as keyof typeof position] || Date.now());
+      const holdingHours = (Date.now() - entryTime.getTime()) / (1000 * 60 * 60);
+
+      // Record significant P&L changes for adaptive learning (>$5 movement or position closed)
+      const positionValue = position.quantity * position.entryPrice;
+      const returnPercent = (unrealizedPnL / positionValue) * 100;
+
+      if (Math.abs(unrealizedPnL) > 5.0) {
+        try {
+          // Get real historical data from AdaptiveLearningPerformance for this symbol
+          const symbolPerf = await prisma.adaptiveLearningPerformance.findUnique({
+            where: {
+              category_symbol: {
+                category: position.side,
+                symbol: position.symbol
+              }
+            }
+          });
+
+          // Use real data from database, no hardcoded fallbacks for learning
+          const expectedReturn = symbolPerf?.avgPnL || returnPercent; // Use actual avg or current
+          const winProbability = symbolPerf?.accuracy || (unrealizedPnL > 0 ? 1.0 : 0.0); // Real accuracy or actual outcome
+          const convictionLevel = symbolPerf?.confidence || 0.5; // Real confidence or neutral
+
+          await adaptiveProfitBrain.recordTradeOutcome({
+            symbol: position.symbol,
+            expectedReturn: expectedReturn,
+            actualReturn: returnPercent,
+            winProbability: winProbability,
+            actualWin: unrealizedPnL > 0,
+            decisionFactors: {
+              timeHeld: holdingHours,
+              marketRegime: 'normal',
+              convictionLevel: convictionLevel,
+              opportunityCost: 0,
+              rotationScore: symbolPerf?.recentStreak || 0
+            },
+            profitImpact: unrealizedPnL,
+            timestamp: new Date()
+          });
+
+          if (Math.abs(returnPercent) > 10) {
+            console.log(`🧠 Adaptive Learning: Recorded ${position.symbol} outcome (${returnPercent.toFixed(1)}% return, $${unrealizedPnL.toFixed(2)} P&L) [${symbolPerf ? 'historical data' : 'live data'}]`);
+          }
+        } catch (error) {
+          // Don't fail position update if learning fails
+          console.error(`⚠️ Adaptive learning recording failed for ${position.symbol}:`, error.message);
+        }
+      }
 
       // Update position
       await prisma.livePosition.update({

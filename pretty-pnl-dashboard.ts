@@ -2,12 +2,10 @@
  * PRETTY P&L DASHBOARD - Fixed with direct Kraken API polling
  */
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './src/lib/prisma';
 import * as http from 'http';
 import * as url from 'url';
 import { execSync } from 'child_process';
-
-const prisma = new PrismaClient();
 
 // Hardcoded credentials that work
 const KRAKEN_API_KEY = 'DX6cOR0oDiBFem9c7M1aFhKBABAICZAI1VSynPJsCFWvAwmakDUfpElR';

@@ -12,8 +12,8 @@
  * Hunt where the money flows, evolve faster than the market.
  */
 
-import { PrismaClient } from '@prisma/client';
-import { CRYPTO_TRADING_PAIRS } from './crypto-trading-pairs';
+import { prisma } from './prisma';
+import { getKrakenUsdPairs, isPredatorTarget } from './crypto-trading-pairs';
 import { quantumForgeOrderBookAI } from './quantum-forge-orderbook-ai';
 import { UniversalSentimentEnhancer, BaseStrategySignal } from './sentiment/universal-sentiment-enhancer';
 import { mathIntuitionEngine } from './mathematical-intuition-engine';
@@ -108,9 +108,9 @@ export interface EvolutionMetrics {
 }
 
 export class QuantumForgeProfitPredator {
-  private prisma: PrismaClient;
   private sentimentEnhancer: UniversalSentimentEnhancer;
   private evolutionMetrics: EvolutionMetrics;
+  private cachedPairs: string[] = [];
   private activeHunts: Map<string, ProfitHunt> = new Map();
   private recentHuntResults: HuntResult[] = [];
   private learningMemory: Map<string, any> = new Map();
@@ -136,20 +136,22 @@ export class QuantumForgeProfitPredator {
   private currentBatchIndex = 0;        // Rotating batch index
   private lastBatchTime = 0;            // Track last batch request time
   private lastPublicApiCall = 0;        // Track public API calls separately
-  
+
   // 🚀 STATIC CACHE for all trading pairs (shared across instances)
   private static allTradingPairsCache: string[] = [];
   private static lastPairsFetch = 0;
   private static readonly PAIRS_CACHE_TTL = 3600000; // 1 hour cache
 
   constructor() {
-    // Initialize Prisma synchronously, connect lazily
-    this.prisma = new PrismaClient();
+    // Use singleton Prisma client
     this.sentimentEnhancer = new UniversalSentimentEnhancer();
     this.evolutionMetrics = this.initializeEvolutionMetrics();
 
     // Initialize logging
     this.initializeLogging();
+
+    // Initialize trading pairs asynchronously (non-blocking)
+    this.initializePairs();
 
     // Test database connection asynchronously (non-blocking)
     this.testDatabaseConnection();
@@ -160,10 +162,28 @@ export class QuantumForgeProfitPredator {
    */
   private async testDatabaseConnection() {
     try {
-      await this.prisma.$connect();
+      await prisma.$connect();
       this.logToFile('✅ Profit Predator: Database connection established');
     } catch (error) {
       this.logToFile(`❌ Profit Predator: Database connection failed, using fallbacks: ${error.message}`);
+    }
+  }
+
+  /**
+   * Initialize trading pairs asynchronously (non-blocking)
+   */
+  private async initializePairs(): Promise<void> {
+    try {
+      this.cachedPairs = await getKrakenUsdPairs();
+      this.logToFile(`🔧 Profit Predator: Initialized ${this.cachedPairs.length} trading pairs from Kraken API`);
+    } catch (error) {
+      this.logToFile(`⚠️ Profit Predator: Failed to load pairs from API, using fallback: ${error.message}`);
+      // Fallback to basic USD pairs
+      this.cachedPairs = [
+        'BTCUSD', 'ETHUSD', 'BNBUSD', 'ADAUSD', 'DOTUSD', 'AVAXUSD',
+        'LINKUSD', 'ATOMUSD', 'NEARUSD', 'LTCUSD', 'BCHUSD', 'TRXUSD',
+        'PEPEUSD', 'SHIBUSD', 'BONKUSD', 'WIFUSD', 'FLOKIUSD', 'MEWUSD'
+      ];
     }
   }
 
@@ -388,12 +408,12 @@ export class QuantumForgeProfitPredator {
           const symbol = coin.symbol + 'USD';
 
           // Check if this pair exists on Kraken
-          // Use CRYPTO_TRADING_PAIRS for validation
-          const symbolExists = CRYPTO_TRADING_PAIRS.some(p => p.symbol === symbol);
+          // Use cached pairs for validation
+          const symbolExists = this.cachedPairs && this.cachedPairs.includes(symbol);
           if (!symbolExists) {
             // Try with USDT suffix
             const symbolUSDT = coin.symbol + 'USDT';
-            if (!CRYPTO_TRADING_PAIRS.some(p => p.symbol === symbolUSDT)) {
+            if (!this.cachedPairs || !this.cachedPairs.includes(symbolUSDT)) {
               continue;
             }
           }
@@ -1264,10 +1284,9 @@ export class QuantumForgeProfitPredator {
       const allPairs = await this.getAllActivePairs();
 
       if (allPairs.length === 0) {
-        // Fallback to CRYPTO_TRADING_PAIRS if database is empty
-        return CRYPTO_TRADING_PAIRS
-          .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
-          .map(pair => pair.symbol)
+        // Fallback to cached pairs if database is empty
+        return this.cachedPairs
+          .filter(symbol => symbol.endsWith('USD') || symbol.endsWith('USDT') || symbol.endsWith('USDC'))
           .slice(0, this.BATCH_SIZE);
       }
 
@@ -1292,9 +1311,8 @@ export class QuantumForgeProfitPredator {
     } catch (error) {
       this.logToFile(`⚠️ Error getting hunting batch: ${error.message}`);
       // Fallback to ensure system continues
-      return CRYPTO_TRADING_PAIRS
-        .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
-        .map(pair => pair.symbol)
+      return this.cachedPairs
+        .filter(symbol => symbol.endsWith('USD') || symbol.endsWith('USDT') || symbol.endsWith('USDC'))
         .slice(this.currentBatchIndex * this.BATCH_SIZE, (this.currentBatchIndex + 1) * this.BATCH_SIZE);
     }
   }
@@ -1330,7 +1348,7 @@ export class QuantumForgeProfitPredator {
 
       if (this.prisma) {
         try {
-          const positions = await this.prisma.managedPosition.findMany({
+          const positions = await prisma.managedPosition.findMany({
             select: { symbol: true },
             distinct: ['symbol']
           });
@@ -1535,7 +1553,7 @@ export class QuantumForgeProfitPredator {
       // Try to fetch recent market data from database with better error handling
       let recentData: any[] = [];
       try {
-        recentData = await this.prisma.marketData.findMany({
+        recentData = await prisma.marketData.findMany({
           where: {
             symbol: { in: symbols },
             timestamp: {
@@ -1566,23 +1584,21 @@ export class QuantumForgeProfitPredator {
 
   private getHuntingPairs(): string[] {
     // Fallback method for backward compatibility
-    return CRYPTO_TRADING_PAIRS
-      .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
-      .map(pair => pair.symbol);
+    return this.cachedPairs
+      .filter(symbol => symbol.endsWith('USD') || symbol.endsWith('USDT') || symbol.endsWith('USDC'));
   }
 
   private getHighLeveragePairs(): string[] {
     // Get all high-leverage pairs (3x+) for aggressive hunting
-    return CRYPTO_TRADING_PAIRS
-      .filter(pair => pair.maxLeverage >= 3)
-      .map(pair => pair.symbol);
+    // For now, return all cached pairs since we don't have leverage info cached
+    return this.cachedPairs
+      .filter(symbol => symbol.endsWith('USD') || symbol.endsWith('USDT') || symbol.endsWith('USDC'));
   }
 
   private getPredatorTargetPairs(): string[] {
     // Get the highest priority predator target pairs
-    return CRYPTO_TRADING_PAIRS
-      .filter(pair => pair.isPredatorTarget)
-      .map(pair => pair.symbol);
+    // Use the isPredatorTarget function from crypto-trading-pairs
+    return this.cachedPairs.filter(symbol => isPredatorTarget(symbol));
   }
 
   private getMajorCryptoPairs(): string[] {
@@ -1593,14 +1609,14 @@ export class QuantumForgeProfitPredator {
                    'LINKUSD', 'LINKUSDT', 'LINKUSDC', 'AVAXUSD', 'AVAXUSDT', 'AVAXUSDC',
                    'ATOMUSD', 'ATOMUSDT', 'ATOMUSDC', 'NEARUSD', 'LTCUSD', 'LTCUSDT',
                    'LTCUSDC', 'BCHUSD', 'BCHUSDT', 'BCHUSDC', 'TRXUSD'];
-    return majors.filter(pair => CRYPTO_TRADING_PAIRS && CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+    return majors.filter(pair => this.cachedPairs && this.cachedPairs.includes(pair));
   }
 
   private getMemeCoinPairs(): string[] {
     // Get meme coin pairs with high volatility opportunities (all USD variants)
     const memes = ['XDGUSD', 'XDGUSDT', 'XDGUSDC', 'SHIBUSD', 'SHIBUSDT', 'SHIBUSDC',
                    'PEPEUSD', 'BONKUSD', 'WIFUSD', 'FLOKIUSD', 'MEWUSD'];
-    return memes.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+    return memes.filter(pair => this.cachedPairs && this.cachedPairs.includes(pair));
   }
 
   /**
@@ -1615,13 +1631,13 @@ export class QuantumForgeProfitPredator {
       'DEAIUMUSD', 'CATDOGUSD', 'MOOGIUSD', 'TORUSD', 'HIPPOSUSD',
       'NOTCOINUSD', 'MOONUSD', 'BABYDOGEUSD', 'XECUSD', 'RYUUSD'
     ];
-    return smallCaps.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+    return smallCaps.filter(pair => this.cachedPairs && this.cachedPairs.includes(pair));
   }
 
   private getAITechPairs(): string[] {
     // Get AI & Technology tokens with momentum potential (all USD variants)
     const aiTech = ['RENDERUSD', 'TAOUSD', 'INJUSD', 'VIRTUALUSD', 'VIRTUALUSDT', 'VIRTUALUSDC'];
-    return aiTech.filter(pair => CRYPTO_TRADING_PAIRS.some(p => p.symbol === pair));
+    return aiTech.filter(pair => this.cachedPairs && this.cachedPairs.includes(pair));
   }
 
   private getRemainingPairs(): string[] {
@@ -1634,9 +1650,8 @@ export class QuantumForgeProfitPredator {
       ...this.getAITechPairs()
     ]);
 
-    return CRYPTO_TRADING_PAIRS
-      .filter(pair => pair.quoteAsset === 'USD' || pair.quoteAsset === 'USDT' || pair.quoteAsset === 'USDC')
-      .map(pair => pair.symbol)
+    return this.cachedPairs
+      .filter(symbol => symbol.endsWith('USD') || symbol.endsWith('USDT') || symbol.endsWith('USDC'))
       .filter(symbol => !priorityPairs.has(symbol));
   }
 
@@ -1706,7 +1721,7 @@ export class QuantumForgeProfitPredator {
 
   private async getSimilarTradeCount(symbol: string, huntType: string): Promise<number> {
     try {
-      return await this.prisma.pairOpportunity.count({
+      return await prisma.pairOpportunity.count({
         where: {
           symbol,
           orderBookAnalysis: { contains: huntType }
@@ -1755,7 +1770,7 @@ export class QuantumForgeProfitPredator {
   private async getMarketData(symbol: string) {
     try {
       // First check database for recent data to minimize API calls
-      const recentData = await this.prisma.marketData.findFirst({
+      const recentData = await prisma.marketData.findFirst({
         where: {
           symbol,
           timestamp: {
@@ -1778,14 +1793,14 @@ export class QuantumForgeProfitPredator {
       // Only fetch from API if necessary (rate limited)
       await this.enforcePublicApiRateLimit();
 
-      const data = await this.prisma.marketDataCollection.findFirst({
+      const data = await prisma.marketDataCollection.findFirst({
         where: { symbol },
         orderBy: { newestData: 'desc' }
       });
 
       if (!data) return null;
 
-      const priceData = await this.prisma.marketData.findFirst({
+      const priceData = await prisma.marketData.findFirst({
         where: { symbol },
         orderBy: { timestamp: 'desc' }
       });
@@ -1838,7 +1853,7 @@ export class QuantumForgeProfitPredator {
 
       // Try to get from ManagedAccount first (more reliable)
       try {
-        const managedAccount = await this.prisma.managedAccount.findFirst({
+        const managedAccount = await prisma.managedAccount.findFirst({
           orderBy: { updatedAt: 'desc' }
         });
 
@@ -1854,7 +1869,7 @@ export class QuantumForgeProfitPredator {
 
       // Fallback: Try AccountBalance table
       try {
-        const balance = await this.prisma.accountBalance.findFirst({
+        const balance = await prisma.accountBalance.findFirst({
           orderBy: { timestamp: 'desc' }
         });
 
@@ -1875,7 +1890,7 @@ export class QuantumForgeProfitPredator {
           return 100; // Conservative fallback
         }
 
-        const positions = await this.prisma.managedPosition.findMany({
+        const positions = await prisma.managedPosition.findMany({
           where: { status: 'open' }
         });
 
