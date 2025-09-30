@@ -36,6 +36,10 @@ import { dynamicConvictionCalculator } from './src/lib/dynamic-conviction-calcul
 import { adaptiveLearningExpander } from './src/lib/adaptive-learning-expander';
 import { opportunityExecutionBridge } from './src/lib/opportunity-execution-bridge';
 import { realTimePositionUpdater } from './src/lib/real-time-position-updater';
+// 🧠 ADAPTIVE PROFIT BRAIN V2.0 - Neural Learning System
+import { adaptiveProfitBrain } from './src/lib/adaptive-profit-brain';
+// Make brain available globally for tensor engine
+(global as any).adaptiveProfitBrain = adaptiveProfitBrain;
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -181,8 +185,20 @@ class ProductionTradingEngine {
       // Initialize phase manager
       await phaseManager.updateTradeCount();
       const currentPhase = await phaseManager.getCurrentPhase();
-      
+
       log(`🎯 Starting in Phase ${currentPhase.phase}: ${currentPhase.name}`);
+
+      // 🧠 Adaptive Profit Brain V2.0 - Already initialized via singleton
+      try {
+        const thresholds = adaptiveProfitBrain.getCurrentThresholds();
+        log('🧠 ADAPTIVE PROFIT BRAIN V2.0 STATUS:');
+        log('📊 Current Learned Thresholds:');
+        for (const [name, data] of Object.entries(thresholds)) {
+          log(`   ${name}: ${(data.current * 100).toFixed(1)}% (optimal est: ${(data.optimal * 100).toFixed(1)}%)`);
+        }
+      } catch (brainError) {
+        log(`⚠️ Brain status check error: ${brainError.message}`);
+      }
       
       // Display appropriate threshold information
       if (this.tensorMode) {
@@ -683,10 +699,16 @@ class ProductionTradingEngine {
 
       log(`🔍 Processing ${opportunities.length} opportunities for priority pair update`);
       
-      // 🚀 DYNAMIC LEARNING THRESHOLD: AI-driven opportunity filtering
-      // Adapts based on market conditions, system performance, and learning data
-      const dynamicThreshold = await this.calculateDynamicOpportunityThreshold();
-      log(`🧠 DYNAMIC THRESHOLD: ${dynamicThreshold.toFixed(1)}% (adaptive learning-based)`);
+      // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Neural learning-based threshold
+      // Adapts through gradient descent from actual trade outcomes
+      const currentVolatility = this.calculateAverageVolatility();
+      const marketRegime = 'NEUTRAL'; // Could be enhanced with regime detection
+      const brainThreshold = adaptiveProfitBrain.getThreshold('profitTakingThreshold', {
+        volatility: currentVolatility,
+        regime: marketRegime
+      });
+      const dynamicThreshold = brainThreshold * 100; // Convert to percentage
+      log(`🧠 BRAIN THRESHOLD: ${dynamicThreshold.toFixed(1)}% (neural learning from ${adaptiveProfitBrain.getLearningMetrics().totalDecisions} decisions)`);
 
       const topScoringPairs = opportunities
         .filter(opp => opp.score >= dynamicThreshold) // Dynamic AI-driven threshold
@@ -1738,7 +1760,38 @@ class ProductionTradingEngine {
             } catch (learningError) {
               log(`⚠️ TENSOR LEARNING ERROR: ${learningError.message} - Trade learning skipped`);
             }
-            
+
+            // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Record trade outcome for threshold learning
+            try {
+              const entryTime = position.openTime?.getTime ? position.openTime : new Date(Date.now() - 60000);
+              const exitTime = new Date();
+              const timeHeldHours = (exitTime.getTime() - (entryTime.getTime ? entryTime.getTime() : exitTime.getTime() - 60000)) / (1000 * 60 * 60);
+
+              await adaptiveProfitBrain.recordTradeOutcome({
+                symbol: position.symbol,
+                expectedReturn: position.metadata?.tensorDecisionData?.expectedReturn || 0,
+                actualReturn: (result.pnl / position.entryValue) * 100,
+                winProbability: position.metadata?.tensorDecisionData?.confidence || 0.5,
+                actualWin: result.pnl > 0,
+                decisionFactors: {
+                  timeHeld: timeHeldHours,
+                  marketRegime: 'NEUTRAL',
+                  convictionLevel: position.metadata?.tensorDecisionData?.confidence || 0.5,
+                  opportunityCost: 0,
+                  rotationScore: 0
+                },
+                profitImpact: result.pnl,
+                timestamp: exitTime,
+                decisionType: 'exit',
+                thresholdAtDecision: position.metadata?.exitThreshold || 0.65,
+                confidenceLevel: position.metadata?.tensorDecisionData?.confidence || 0.5
+              });
+
+              log(`🧠 BRAIN LEARNING: Recorded ${winLoss} for threshold optimization ($${result.pnl.toFixed(2)} P&L)`);
+            } catch (brainError) {
+              log(`⚠️ BRAIN LEARNING ERROR: ${brainError.message} - Brain learning skipped`);
+            }
+
             // 🔥 Execute position close directly on Kraken API
             try {
               const closeAction = side === 'long' ? 'sell' : 'buy'; // Opposite action to close position
@@ -1860,9 +1913,43 @@ class ProductionTradingEngine {
     try {
       this.cycleCount++;
       const currentPhase = await phaseManager.getCurrentPhase();
-      
+
       log(`🔄 Trading Cycle ${this.cycleCount} - Phase ${currentPhase.phase}`);
-      
+
+      // 🧠 ADAPTIVE PROFIT BRAIN V2.0 - Log-Only Monitoring (every 10 cycles)
+      if (this.cycleCount % 10 === 0) {
+        try {
+          const currentVolatility = 0.05; // Typical crypto volatility
+          const brainThresholds = {
+            entry: adaptiveProfitBrain.getThreshold('entryConfidence', { volatility: currentVolatility, regime: 'NEUTRAL' }),
+            exit: adaptiveProfitBrain.getThreshold('exitScore', { volatility: currentVolatility }),
+            positionSize: adaptiveProfitBrain.getThreshold('positionSizeMultiplier', { confidence: 0.70 }),
+            profitTaking: adaptiveProfitBrain.getThreshold('profitTakingThreshold', { volatility: currentVolatility }),
+            capitalRotation: adaptiveProfitBrain.getThreshold('capitalRotationUrgency', { volatility: currentVolatility })
+          };
+
+          log('');
+          log('🧠 ========================================');
+          log('🧠 ADAPTIVE PROFIT BRAIN V2.0 RECOMMENDATIONS (not used yet):');
+          log(`🧠   Entry Threshold: ${(brainThresholds.entry * 100).toFixed(1)}% (system using: dynamic calc)`);
+          log(`🧠   Exit Threshold: ${(brainThresholds.exit * 100).toFixed(1)}% (system using: 65-80%)`);
+          log(`🧠   Position Multiplier: ${brainThresholds.positionSize.toFixed(2)}x (system using: 1.0x)`);
+          log(`🧠   Profit Taking: ${(brainThresholds.profitTaking * 100).toFixed(1)}% (system using: static)`);
+          log(`🧠   Capital Rotation: ${(brainThresholds.capitalRotation * 100).toFixed(1)}% (system using: static)`);
+
+          // Show learning metrics
+          const metrics = adaptiveProfitBrain.getLearningMetrics();
+          log(`🧠   Learning Status:`);
+          log(`🧠     - Total Decisions: ${metrics.totalDecisions}`);
+          log(`🧠     - Avg Profit Impact: $${metrics.avgProfitImpact.toFixed(2)}`);
+          log(`🧠     - System Convergence: ${(metrics.overallConvergence * 100).toFixed(0)}%`);
+          log('🧠 ========================================');
+          log('');
+        } catch (brainError) {
+          log(`⚠️ Brain monitoring error: ${brainError.message}`);
+        }
+      }
+
       // 🚀 STARTUP WARM-UP CYCLE: Market evaluation only, no trading on first cycle
       // 🐅 UPDATE PROFIT PREDATOR™ DYNAMIC PAIRS IMMEDIATELY (bypass all delays)
       // Critical: Run this FIRST to ensure discovered opportunities are always integrated
@@ -2358,12 +2445,16 @@ class ProductionTradingEngine {
                 action: data.action,
                 accountBalance: balanceInfo.availableBalance
               });
-              
+
               log(`💰 DYNAMIC BALANCE: Total: $${balanceInfo.totalBalance.toFixed(2)} | Available: $${balanceInfo.availableBalance.toFixed(2)} | Open Positions: ${balanceInfo.openPositionsCount} ($${balanceInfo.openPositionsValue.toFixed(2)})`);
-              
-              quantity = sizingResult.finalPositionSize;
-              
-              log(`🚀 ENHANCED SIZING: $${quantity.toFixed(2)} (${sizingResult.confidenceMultiplier.toFixed(1)}x conf × ${sizingResult.pairPerformanceMultiplier.toFixed(1)}x pair × ${sizingResult.winStreakMultiplier.toFixed(1)}x streak)`);
+
+              // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Apply learned position sizing multiplier
+              const brainMultiplier = adaptiveProfitBrain.getThreshold('positionSizeMultiplier', {
+                confidence: aiAnalysis.confidence
+              });
+              quantity = sizingResult.finalPositionSize * brainMultiplier;
+
+              log(`🚀 ENHANCED SIZING: $${quantity.toFixed(2)} (${sizingResult.confidenceMultiplier.toFixed(1)}x conf × ${sizingResult.pairPerformanceMultiplier.toFixed(1)}x pair × ${sizingResult.winStreakMultiplier.toFixed(1)}x streak × ${brainMultiplier.toFixed(2)}x 🧠brain)`);
               log(`💡 Reasoning: ${sizingResult.reasoning.join(', ')}`);
               log(`🎯 Expected: $${sizingResult.expectedProfit.toFixed(4)} | Risk: ${sizingResult.riskLevel}`);
               

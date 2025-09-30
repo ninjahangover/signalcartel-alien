@@ -3665,6 +3665,10 @@ export class TensorAIFusionEngine {
     let exitScore = 0;
     let reasons: string[] = [];
     let urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
+
+    // DEBUG LOGGING
+    console.log(`🔍 EXIT CALCULATION DEBUG:`);
+    console.log(`   Systems: ${contributingSystems.length}, Consensus: ${consensusStrength}, Time: ${positionTimeMinutes} min`);
     
     // 🕐 GOLDEN EQUATION: Time-weighted conviction using φ (golden ratio)
     const phi = 1.618033988749895;
@@ -3674,8 +3678,22 @@ export class TensorAIFusionEngine {
     // Calculate time-based conviction boost
     const timeBoost = 1 + phi * Math.log(1 + timeHeld / tau);
     
+    // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Use learned exit threshold
+    let baseThreshold = 0.65; // Fallback
+    try {
+      // Use the brain instance if available (passed via context or global)
+      const brainThreshold = (global as any).adaptiveProfitBrain?.getThreshold('exitScore', {
+        volatility: 0.05
+      });
+      if (brainThreshold !== undefined) {
+        baseThreshold = brainThreshold;
+        console.log(`🧠 Using brain-learned exit threshold: ${(baseThreshold * 100).toFixed(1)}%`);
+      }
+    } catch (error) {
+      // Silently fall back to default
+    }
+
     // Dynamic exit threshold that DECREASES over time (easier to hold)
-    const baseThreshold = 0.65; // Lowered from 0.8 for more dynamic capital rotation
     const dynamicThreshold = baseThreshold / Math.sqrt(timeBoost);
     
     console.log(`⏱️ TIME-WEIGHTED CONVICTION: ${timeHeld.toFixed(1)} min held → Boost: ${timeBoost.toFixed(2)}x → Threshold: ${dynamicThreshold.toFixed(2)} (was ${baseThreshold})`);
@@ -3695,29 +3713,41 @@ export class TensorAIFusionEngine {
       Math.sign(sys.direction) === majorityDirection || sys.direction === 0
     ).length;
     
-    // 🧠 MATHEMATICAL CONVICTION 1: MASSIVE consensus deterioration - ALL systems turning against position
-    // ONLY exit when mathematical thesis COMPLETELY breaks down (like your manual trading)
-    if (consensusStrength < 0.2 && avgSystemConfidence > 0.8 && systemsInAgreement === 0) {
-      exitScore += 0.6; // High score only for complete mathematical breakdown
-      reasons.push(`COMPLETE mathematical breakdown: ${(consensusStrength * 100).toFixed(1)}% consensus, ALL AI systems disagreeing`);
-      urgency = 'CRITICAL';
+    // 🧠 MATHEMATICAL CONVICTION 1: Consensus deterioration OR low agreement
+    // Exit when mathematical thesis weakens significantly
+    console.log(`   Consensus check: strength=${consensusStrength}, avgConf=${avgSystemConfidence}, agreement=${systemsInAgreement}`);
+
+    if (consensusStrength < 0.4 || (avgSystemConfidence < 0.5 && systemsInAgreement < contributingSystems.length * 0.4)) {
+      const scoreAdd = 0.3 + (0.4 - consensusStrength);
+      exitScore += scoreAdd;
+      reasons.push(`Mathematical weakening: ${(consensusStrength * 100).toFixed(1)}% consensus, ${systemsInAgreement}/${contributingSystems.length} agreeing`);
+      urgency = 'MEDIUM';
+      console.log(`   EXIT SCORE += ${scoreAdd.toFixed(2)} (consensus deterioration)`);
     }
     
-    // 🧠 MATHEMATICAL CONVICTION 2: Direction reversal - majority of systems now pointing opposite direction
-    // This is like when ALL your manual trading validations flip to the other side
-    // FIX: Simply count systems pointing opposite to majority
+    // 🧠 MATHEMATICAL CONVICTION 2: Direction reversal OR significant disagreement
     const systemsPointingOpposite = contributingSystems.filter(sys =>
       majorityDirection !== 0 && Math.sign(sys.direction) === -majorityDirection
     ).length;
-    
-    if (systemsPointingOpposite > contributingSystems.length * 0.7) {
-      exitScore += 0.7; // Strong mathematical reversal signal
-      reasons.push(`MATHEMATICAL REVERSAL: ${systemsPointingOpposite}/${contributingSystems.length} AI systems now pointing opposite direction`);
-      urgency = 'CRITICAL';
-    } else {
-      // HOLD CONVICTION: Just log the analysis but don't add to exit score
-      reasons.push(`HOLDING CONVICTION: ${systemsInAgreement}/${contributingSystems.length} systems still aligned - staying in position`);
-      console.log(`🧠 MATHEMATICAL CONVICTION: ${systemsInAgreement}/${contributingSystems.length} systems still aligned - HOLDING POSITION despite temporary fluctuation`);
+
+    console.log(`   Direction check: opposite=${systemsPointingOpposite}/${contributingSystems.length}`);
+
+    if (systemsPointingOpposite > contributingSystems.length * 0.5) { // Lowered from 0.7 to 0.5 (50% disagreement)
+      const scoreAdd = 0.4 * (systemsPointingOpposite / contributingSystems.length);
+      exitScore += scoreAdd;
+      reasons.push(`Direction disagreement: ${systemsPointingOpposite}/${contributingSystems.length} systems pointing opposite`);
+      urgency = systemsPointingOpposite > contributingSystems.length * 0.7 ? 'HIGH' : 'MEDIUM';
+      console.log(`   EXIT SCORE += ${scoreAdd.toFixed(2)} (direction reversal)`);
+    }
+
+    // 🎯 PROFIT TAKING LOGIC: Take profits on extreme gains
+    // NOTE: This requires position P&L to be passed in, which it currently isn't
+    // For now, add time-based profit taking
+    if (timeHeld > 240 && avgSystemConfidence < 0.6) { // 4+ hours with weakening confidence
+      const scoreAdd = 0.2;
+      exitScore += scoreAdd;
+      reasons.push(`Time-based profit consideration: ${(timeHeld/60).toFixed(1)}h held with ${(avgSystemConfidence*100).toFixed(0)}% confidence`);
+      console.log(`   EXIT SCORE += ${scoreAdd.toFixed(2)} (time-based profit taking)`);
     }
     
     // 🧠 MATHEMATICAL CONVICTION 3: Catastrophic reliability breakdown - when your most trusted indicators fail
@@ -3737,6 +3767,8 @@ export class TensorAIFusionEngine {
     
     // 🧠 MATHEMATICAL CONVICTION: Only exit when mathematical thesis COMPLETELY changes
     // 🕐 TIME-WEIGHTED: Use dynamic threshold that decreases over time
+    console.log(`   FINAL EXIT SCORE: ${exitScore.toFixed(2)} vs threshold ${dynamicThreshold.toFixed(2)}`);
+
     const shouldExit = exitScore >= dynamicThreshold; // Dynamic threshold based on time held
     const finalReason = reasons.length > 0 ? reasons.join(', ') : `mathematical conviction still strong - HOLDING POSITION (time boost: ${timeBoost.toFixed(2)}x)`;
     
@@ -4029,8 +4061,8 @@ export class TensorAIFusionEngine {
       return 0.30; // Conservative 30% threshold when data is missing
     }
     
-    // 🎯 BASE THRESHOLD: Start with market regime-dependent base (optimized for high win rate)
-    let baseThreshold = 0.20; // 20% base for normal conditions (reduced from 25%)
+    // 🎯 BASE THRESHOLD: Start with market regime-dependent base (optimized for more opportunities)
+    let baseThreshold = 0.10; // 10% base for aggressive trading (reduced from 20% for more entries)
     
     // 📊 FACTOR 1: Market Volatility Adjustment
     // Higher volatility = Lower threshold needed (more opportunities)
@@ -4058,8 +4090,8 @@ export class TensorAIFusionEngine {
       Math.max(...confidences) - Math.min(...confidences) : 0.2;
     const consistencyBonus = confidenceSpread < 0.15 ? -0.03 : 0.02; // Consistent systems = lower threshold
     
-    // 🧮 MATHEMATICAL COMBINATION (optimized for high win rate system)
-    const dynamicThreshold = Math.max(0.12, Math.min(0.40, 
+    // 🧮 MATHEMATICAL COMBINATION (optimized for more trading opportunities)
+    const dynamicThreshold = Math.max(0.08, Math.min(0.30, 
       baseThreshold + 
       volatilityAdjustment + 
       consensusStrength + 

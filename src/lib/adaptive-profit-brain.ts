@@ -1,7 +1,15 @@
 /**
- * Adaptive Profit Maximization Brain
- * Evolves mathematical equations dynamically based on real market feedback
- * Replaces static formulas with learning neural pathways
+ * ADAPTIVE PROFIT MAXIMIZATION BRAIN V2.0
+ * Unified self-learning mathematical consciousness that discovers optimal:
+ * - Neural pathway weights (profit factors)
+ * - Entry/exit thresholds (when to trade)
+ * - Position sizing multipliers (how much to trade)
+ * - Capital rotation timing (when to switch)
+ *
+ * Evolves through gradient descent with momentum, exploration-exploitation balance,
+ * and continuous feedback from actual trade outcomes.
+ *
+ * NO HARDCODED THRESHOLDS - Pure mathematical learning
  */
 
 interface TradeOutcome {
@@ -19,6 +27,10 @@ interface TradeOutcome {
   };
   profitImpact: number;
   timestamp: Date;
+  // New: Decision type tracking for threshold learning
+  decisionType?: 'entry' | 'hold' | 'exit' | 'skip';
+  thresholdAtDecision?: number;
+  confidenceLevel?: number;
 }
 
 interface NeuralPathway {
@@ -29,6 +41,22 @@ interface NeuralPathway {
   lastGradient: number;
   activationHistory: number[];
   profitCorrelation: number;
+}
+
+// New: Learned threshold parameters
+interface ThresholdParameter {
+  name: string;
+  currentValue: number;
+  learningRate: number;
+  momentum: number;
+  velocity: number;
+  minValue: number;
+  maxValue: number;
+  lastGradient: number;
+  profitHistory: number[];
+  adjustmentHistory: number[];
+  explorationNoise: number;
+  optimalEstimate: number; // Continuously updated estimate of optimal value
 }
 
 interface EquationGenome {
@@ -48,6 +76,13 @@ export class AdaptiveProfitBrain {
   private equationGenomes: EquationGenome[] = [];
   private currentGeneration: number = 0;
   private learningEnabled: boolean = true;
+
+  // NEW: Self-learning thresholds
+  private thresholds: Map<string, ThresholdParameter> = new Map();
+  private maxHistoryLength = 1000;
+  private performanceWindow = 50;
+  private explorationDecayRate = 0.995;
+  private minExplorationRate = 0.05;
 
   // Core mathematical factors that can be dynamically weighted
   private coreFacts = {
@@ -69,8 +104,9 @@ export class AdaptiveProfitBrain {
 
   private constructor() {
     this.initializeNeuralPathways();
+    this.initializeThresholdParameters(); // NEW
     this.loadHistoricalOutcomes();
-    console.log('🧠 Adaptive Profit Brain initialized - Learning from market feedback');
+    console.log('🧠 ADAPTIVE PROFIT BRAIN V2.0 initialized - Learning thresholds AND pathways');
   }
 
   /**
@@ -87,6 +123,116 @@ export class AdaptiveProfitBrain {
         activationHistory: [],
         profitCorrelation: 0
       });
+    }
+  }
+
+  /**
+   * NEW: Initialize self-learning threshold parameters
+   * These start with reasonable values but adapt through gradient descent
+   */
+  private initializeThresholdParameters(): void {
+    const baseLearningRate = 0.001;
+    const momentumDecay = 0.9;
+
+    // Entry confidence threshold
+    this.thresholds.set('entryConfidence', {
+      name: 'entryConfidence',
+      currentValue: 0.12, // Start at 12%
+      learningRate: baseLearningRate,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.05,
+      maxValue: 0.40,
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.10,
+      optimalEstimate: 0.12
+    });
+
+    // Exit score threshold
+    this.thresholds.set('exitScore', {
+      name: 'exitScore',
+      currentValue: 0.65,
+      learningRate: baseLearningRate * 0.5,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.20,
+      maxValue: 0.90,
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.08,
+      optimalEstimate: 0.65
+    });
+
+    // Position sizing multiplier
+    this.thresholds.set('positionSizeMultiplier', {
+      name: 'positionSizeMultiplier',
+      currentValue: 1.0,
+      learningRate: baseLearningRate * 0.3,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.5,
+      maxValue: 2.5,
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.05,
+      optimalEstimate: 1.0
+    });
+
+    // Profit taking threshold
+    this.thresholds.set('profitTakingThreshold', {
+      name: 'profitTakingThreshold',
+      currentValue: 0.15,
+      learningRate: baseLearningRate * 0.8,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.05,
+      maxValue: 0.50,
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.12,
+      optimalEstimate: 0.15
+    });
+
+    // Capital rotation urgency
+    this.thresholds.set('capitalRotationUrgency', {
+      name: 'capitalRotationUrgency',
+      currentValue: 0.30,
+      learningRate: baseLearningRate * 0.6,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.10,
+      maxValue: 0.80,
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.10,
+      optimalEstimate: 0.30
+    });
+
+    // Volatility adjustment factor
+    this.thresholds.set('volatilityAdjustmentFactor', {
+      name: 'volatilityAdjustmentFactor',
+      currentValue: 1.0,
+      learningRate: baseLearningRate * 0.4,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.5,
+      maxValue: 2.0,
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.06,
+      optimalEstimate: 1.0
+    });
+
+    console.log('📊 Initialized self-learning thresholds:');
+    for (const [name, param] of this.thresholds) {
+      console.log(`   ${name}: ${(param.currentValue * 100).toFixed(1)}% (range: ${(param.minValue * 100).toFixed(0)}-${(param.maxValue * 100).toFixed(0)}%)`);
     }
   }
 
@@ -488,12 +634,13 @@ export class AdaptiveProfitBrain {
 
   /**
    * Record actual trade outcome for continuous learning
+   * NOW: Also learns thresholds from outcomes
    */
-  recordTradeOutcome(outcome: TradeOutcome): void {
+  async recordTradeOutcome(outcome: TradeOutcome): Promise<void> {
     this.tradeHistory.push(outcome);
 
     // Keep history manageable
-    if (this.tradeHistory.length > 500) {
+    if (this.tradeHistory.length > this.maxHistoryLength) {
       this.tradeHistory.shift();
     }
 
@@ -502,7 +649,20 @@ export class AdaptiveProfitBrain {
       this.adaptFromRecentOutcome(outcome);
     }
 
-    console.log(`📈 Recorded outcome: ${outcome.symbol} expected ${outcome.expectedReturn.toFixed(1)}% got ${outcome.actualReturn.toFixed(1)}% (profit: ${outcome.profitImpact.toFixed(2)})`);
+    // NEW: Learn thresholds from this outcome
+    if (outcome.decisionType && outcome.thresholdAtDecision !== undefined) {
+      await this.updateThresholdsFromOutcome(outcome);
+    }
+
+    // Decay exploration rate
+    for (const param of this.thresholds.values()) {
+      param.explorationNoise = Math.max(
+        this.minExplorationRate,
+        param.explorationNoise * this.explorationDecayRate
+      );
+    }
+
+    console.log(`📈 Recorded outcome: ${outcome.symbol} expected ${outcome.expectedReturn.toFixed(1)}% got ${outcome.actualReturn.toFixed(1)}% (profit: $${outcome.profitImpact.toFixed(2)})`);
   }
 
   /**
@@ -556,6 +716,277 @@ export class AdaptiveProfitBrain {
   setLearningEnabled(enabled: boolean): void {
     this.learningEnabled = enabled;
     console.log(`🧠 Adaptive learning ${enabled ? 'ENABLED' : 'DISABLED'}`);
+  }
+
+  // ============================================================================
+  // NEW: SELF-LEARNING THRESHOLD METHODS
+  // ============================================================================
+
+  /**
+   * Get threshold value with contextual adjustments and exploration
+   */
+  getThreshold(
+    parameterName: string,
+    context?: {
+      volatility?: number;
+      regime?: string;
+      confidence?: number;
+      marketMomentum?: number;
+    }
+  ): number {
+    const param = this.thresholds.get(parameterName);
+    if (!param) {
+      console.warn(`⚠️ Unknown threshold parameter: ${parameterName}`);
+      return 0.15;
+    }
+
+    // Epsilon-greedy exploration
+    const shouldExplore = Math.random() < param.explorationNoise;
+
+    let value = param.currentValue;
+
+    // Apply contextual adjustments
+    if (context) {
+      if (context.volatility !== undefined && parameterName === 'entryConfidence') {
+        const volatilityFactor = this.thresholds.get('volatilityAdjustmentFactor')?.currentValue ?? 1.0;
+        value += context.volatility * volatilityFactor * 0.5;
+      }
+
+      if (context.regime === 'BULL' && parameterName === 'entryConfidence') {
+        value *= 0.9;
+      } else if (context.regime === 'BEAR' && parameterName === 'entryConfidence') {
+        value *= 1.1;
+      }
+
+      if (context.confidence !== undefined && parameterName === 'positionSizeMultiplier') {
+        value *= (0.8 + context.confidence * 0.4);
+      }
+    }
+
+    // Exploration noise
+    if (shouldExplore) {
+      const noiseRange = (param.maxValue - param.minValue) * 0.1;
+      const noise = (Math.random() - 0.5) * 2 * noiseRange;
+      value += noise;
+    }
+
+    return Math.max(param.minValue, Math.min(param.maxValue, value));
+  }
+
+  /**
+   * Update thresholds using gradient descent based on outcome
+   */
+  private async updateThresholdsFromOutcome(outcome: TradeOutcome): Promise<void> {
+    let thresholdName: string;
+
+    switch (outcome.decisionType) {
+      case 'entry':
+        thresholdName = 'entryConfidence';
+        break;
+      case 'exit':
+        thresholdName = 'exitScore';
+        break;
+      case 'hold':
+        thresholdName = 'exitScore';
+        break;
+      case 'skip':
+        thresholdName = 'entryConfidence';
+        break;
+      default:
+        return;
+    }
+
+    const param = this.thresholds.get(thresholdName);
+    if (!param) return;
+
+    // Calculate gradient
+    const gradient = this.calculateProfitGradient(
+      thresholdName,
+      outcome.profitImpact,
+      outcome.confidenceLevel ?? 0.5,
+      outcome.thresholdAtDecision ?? param.currentValue
+    );
+
+    // Update with momentum
+    param.velocity = param.momentum * param.velocity + param.learningRate * gradient;
+
+    const oldValue = param.currentValue;
+    param.currentValue += param.velocity;
+    param.currentValue = Math.max(param.minValue, Math.min(param.maxValue, param.currentValue));
+
+    // Track history
+    param.lastGradient = gradient;
+    param.profitHistory.push(outcome.profitImpact);
+    param.adjustmentHistory.push(param.currentValue - oldValue);
+
+    if (param.profitHistory.length > 100) {
+      param.profitHistory.shift();
+      param.adjustmentHistory.shift();
+    }
+
+    // Update optimal estimate
+    param.optimalEstimate = this.estimateOptimalThreshold(thresholdName);
+
+    // Adjust learning rate based on variance
+    if (param.profitHistory.length > 20) {
+      const recentVariance = this.calculateVariance(param.profitHistory.slice(-20));
+      param.learningRate = 0.001 / (1 + recentVariance * 0.01);
+    }
+
+    const percentChange = ((param.currentValue - oldValue) / oldValue) * 100;
+    if (Math.abs(percentChange) > 1) {
+      console.log(`🧠 THRESHOLD LEARNED: ${thresholdName} ${percentChange > 0 ? '+' : ''}${percentChange.toFixed(2)}%`);
+      console.log(`   ${(oldValue * 100).toFixed(2)}% → ${(param.currentValue * 100).toFixed(2)}% (optimal est: ${(param.optimalEstimate * 100).toFixed(2)}%)`);
+      console.log(`   Gradient: ${gradient.toFixed(4)}, Profit: $${outcome.profitImpact.toFixed(2)}`);
+    }
+  }
+
+  /**
+   * Calculate profit gradient with respect to threshold
+   */
+  private calculateProfitGradient(
+    thresholdName: string,
+    actualProfit: number,
+    confidenceLevel: number,
+    thresholdAtDecision: number
+  ): number {
+    const recentDecisions = this.tradeHistory.slice(-this.performanceWindow);
+
+    if (recentDecisions.length < 10) {
+      return actualProfit > 0 ? 0.01 : -0.01;
+    }
+
+    const avgProfit = recentDecisions.reduce((sum, d) => sum + d.profitImpact, 0) / recentDecisions.length;
+    const normalizedProfit = (actualProfit - avgProfit) / (Math.abs(avgProfit) + 1);
+
+    let gradient = 0;
+
+    if (thresholdName === 'entryConfidence') {
+      if (actualProfit > 0) {
+        if (confidenceLevel > thresholdAtDecision + 0.05) {
+          gradient = -0.01 * normalizedProfit; // Can lower threshold
+        } else {
+          gradient = 0.005 * normalizedProfit; // Threshold is good
+        }
+      } else {
+        if (confidenceLevel < thresholdAtDecision + 0.05) {
+          gradient = 0.02 * Math.abs(normalizedProfit); // Raise threshold
+        } else {
+          gradient = 0.001;
+        }
+      }
+    } else if (thresholdName === 'exitScore') {
+      if (actualProfit > avgProfit * 1.5) {
+        gradient = -0.01; // Could exit earlier
+      } else if (actualProfit < avgProfit * 0.5) {
+        gradient = 0.01; // Exited too early
+      } else {
+        gradient = 0.001 * normalizedProfit;
+      }
+    }
+
+    return gradient;
+  }
+
+  /**
+   * Estimate optimal threshold from profitable decisions
+   */
+  private estimateOptimalThreshold(thresholdName: string): number {
+    const param = this.thresholds.get(thresholdName);
+    if (!param || param.profitHistory.length < 10) {
+      return param?.currentValue ?? 0.15;
+    }
+
+    const recentAdjustments = param.adjustmentHistory.slice(-20);
+    const recentProfits = param.profitHistory.slice(-20);
+
+    let sumProfitWeightedThreshold = 0;
+    let sumProfitWeights = 0;
+    let currentThreshold = param.currentValue;
+
+    for (let i = recentAdjustments.length - 1; i >= 0; i--) {
+      currentThreshold -= recentAdjustments[i];
+      const profit = recentProfits[i];
+
+      if (profit > 0) {
+        sumProfitWeightedThreshold += currentThreshold * profit;
+        sumProfitWeights += profit;
+      }
+    }
+
+    return sumProfitWeights > 0 ? sumProfitWeightedThreshold / sumProfitWeights : param.currentValue;
+  }
+
+  /**
+   * Calculate variance
+   */
+  private calculateVariance(values: number[]): number {
+    if (values.length === 0) return 0;
+    const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+    return values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+  }
+
+  /**
+   * Get current learned thresholds
+   */
+  getCurrentThresholds(): Record<string, {
+    current: number;
+    optimal: number;
+    exploration: number;
+    profitHistory: number;
+  }> {
+    const thresholds: Record<string, any> = {};
+    for (const [name, param] of this.thresholds) {
+      const avgProfit = param.profitHistory.length > 0
+        ? param.profitHistory.reduce((sum, p) => sum + p, 0) / param.profitHistory.length
+        : 0;
+
+      thresholds[name] = {
+        current: param.currentValue,
+        optimal: param.optimalEstimate,
+        exploration: param.explorationNoise,
+        profitHistory: avgProfit
+      };
+    }
+    return thresholds;
+  }
+
+  /**
+   * Get learning performance metrics
+   */
+  getLearningMetrics(): {
+    pathways: Array<{factorName: string; weight: number; correlation: number}>;
+    thresholds: Record<string, {
+      value: number;
+      optimalEstimate: number;
+      avgProfit: number;
+      decisions: number;
+      convergence: number;
+    }>;
+  } {
+    const pathways = this.getPathwayState();
+    const thresholds: Record<string, any> = {};
+
+    for (const [name, param] of this.thresholds) {
+      const avgProfit = param.profitHistory.length > 0
+        ? param.profitHistory.reduce((sum, p) => sum + p, 0) / param.profitHistory.length
+        : 0;
+
+      // Convergence: how close current is to optimal estimate
+      const convergence = param.optimalEstimate > 0
+        ? 1 - Math.abs(param.currentValue - param.optimalEstimate) / param.optimalEstimate
+        : 0;
+
+      thresholds[name] = {
+        value: param.currentValue,
+        optimalEstimate: param.optimalEstimate,
+        avgProfit,
+        decisions: param.profitHistory.length,
+        convergence: Math.max(0, Math.min(1, convergence))
+      };
+    }
+
+    return { pathways, thresholds };
   }
 }
 
