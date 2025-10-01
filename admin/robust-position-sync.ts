@@ -125,34 +125,39 @@ async function robustPositionSync() {
     console.log('🚀 ROBUST POSITION SYNC - Starting...');
     console.log('================================================');
 
-    // Define actual positions based on real Kraken holdings
-    // Updated with current actual holdings from user
+    // 🔧 V3.10.2: Updated with actual Kraken holdings (from Balance API via dashboard)
+    // Dashboard shows: AVAX 7.306979 @ $30.61, BNB 0.009670 @ $1021.72, WIF 54.489950 @ $0.76, BTC 0.000173 @ $116670.40
     const actualPositions: ActualPosition[] = [
       {
-        symbol: 'BNBUSD',
-        quantity: 0.6944, // BNB quantity for $411.80 (still holding!)
-        estimatedValue: 411.80,
-        estimatedPrice: 593.0
-      },
-      {
-        symbol: 'DOTUSD',
-        quantity: 14.268, // DOT quantity for $58.50
-        estimatedValue: 58.50,
-        estimatedPrice: 4.10
-      },
-      {
         symbol: 'AVAXUSD',
-        quantity: 1.7935, // AVAX quantity for $50.49
-        estimatedValue: 50.49,
-        estimatedPrice: 28.14
+        quantity: 7.306979, // Actual Kraken holding
+        estimatedValue: 223.67,
+        estimatedPrice: 30.61
+      },
+      {
+        symbol: 'WIFUSD',
+        quantity: 54.489950, // dogwifhat holding
+        estimatedValue: 41.40,
+        estimatedPrice: 0.76
       },
       {
         symbol: 'BTCUSD',
-        quantity: 0.0004376, // BTC quantity for $50.01 (exited ETH, jumped into BTC)
-        estimatedValue: 50.01,
-        estimatedPrice: 114280.0
+        quantity: 0.000173, // Actual Kraken holding
+        estimatedValue: 20.24,
+        estimatedPrice: 116670.40
+      },
+      {
+        symbol: 'BNBUSD',
+        quantity: 0.009670, // Small remaining position after partial close
+        estimatedValue: 9.88,
+        estimatedPrice: 1021.72
       }
     ];
+
+    console.log('📊 Syncing with actual Kraken holdings:');
+    for (const pos of actualPositions) {
+      console.log(`   ${pos.symbol}: ${pos.quantity} × $${pos.estimatedPrice} = $${pos.estimatedValue.toFixed(2)}`);
+    }
 
     // Step 1: Clear all existing positions
     await clearAllPositions();

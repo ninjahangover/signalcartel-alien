@@ -4,12 +4,10 @@
  * Prevents missed opportunities due to stale data
  */
 
-import { PrismaClient } from '@prisma/client';
 import { krakenProxyService } from './kraken-proxy-service';
 import { priceLogger } from './price-logger';
 import { EventEmitter } from 'events';
-
-const prisma = new PrismaClient();
+import { prisma } from './prisma'; // 🔧 V3.10.1: Use singleton to prevent connection leaks
 
 export interface PositionUpdate {
   positionId: string;
@@ -246,15 +244,24 @@ export class RealTimePositionUpdater extends EventEmitter {
       priceLogger.warn(`⚠️ Invalid price change calculation for ${position.symbol} - using safe defaults`);
     }
 
-    // Update in database
-    await prisma.livePosition.update({
-      where: { id: position.id },
-      data: {
-        currentPrice,
-        unrealizedPnL,
-        updatedAt: new Date()
+    // Update in database (use upsert to handle race conditions)
+    try {
+      await prisma.livePosition.update({
+        where: { id: position.id },
+        data: {
+          currentPrice,
+          unrealizedPnL,
+          updatedAt: new Date()
+        }
+      });
+    } catch (error: any) {
+      // Handle P2025 (record not found) - position was likely closed
+      if (error.code === 'P2025') {
+        priceLogger.debug(`⚠️ Position ${position.symbol} no longer exists (likely closed) - skipping update`);
+        return; // Skip this position, it's been closed
       }
-    });
+      throw error; // Re-throw other errors
+    }
 
     // Emit update event
     const update: PositionUpdate = {

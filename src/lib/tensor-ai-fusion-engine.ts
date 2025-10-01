@@ -2681,7 +2681,9 @@ export class TensorAIFusionEngine {
     contributingSystems: AISystemOutput[],
     currentPrice: number,
     consensusStrength: number,
-    markovPrediction?: any
+    markovPrediction?: any,
+    positionTimeMinutes?: number,
+    unrealizedPnLPercent?: number
   ): Promise<{
     shouldExit: boolean;
     exitReason?: string;
@@ -2690,7 +2692,7 @@ export class TensorAIFusionEngine {
     orderBookShift: any;
     sentimentShift: any;
   }> {
-    console.log(`🚪 Calculating dynamic exit logic from ${contributingSystems.length} AI systems`);
+    console.log(`🚪 Calculating dynamic exit logic from ${contributingSystems.length} AI systems (Time: ${positionTimeMinutes?.toFixed(1) || 'N/A'} min, P&L: ${unrealizedPnLPercent?.toFixed(2) || 'N/A'}%)`);
     
     // For now, we'll use a placeholder symbol since this method doesn't have symbol context
     // In production, this would be passed as a parameter
@@ -2714,8 +2716,15 @@ export class TensorAIFusionEngine {
     let exitScore = 0;
     let exitUrgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
     
-    // 💰 PROFIT PROTECTION: Analyze current profit situation
-    const profitProtection = this.calculateProfitProtectionExit(contributingSystems, consensusStrength);
+    // 💰 PROFIT PROTECTION: Analyze current profit situation with time and P&L context
+    // Note: opportunityCost is not available in this context (called during new opportunity analysis)
+    const profitProtection = this.calculateProfitProtectionExit(
+      contributingSystems,
+      consensusStrength,
+      positionTimeMinutes,
+      unrealizedPnLPercent,
+      undefined // No opportunity cost available during new opportunity analysis
+    );
     if (profitProtection.shouldExit) {
       exitTriggers.push(`💰 PROFIT PROTECTION: ${profitProtection.reason}`);
       exitScore += profitProtection.exitScore;
@@ -3651,11 +3660,14 @@ export class TensorAIFusionEngine {
   /**
    * 🧠 MATHEMATICAL CONVICTION: Calculate if mathematical thesis has changed (hold until ALL validations align for exit)
    * 🕐 TIME-WEIGHTED GOLDEN EQUATION: Conviction grows with time using φ (golden ratio)
+   * 💰 PROFIT-AWARE: Uses sigmoid curve to balance conviction holding vs profit taking
    */
   public calculateProfitProtectionExit(
     contributingSystems: any[],
     consensusStrength: number,
-    positionTimeMinutes?: number
+    positionTimeMinutes?: number,
+    unrealizedPnLPercent?: number,
+    opportunityCost?: number
   ): {
     shouldExit: boolean;
     reason: string;
@@ -3668,7 +3680,7 @@ export class TensorAIFusionEngine {
 
     // DEBUG LOGGING
     console.log(`🔍 EXIT CALCULATION DEBUG:`);
-    console.log(`   Systems: ${contributingSystems.length}, Consensus: ${consensusStrength}, Time: ${positionTimeMinutes} min`);
+    console.log(`   Systems: ${contributingSystems.length}, Consensus: ${consensusStrength.toFixed(2)}, Time: ${positionTimeMinutes?.toFixed(1) || 'undefined'} min, P&L: ${unrealizedPnLPercent?.toFixed(2) || 'undefined'}%, OpportunityCost: ${opportunityCost?.toFixed(2) || 'N/A'}%`);
     
     // 🕐 GOLDEN EQUATION: Time-weighted conviction using φ (golden ratio)
     const phi = 1.618033988749895;
@@ -3678,16 +3690,29 @@ export class TensorAIFusionEngine {
     // Calculate time-based conviction boost
     const timeBoost = 1 + phi * Math.log(1 + timeHeld / tau);
     
-    // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Use learned exit threshold
+    // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Use learned exit threshold with context-aware adjustments
     let baseThreshold = 0.65; // Fallback
     try {
+      // Calculate current volatility proxy from consensus strength variance
+      const volatilityProxy = 1.0 - consensusStrength; // Low consensus = high volatility
+
       // Use the brain instance if available (passed via context or global)
       const brainThreshold = (global as any).adaptiveProfitBrain?.getThreshold('exitScore', {
-        volatility: 0.05
+        volatility: volatilityProxy,
+        confidence: consensusStrength
       });
+
       if (brainThreshold !== undefined) {
         baseThreshold = brainThreshold;
-        console.log(`🧠 Using brain-learned exit threshold: ${(baseThreshold * 100).toFixed(1)}%`);
+
+        // 🎯 DYNAMIC ADJUSTMENT: Lower threshold if there's opportunity cost (easier to exit for better opportunities)
+        if (opportunityCost && opportunityCost > 15) {
+          const adjustmentFactor = Math.min(0.85, 1.0 - (opportunityCost / 100)); // Max 15% reduction
+          baseThreshold = baseThreshold * adjustmentFactor;
+          console.log(`🧠 Brain exit threshold ${(brainThreshold * 100).toFixed(1)}% → adjusted to ${(baseThreshold * 100).toFixed(1)}% due to ${opportunityCost.toFixed(1)}% opportunity cost`);
+        } else {
+          console.log(`🧠 Using brain-learned exit threshold: ${(baseThreshold * 100).toFixed(1)}%`);
+        }
       }
     } catch (error) {
       // Silently fall back to default
@@ -3740,16 +3765,70 @@ export class TensorAIFusionEngine {
       console.log(`   EXIT SCORE += ${scoreAdd.toFixed(2)} (direction reversal)`);
     }
 
-    // 🎯 PROFIT TAKING LOGIC: Take profits on extreme gains
-    // NOTE: This requires position P&L to be passed in, which it currently isn't
-    // For now, add time-based profit taking
-    if (timeHeld > 240 && avgSystemConfidence < 0.6) { // 4+ hours with weakening confidence
+    // 💰 PROFIT TAKING LOGIC: Mathematical sigmoid curve for profit-taking urgency
+    // Uses tanh function with adaptive brain learning for profit capture optimization
+    // Formula: profit_urgency = tanh((P% - learned_target%) / steepness%)
+    if (unrealizedPnLPercent !== undefined && unrealizedPnLPercent > 0) {
+      // 🧠 Use adaptive brain's learned profit-taking threshold
+      const learnedProfitTarget = (global as any).adaptiveProfitBrain?.getThreshold('profitTakingThreshold') || 20;
+
+      // Sigmoid curve: smooth transition from holding to taking profits
+      // Inflection point at learned target (neutral), steepness adaptive to position size
+      // More aggressive for large gains: 20% divisor for faster profit capture
+      const profitUrgency = Math.tanh((unrealizedPnLPercent - learnedProfitTarget) / 20);
+      const profitScore = Math.max(0, profitUrgency * 0.6); // Scale to 0-0.6 contribution (increased from 0.5)
+
+      exitScore += profitScore;
+      console.log(`   💰 PROFIT URGENCY: ${unrealizedPnLPercent.toFixed(1)}% gain (target: ${learnedProfitTarget.toFixed(1)}%) → sigmoid ${profitUrgency.toFixed(3)} → score +${profitScore.toFixed(2)}`);
+
+      if (unrealizedPnLPercent > 50) {
+        reasons.push(`🎯 EXTRAORDINARY PROFIT: ${unrealizedPnLPercent.toFixed(1)}% unrealized gain - strong profit-taking signal`);
+        urgency = unrealizedPnLPercent > 80 ? 'CRITICAL' : 'HIGH'; // Changed 80%+ to CRITICAL
+      } else if (unrealizedPnLPercent > 30) {
+        reasons.push(`💰 Significant profit: ${unrealizedPnLPercent.toFixed(1)}% gain building exit urgency`);
+        if (urgency === 'LOW') urgency = 'MEDIUM';
+      } else if (unrealizedPnLPercent > learnedProfitTarget) {
+        reasons.push(`💵 Above target: ${unrealizedPnLPercent.toFixed(1)}% vs ${learnedProfitTarget.toFixed(1)}% target`);
+      }
+    } else if (unrealizedPnLPercent === undefined) {
+      console.log(`   ⚠️ PROFIT URGENCY: unrealizedPnLPercent is UNDEFINED - cannot calculate profit urgency!`);
+    }
+
+    // ⏰ TIME-PROFIT INTERACTION: Longer holds with weak confidence should exit
+    if (timeHeld > 240 && avgSystemConfidence < 0.6) {
       const scoreAdd = 0.2;
       exitScore += scoreAdd;
       reasons.push(`Time-based profit consideration: ${(timeHeld/60).toFixed(1)}h held with ${(avgSystemConfidence*100).toFixed(0)}% confidence`);
       console.log(`   EXIT SCORE += ${scoreAdd.toFixed(2)} (time-based profit taking)`);
     }
-    
+
+    // 🎯 OPPORTUNITY COST: Exit when there's a significantly better opportunity
+    // This is the KEY mathematical driver for capital rotation
+    if (opportunityCost !== undefined && opportunityCost > 0) {
+      // Opportunity cost represents the expected return of the BEST available alternative
+      // If current position has low/negative P&L and there's a much better opportunity, EXIT
+      const currentPositionValue = unrealizedPnLPercent || 0;
+      const opportunityGap = opportunityCost - currentPositionValue;
+
+      // Mathematical sigmoid for opportunity urgency: tanh((gap - 10%) / 15%)
+      // Result: 10% gap = neutral, 25% gap = 48% urgency, 40% gap = 79% urgency
+      if (opportunityGap > 5) {
+        const opportunityUrgency = Math.tanh((opportunityGap - 10) / 15);
+        const opportunityScore = Math.max(0, opportunityUrgency * 0.4); // Scale to 0-0.4 contribution
+
+        exitScore += opportunityScore;
+        console.log(`   🎯 OPPORTUNITY COST: Current ${currentPositionValue.toFixed(1)}% vs Available ${opportunityCost.toFixed(1)}% → gap ${opportunityGap.toFixed(1)}% → urgency ${opportunityUrgency.toFixed(3)} → score +${opportunityScore.toFixed(2)}`);
+
+        if (opportunityGap > 30) {
+          reasons.push(`🚀 MASSIVE OPPORTUNITY: ${opportunityCost.toFixed(1)}% opportunity available while holding ${currentPositionValue.toFixed(1)}% position - rotate capital!`);
+          urgency = 'HIGH';
+        } else if (opportunityGap > 15) {
+          reasons.push(`💡 Better opportunity: ${opportunityCost.toFixed(1)}% available vs ${currentPositionValue.toFixed(1)}% current - consider rotation`);
+          if (urgency === 'LOW') urgency = 'MEDIUM';
+        }
+      }
+    }
+
     // 🧠 MATHEMATICAL CONVICTION 3: Catastrophic reliability breakdown - when your most trusted indicators fail
     const avgReliability = contributingSystems.reduce((sum, sys) => sum + (sys.reliability || 0.5), 0) / contributingSystems.length;
     const criticalSystemsFailure = contributingSystems.filter(sys => 

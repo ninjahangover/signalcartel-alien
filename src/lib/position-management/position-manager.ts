@@ -378,29 +378,33 @@ export class PositionManager {
           }
         });
         
-        // Step 2: Update position with exit information
-        await tx.managedPosition.update({
-          where: { id: positionId },
-          data: {
-            exitPrice: exitPrice,
-            exitTradeId: tradeId,
-            exitTime: position.exitTime,
-            status: 'closed',
-            realizedPnL: pnl
-          }
-        });
-        
-        // Step 3: DASHBOARD POSITION FIX - Update LivePosition to closed status first
-        const livePositionId = `live-pos-${positionId}`;
+        // Step 2: 🔧 V3.10.1 - Update LivePosition first (primary position store)
         try {
-          // Check if livePosition exists first, if not skip update
-          const existingLivePosition = await tx.livePosition.findUnique({
-            where: { id: livePositionId }
+          await tx.livePosition.update({
+            where: { id: positionId },
+            data: {
+              exitPrice: exitPrice,
+              exitTradeIds: tradeId,
+              exitTime: position.exitTime,
+              status: 'closed',
+              realizedPnL: pnl,
+              netPnL: pnl // Also update netPnL
+            }
+          });
+        } catch (liveError) {
+          console.warn(`⚠️ LivePosition update failed for ${positionId}: ${liveError.message}`);
+          // Continue to try ManagedPosition for backwards compatibility
+        }
+
+        // Step 3: OPTIONAL - Update ManagedPosition if it exists (for backwards compatibility)
+        try {
+          const existingManagedPos = await tx.managedPosition.findUnique({
+            where: { id: positionId }
           });
 
-          if (existingLivePosition) {
-            await tx.livePosition.update({
-              where: { id: livePositionId },
+          if (existingManagedPos) {
+            await tx.managedPosition.update({
+              where: { id: positionId },
               data: {
                 status: 'closed',
                 exitPrice: exitPrice,
@@ -1079,9 +1083,10 @@ export class PositionManager {
    */
   private async loadPositionsFromDatabase(): Promise<void> {
     try {
-      const dbPositions = await this.prisma.managedPosition.findMany({
-        where: { status: 'open' },
-        include: { entryTrade: true, exitTrade: true }
+      // 🔧 V3.10.1: Query LivePosition table (where actual trading positions are stored)
+      const dbPositions = await this.prisma.livePosition.findMany({
+        where: { status: 'open' }
+        // Note: LivePosition doesn't have entryTrade/exitTrade relations
       });
 
       // Sync database positions to memory
@@ -1090,22 +1095,23 @@ export class PositionManager {
           id: dbPos.id,
           strategy: dbPos.strategy,
           symbol: dbPos.symbol,
-          side: dbPos.side as 'long' | 'short',
-          entryPrice: parseFloat(dbPos.entryPrice),
-          quantity: parseFloat(dbPos.quantity),
-          entryTradeId: dbPos.entryTradeId,
-          entryTime: dbPos.openTime,
-          openTime: dbPos.openTime, // Set openTime for compatibility
-          exitPrice: dbPos.exitPrice ? parseFloat(dbPos.exitPrice) : undefined,
-          exitTradeId: dbPos.exitTradeId || undefined,
+          side: dbPos.side.toLowerCase() as 'long' | 'short',
+          entryPrice: dbPos.entryPrice,
+          quantity: dbPos.quantity,
+          entryTradeId: dbPos.entryTradeIds, // LivePosition uses entryTradeIds
+          entryTime: dbPos.entryTime,
+          openTime: dbPos.entryTime, // Use entryTime for compatibility
+          exitPrice: dbPos.exitPrice || undefined,
+          exitTradeId: dbPos.exitTradeIds || undefined,
           exitTime: dbPos.exitTime || undefined,
           status: dbPos.status.toLowerCase() as 'open' | 'closed' | 'partial',
-          realizedPnL: dbPos.realizedPnL ? parseFloat(dbPos.realizedPnL) : undefined,
-          stopLoss: dbPos.stopLoss ? parseFloat(dbPos.stopLoss) : undefined,
-          takeProfit: dbPos.takeProfit ? parseFloat(dbPos.takeProfit) : undefined,
+          realizedPnL: dbPos.realizedPnL || undefined,
+          unrealizedPnL: dbPos.unrealizedPnL,
+          stopLoss: dbPos.stopLossPrice || undefined,
+          takeProfit: dbPos.takeProfitPrice || undefined,
           metadata: {} // Initialize empty metadata
         };
-        
+
         this.positions.set(position.id, position);
       }
     } catch (error) {

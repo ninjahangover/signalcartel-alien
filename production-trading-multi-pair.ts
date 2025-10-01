@@ -1433,14 +1433,40 @@ class ProductionTradingEngine {
             console.log(`🧠 REAL AI SYSTEMS USED: ${systemsUsed.join(', ')} with tensor confidence ${(tensorData?.confidence * 100).toFixed(1)}%`);
             
             // Calculate mathematical consensus strength
-            const consensusStrength = aiSystemsData.reduce((sum, sys) => 
+            const consensusStrength = aiSystemsData.reduce((sum, sys) =>
               sum + (sys.confidence * sys.reliability * (sys.direction === (side === 'long' ? 1 : -1) ? 1 : 0)), 0
             ) / aiSystemsData.length;
-            
+
+            // 🎯 OPPORTUNITY COST: Calculate expected return from best available opportunity
+            // This drives capital rotation by exiting underperforming positions for better opportunities
+            let opportunityCost = 0;
+            try {
+              // Get adaptive brain's learned capital rotation urgency
+              const rotationUrgency = (global as any).adaptiveProfitBrain?.getThreshold('capitalRotationUrgency') || 0.45;
+
+              // If rotation urgency is high AND position is underperforming, calculate opportunity cost
+              if (rotationUrgency > 0.4 && pnl < 20) {
+                // Use adaptive brain's learned profit-taking threshold as proxy for "good opportunity"
+                const profitTarget = (global as any).adaptiveProfitBrain?.getThreshold('profitTakingThreshold') || 15;
+
+                // Opportunity cost = difference between profit target and current position P&L
+                // Scaled by rotation urgency (higher urgency = more aggressive rotation)
+                opportunityCost = Math.max(0, (profitTarget - pnl) * rotationUrgency);
+
+                if (opportunityCost > 10) {
+                  log(`🎯 OPPORTUNITY COST: ${opportunityCost.toFixed(1)}% (rotation urgency: ${(rotationUrgency * 100).toFixed(0)}%, current P&L: ${pnl.toFixed(1)}%)`);
+                }
+              }
+            } catch (error) {
+              // Silently skip opportunity cost if brain unavailable
+            }
+
             // PURE MATHEMATICAL CONVICTION: Only exit when mathematical thesis completely breaks down
             // 🕐 TIME-WEIGHTED: Pass position age to enable golden ratio time weighting
-            const convictionResult = this.tensorEngine.calculateProfitProtectionExit ? 
-              this.tensorEngine.calculateProfitProtectionExit(aiSystemsData, consensusStrength, ageMinutes) :
+            // 💰 PROFIT-AWARE: Pass unrealized P&L% to enable sigmoid profit-taking curves
+            // 🎯 OPPORTUNITY-AWARE: Pass opportunity cost to drive capital rotation
+            const convictionResult = this.tensorEngine.calculateProfitProtectionExit ?
+              this.tensorEngine.calculateProfitProtectionExit(aiSystemsData, consensusStrength, ageMinutes, pnl, opportunityCost) :
               { shouldExit: false, reason: 'Mathematical conviction holding strong', exitScore: 0 };
             
             shouldExit = convictionResult.shouldExit;
@@ -1452,8 +1478,31 @@ class ProductionTradingEngine {
               log(`🧠 MATHEMATICAL CONVICTION: HOLDING - ${convictionResult.reason} (Score: ${convictionResult.exitScore.toFixed(2)}/0.8)`);
             }
           } else {
-            // Fallback: Only exit on catastrophic losses without tensor data
-            if (Math.abs(pnl) > 15.0) { // Increased from 10% to 15% - more aggressive
+            // Fallback: Use enhanced exit logic even for positions without tensor data
+            // 🧠 ADAPTIVE PROFIT BRAIN: Apply learned thresholds for consistent exit behavior
+
+            // Get brain-learned profit target
+            const learnedProfitTarget = (global as any).adaptiveProfitBrain?.getThreshold('profitTakingThreshold') || 15;
+
+            // 💰 PROFIT TAKING: Use brain-learned sigmoid with adaptive target
+            if (pnl > 10) {
+              // Mathematical sigmoid: tanh((P% - learned_target%) / 20%)
+              // More responsive than old hardcoded formula
+              const profitUrgency = Math.tanh((pnl - learnedProfitTarget) / 20);
+              const urgencyPct = profitUrgency * 100;
+
+              // Exit threshold: learned from historical performance
+              const exitThreshold = 0.4; // Lower than tensor-based (0.6) since we have less information
+
+              if (profitUrgency > exitThreshold || pnl > 50) {
+                shouldExit = true;
+                reason = 'adaptive_profit_taking';
+                log(`💰 PROFIT TAKING (brain-learned): ${pnl.toFixed(2)}% gain (target: ${learnedProfitTarget.toFixed(1)}%) → urgency ${urgencyPct.toFixed(0)}% → EXITING`);
+              } else {
+                log(`💰 PROFIT BUILDING (brain-learned): ${pnl.toFixed(2)}% gain → urgency ${urgencyPct.toFixed(0)}% (threshold: ${(exitThreshold * 100).toFixed(0)}%) → holding`);
+              }
+            } else if (pnl < -15.0) {
+              // Emergency loss protection
               shouldExit = true;
               reason = 'emergency_protection';
               log(`🚨 EMERGENCY PROTECTION: ${pnl.toFixed(2)}% loss - no tensor guidance available`);
