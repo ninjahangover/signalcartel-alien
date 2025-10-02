@@ -22,6 +22,7 @@ interface ProcessConfig {
 const NTFY_TOPIC = process.env.NTFY_TOPIC || 'signal-cartel';
 const CHECK_INTERVAL = 30000; // 30 seconds
 const SYNC_INTERVAL = 15 * 60 * 1000; // 15 minutes
+const OHLC_SYNC_INTERVAL = 60 * 60 * 1000; // 60 minutes (1 hour)
 
 // Processes to monitor - matches tensor-start.sh exactly
 const MONITORED_PROCESSES: ProcessConfig[] = [
@@ -259,9 +260,42 @@ async function runDatabaseSync(): Promise<boolean> {
   }
 }
 
+async function runOHLCWarehouseSync(): Promise<boolean> {
+  try {
+    console.log('📊 Running OHLC warehouse population...');
+
+    const command = `cd /home/telgkb9/depot/current && DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" npx tsx admin/populate-warehouse-ohlc.ts`;
+    const { stdout, stderr } = await execAsync(command, { timeout: 120000 }); // 2-minute timeout
+
+    if (stderr && !stderr.includes('npm warn')) {
+      console.log(`⚠️ OHLC sync stderr: ${stderr}`);
+    }
+
+    // Check if sync was successful
+    if (stdout.includes('Script completed successfully') || stdout.includes('OHLC Warehouse Population Complete')) {
+      const candleCount = stdout.match(/Total candles stored: (\d+)/)?.[1] || 'unknown';
+      console.log(`✅ OHLC warehouse sync completed - ${candleCount} candles stored`);
+      return true;
+    } else {
+      console.log('❌ OHLC warehouse sync may have failed');
+      console.log('Stdout:', stdout);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ OHLC warehouse sync error:', error.message);
+    await sendNtfyAlert(
+      '⚠️ OHLC Warehouse Sync Failed',
+      `Automated OHLC warehouse population failed: ${error.message}`,
+      'high'
+    );
+    return false;
+  }
+}
+
 async function monitoringLoop() {
   const processStatus = new Map<string, boolean>();
   let lastSyncTime = 0;
+  let lastOHLCSyncTime = 0;
 
   console.log('🛡️ SYSTEM GUARDIAN STARTED - ntfy alerts active');
   console.log(`📱 Alerts will be sent to: https://ntfy.sh/${NTFY_TOPIC}`);
@@ -270,8 +304,9 @@ async function monitoringLoop() {
   console.log('');
 
   while (true) {
-    // Check if database sync is needed (every 15 minutes)
     const currentTime = Date.now();
+
+    // Check if database sync is needed (every 15 minutes)
     if (currentTime - lastSyncTime >= SYNC_INTERVAL) {
       const syncSuccess = await runDatabaseSync();
       if (syncSuccess) {
@@ -284,6 +319,21 @@ async function monitoringLoop() {
       }
       // Always update lastSyncTime to prevent spamming on failures
       lastSyncTime = currentTime;
+    }
+
+    // Check if OHLC warehouse sync is needed (every 60 minutes)
+    if (currentTime - lastOHLCSyncTime >= OHLC_SYNC_INTERVAL) {
+      const ohlcSuccess = await runOHLCWarehouseSync();
+      if (ohlcSuccess) {
+        lastOHLCSyncTime = currentTime;
+        await sendNtfyAlert(
+          '📊 OHLC Warehouse Updated',
+          'Warehouse successfully populated with latest OHLC candle data for backtesting and AI training.',
+          'default'
+        );
+      }
+      // Always update lastOHLCSyncTime to prevent spamming on failures
+      lastOHLCSyncTime = currentTime;
     }
 
     for (const config of MONITORED_PROCESSES) {
@@ -309,7 +359,8 @@ async function monitoringLoop() {
     }
 
     const nextSyncMinutes = Math.round((SYNC_INTERVAL - (currentTime - lastSyncTime)) / 60000);
-    console.log(`⏰ Next check in ${CHECK_INTERVAL / 1000}s | Next sync in ${nextSyncMinutes}min\n`);
+    const nextOHLCSyncMinutes = Math.round((OHLC_SYNC_INTERVAL - (currentTime - lastOHLCSyncTime)) / 60000);
+    console.log(`⏰ Next check in ${CHECK_INTERVAL / 1000}s | DB sync in ${nextSyncMinutes}min | OHLC sync in ${nextOHLCSyncMinutes}min\n`);
     await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
   }
 }

@@ -60,55 +60,16 @@ export class Phase2MathematicalOptimizer {
     symbol: string,
     baseConfidence: number
   ): Promise<{ shouldTrade: boolean; requiredConfidence: number; reason?: string }> {
-    // Update cache if stale
-    await this.updatePerformanceCache();
+    // 🔥 V3.11.3: AGGRESSIVE MODE - Accept ALL signals above 10% confidence
+    // User wants trades NOW - trust the tensor AI fusion decision
+    const minConfidence = 0.10; // 10% minimum
 
-    const performance = this.pairPerformanceCache.get(symbol);
-    if (!performance) {
-      // No history - require higher confidence for unknown pairs
-      return {
-        shouldTrade: baseConfidence > 0.20,
-        requiredConfidence: 0.20,
-        reason: 'Unknown pair - requires 20% confidence'
-      };
-    }
-
-    // Blacklist terrible performers (below 20% accuracy)
-    if (performance.accuracy < 0.20 && performance.totalSignals > 10) {
-      return {
-        shouldTrade: false,
-        requiredConfidence: 1.0, // Impossible threshold
-        reason: `Blacklisted - ${(performance.accuracy * 100).toFixed(1)}% accuracy`
-      };
-    }
-
-    // Require higher confidence for poor performers (20-40% accuracy)
-    if (performance.accuracy < 0.40 && performance.totalSignals > 5) {
-      const multiplier = 2.0 - performance.accuracy; // 1.6x - 1.8x multiplier
-      const requiredConfidence = Math.min(0.12 * multiplier, 0.25);
-
-      return {
-        shouldTrade: baseConfidence >= requiredConfidence,
-        requiredConfidence,
-        reason: `Poor performer - requires ${(requiredConfidence * 100).toFixed(1)}% confidence`
-      };
-    }
-
-    // Good performers - standard or reduced threshold
-    if (performance.accuracy > 0.70 && performance.totalSignals > 20) {
-      const requiredConfidence = 0.10; // Reduced threshold for proven winners
-      return {
-        shouldTrade: baseConfidence >= requiredConfidence,
-        requiredConfidence,
-        reason: `Strong performer - only needs ${(requiredConfidence * 100).toFixed(1)}% confidence`
-      };
-    }
-
-    // Standard threshold for average performers
     return {
-      shouldTrade: baseConfidence >= 0.12,
-      requiredConfidence: 0.12,
-      reason: 'Standard threshold'
+      shouldTrade: baseConfidence >= minConfidence,
+      requiredConfidence: minConfidence,
+      reason: baseConfidence >= minConfidence ?
+              `✅ Aggressive mode: ${(baseConfidence * 100).toFixed(1)}% confidence accepted` :
+              `❌ Below 10% minimum (${(baseConfidence * 100).toFixed(1)}%)`
     };
   }
 
@@ -172,14 +133,34 @@ export class Phase2MathematicalOptimizer {
       }
     }
 
-    // Apply min/max constraints
-    positionPercent = Math.min(Math.max(positionPercent, 0.01), 0.10); // 1-10% range
+    // 🧠 V3.11.2: DYNAMIC POSITION SIZING - Zero Hardcoded Limits!
+    // Calculate minimum percentage needed to meet Kraken's order minimums
+    const krakenMinimumUSD = 22; // Kraken's lowest minimum across all pairs
+    const krakenMaximumUSD = 55; // Kraken's highest minimum for some pairs
+
+    // Dynamic minimum: Whatever percentage of bankroll gives us $60 (buffer above $55 max)
+    // This ensures we can trade ALL pairs, not just the ones with $22 minimums
+    const dynamicMinPercent = Math.max(60 / bankroll, 0.01); // At least 1% for sanity
+
+    // Dynamic maximum: Cap at 20% of bankroll for risk management (more aggressive than typical 10%)
+    // Small accounts need larger % to meet minimums, large accounts can use smaller %
+    const dynamicMaxPercent = bankroll < 1000 ? 0.20 : // <$1k: up to 20%
+                              bankroll < 5000 ? 0.15 : // $1k-5k: up to 15%
+                              0.10; // >$5k: standard 10%
+
+    // Apply dynamic constraints based on actual account size
+    positionPercent = Math.min(Math.max(positionPercent, dynamicMinPercent), dynamicMaxPercent);
 
     const positionSizeUSD = bankroll * positionPercent;
 
-    const explanation = confidence >= 0.20 ? 'High conviction trade' :
-                        confidence >= 0.15 ? 'Medium conviction trade' :
-                        'Low conviction trade';
+    // Enhanced explanation with dynamic reasoning
+    const sizeReasoning = positionSizeUSD < krakenMaximumUSD ?
+                         `meeting Kraken ${krakenMinimumUSD}-${krakenMaximumUSD} minimums` :
+                         `optimal Kelly sizing`;
+
+    const explanation = confidence >= 0.20 ? `High conviction trade (${sizeReasoning})` :
+                        confidence >= 0.15 ? `Medium conviction trade (${sizeReasoning})` :
+                        `Low conviction trade (${sizeReasoning})`;
 
     return {
       positionSizePercent: positionPercent,

@@ -1089,6 +1089,18 @@ export class PositionManager {
         // Note: LivePosition doesn't have entryTrade/exitTrade relations
       });
 
+      // 🔥 V3.11.1 FIX: Clear closed positions from memory before syncing
+      // Get IDs of positions that are currently open in database
+      const openPositionIds = new Set(dbPositions.map(p => p.id));
+
+      // Remove any positions from memory that are no longer open in database
+      for (const [id, position] of this.positions.entries()) {
+        if (!openPositionIds.has(id)) {
+          console.log(`🗑️ Removing closed position from memory: ${position.symbol} (${id})`);
+          this.positions.delete(id);
+        }
+      }
+
       // Sync database positions to memory
       for (const dbPos of dbPositions) {
         const position: Position = {

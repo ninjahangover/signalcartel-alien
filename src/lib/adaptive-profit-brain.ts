@@ -134,68 +134,68 @@ export class AdaptiveProfitBrain {
     const baseLearningRate = 0.001;
     const momentumDecay = 0.9;
 
-    // Entry confidence threshold
+    // Entry confidence threshold - 🚨 V3.11.1: AGGRESSIVE BOOTSTRAP for maximum opportunity capture
     this.thresholds.set('entryConfidence', {
       name: 'entryConfidence',
-      currentValue: 0.12, // Start at 12%
-      learningRate: baseLearningRate,
+      currentValue: 0.05, // Start at 5% - let brain learn optimal from wins/losses
+      learningRate: baseLearningRate * 2.0, // 2x faster learning
       momentum: momentumDecay,
       velocity: 0,
-      minValue: 0.05,
-      maxValue: 0.40,
+      minValue: 0.01, // As low as 1% to explore full opportunity space
+      maxValue: 0.50, // Max 50%
       lastGradient: 0,
       profitHistory: [],
       adjustmentHistory: [],
-      explorationNoise: 0.10,
-      optimalEstimate: 0.12
+      explorationNoise: 0.15, // Higher exploration
+      optimalEstimate: 0.05
     });
 
-    // Exit score threshold
+    // Exit score threshold - Learn when to hold vs exit
     this.thresholds.set('exitScore', {
       name: 'exitScore',
-      currentValue: 0.65,
-      learningRate: baseLearningRate * 0.5,
+      currentValue: 0.50, // Start at 50% - less conservative
+      learningRate: baseLearningRate * 1.5,
       momentum: momentumDecay,
       velocity: 0,
-      minValue: 0.20,
-      maxValue: 0.90,
-      lastGradient: 0,
-      profitHistory: [],
-      adjustmentHistory: [],
-      explorationNoise: 0.08,
-      optimalEstimate: 0.65
-    });
-
-    // Position sizing multiplier
-    this.thresholds.set('positionSizeMultiplier', {
-      name: 'positionSizeMultiplier',
-      currentValue: 1.0,
-      learningRate: baseLearningRate * 0.3,
-      momentum: momentumDecay,
-      velocity: 0,
-      minValue: 0.5,
-      maxValue: 2.5,
-      lastGradient: 0,
-      profitHistory: [],
-      adjustmentHistory: [],
-      explorationNoise: 0.05,
-      optimalEstimate: 1.0
-    });
-
-    // Profit taking threshold
-    this.thresholds.set('profitTakingThreshold', {
-      name: 'profitTakingThreshold',
-      currentValue: 0.15,
-      learningRate: baseLearningRate * 0.8,
-      momentum: momentumDecay,
-      velocity: 0,
-      minValue: 0.05,
-      maxValue: 0.50,
+      minValue: 0.10, // As low as 10% to hold winners longer
+      maxValue: 0.95, // Max 95%
       lastGradient: 0,
       profitHistory: [],
       adjustmentHistory: [],
       explorationNoise: 0.12,
-      optimalEstimate: 0.15
+      optimalEstimate: 0.50
+    });
+
+    // Position sizing multiplier - Learn optimal trade sizes
+    this.thresholds.set('positionSizeMultiplier', {
+      name: 'positionSizeMultiplier',
+      currentValue: 1.5, // Start at 1.5x - more aggressive
+      learningRate: baseLearningRate * 1.0,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.3, // Min 30% sizing
+      maxValue: 3.0, // Max 3x for high-conviction trades
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.10,
+      optimalEstimate: 1.5
+    });
+
+    // Profit taking threshold - Learn optimal profit capture
+    this.thresholds.set('profitTakingThreshold', {
+      name: 'profitTakingThreshold',
+      currentValue: 0.08, // Start at 8% - let brain learn from market
+      learningRate: baseLearningRate * 2.5, // Fast learning for profit capture
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.02, // As low as 2% for quick scalps
+      maxValue: 0.60, // Max 60% for big moves
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.18, // High exploration for profit optimization
+      optimalEstimate: 0.08
     });
 
     // Capital rotation urgency
@@ -963,9 +963,11 @@ export class AdaptiveProfitBrain {
       decisions: number;
       convergence: number;
     }>;
+    totalDecisions: number;
   } {
     const pathways = this.getPathwayState();
     const thresholds: Record<string, any> = {};
+    let totalDecisions = 0;
 
     for (const [name, param] of this.thresholds) {
       const avgProfit = param.profitHistory.length > 0
@@ -977,16 +979,19 @@ export class AdaptiveProfitBrain {
         ? 1 - Math.abs(param.currentValue - param.optimalEstimate) / param.optimalEstimate
         : 0;
 
+      const decisions = param.profitHistory.length;
+      totalDecisions = Math.max(totalDecisions, decisions); // Use max across all thresholds
+
       thresholds[name] = {
         value: param.currentValue,
         optimalEstimate: param.optimalEstimate,
         avgProfit,
-        decisions: param.profitHistory.length,
+        decisions,
         convergence: Math.max(0, Math.min(1, convergence))
       };
     }
 
-    return { pathways, thresholds };
+    return { pathways, thresholds, totalDecisions };
   }
 }
 

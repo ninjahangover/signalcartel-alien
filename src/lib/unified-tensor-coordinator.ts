@@ -788,11 +788,26 @@ export class UnifiedTensorCoordinator {
       return bestSignal.recommendation;
     }
 
+    // 🧠 V3.11.1: Use brain-learned thresholds instead of hardcoded values
+    const brain = (global as any).adaptiveProfitBrain;
+    let entryThreshold = 0.60; // Fallback (was 0.6 → BUY, 0.4 → SELL)
+
+    if (brain && typeof brain.getThreshold === 'function') {
+      // Brain's entryConfidence is stored as 0-1, convert to same scale
+      entryThreshold = brain.getThreshold('entryConfidence', {
+        volatility: 0.02,
+        regime: 'NORMAL',
+        confidence: mathematicalConsensus
+      });
+
+      // Log brain-learned threshold for transparency
+      console.log(`🧠 BRAIN ENTRY THRESHOLD: ${(entryThreshold * 100).toFixed(1)}% (consensus: ${(mathematicalConsensus * 100).toFixed(1)}%)`);
+    }
+
     // Use mathematical consensus when agreement is moderate
-    if (mathematicalConsensus > 0.7) return 'BUY';
-    if (mathematicalConsensus < 0.3) return 'SELL';
-    if (mathematicalConsensus > 0.6) return 'BUY';
-    if (mathematicalConsensus < 0.4) return 'SELL';
+    // Brain learning allows much more aggressive thresholds (5-15% vs hardcoded 60%)
+    if (mathematicalConsensus > entryThreshold) return 'BUY';
+    if (mathematicalConsensus < (1 - entryThreshold)) return 'SELL';
 
     // Default to conservative approach when uncertain
     return 'WAIT';
@@ -859,14 +874,28 @@ export class UnifiedTensorCoordinator {
    * Calculate risk assessment parameters
    */
   private calculateRiskAssessment(signals: SystemSignal[], marketData: any): any {
-    // Base position size on unified confidence
+    // 🧠 V3.11.1: Brain-learned position sizing with exchange minimum enforcement
     const baseConfidence = this.calculateMathematicalConsensus(signals);
-    let positionSize = Math.min(0.25, baseConfidence * 0.3); // Max 25% of capital, scaled by confidence
+
+    // Get brain's learned position size multiplier
+    const brain = (global as any).adaptiveProfitBrain;
+    let brainMultiplier = 1.5; // Default if brain not available
+    if (brain && typeof brain.getThreshold === 'function') {
+      brainMultiplier = brain.getThreshold('positionSizeMultiplier', {
+        confidence: baseConfidence,
+        volatility: this.estimateVolatility(marketData) || 0.02,
+        regime: 'NORMAL'
+      });
+    }
+
+    // Brain-learned sizing: Base starts at 5% (to meet exchange minimums), scales with confidence
+    // After multipliers, range will be ~5-30% to ensure all orders meet Kraken's $11-$55 minimums
+    let positionSize = Math.max(0.05, baseConfidence * 0.4) * brainMultiplier; // Min 5% base × brain
 
     // Adjust based on Bayesian uncertainty
     const bayesianSignal = signals.find(s => s.source === 'bayesian_probability');
     if (bayesianSignal?.data.uncertainty && bayesianSignal.data.uncertainty > 0.5) {
-      positionSize *= 0.7; // Reduce size when uncertain
+      positionSize *= 0.85; // Reduce size when uncertain (was 0.7, now less aggressive)
     }
 
     // Adjust based on profit predator expected return
@@ -884,7 +913,9 @@ export class UnifiedTensorCoordinator {
     const takeProfit = currentPrice * (1 + volatility * 3); // 3x volatility target
 
     return {
-      positionSize: Math.max(0.01, Math.min(0.25, positionSize)),
+      // 🧠 V3.11.1: Minimum 4% ensures $18+ orders on $459 account (meets all Kraken minimums)
+      // Maximum 35% for aggressive brain-learned high-conviction trades
+      positionSize: Math.max(0.04, Math.min(0.35, positionSize)),
       stopLoss,
       takeProfit,
       maxHoldTime: 240 // 4 hours default

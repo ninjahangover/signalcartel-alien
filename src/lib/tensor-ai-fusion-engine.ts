@@ -3678,9 +3678,12 @@ export class TensorAIFusionEngine {
     let reasons: string[] = [];
     let urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
 
-    // DEBUG LOGGING
-    console.log(`🔍 EXIT CALCULATION DEBUG:`);
-    console.log(`   Systems: ${contributingSystems.length}, Consensus: ${consensusStrength.toFixed(2)}, Time: ${positionTimeMinutes?.toFixed(1) || 'undefined'} min, P&L: ${unrealizedPnLPercent?.toFixed(2) || 'undefined'}%, OpportunityCost: ${opportunityCost?.toFixed(2) || 'N/A'}%`);
+    // DEBUG LOGGING (only for actual position exits, not new trade evaluations)
+    const isPositionExit = positionTimeMinutes !== undefined && unrealizedPnLPercent !== undefined;
+    if (isPositionExit) {
+      console.log(`🔍 EXIT CALCULATION DEBUG:`);
+      console.log(`   Systems: ${contributingSystems.length}, Consensus: ${consensusStrength.toFixed(2)}, Time: ${positionTimeMinutes.toFixed(1)} min, P&L: ${unrealizedPnLPercent.toFixed(2)}%, OpportunityCost: ${opportunityCost?.toFixed(2) || 'N/A'}%`);
+    }
     
     // 🕐 GOLDEN EQUATION: Time-weighted conviction using φ (golden ratio)
     const phi = 1.618033988749895;
@@ -3779,7 +3782,10 @@ export class TensorAIFusionEngine {
       const profitScore = Math.max(0, profitUrgency * 0.6); // Scale to 0-0.6 contribution (increased from 0.5)
 
       exitScore += profitScore;
-      console.log(`   💰 PROFIT URGENCY: ${unrealizedPnLPercent.toFixed(1)}% gain (target: ${learnedProfitTarget.toFixed(1)}%) → sigmoid ${profitUrgency.toFixed(3)} → score +${profitScore.toFixed(2)}`);
+
+      if (isPositionExit) {
+        console.log(`   💰 PROFIT URGENCY: ${unrealizedPnLPercent.toFixed(1)}% gain (target: ${learnedProfitTarget.toFixed(1)}%) → sigmoid ${profitUrgency.toFixed(3)} → score +${profitScore.toFixed(2)}`);
+      }
 
       if (unrealizedPnLPercent > 50) {
         reasons.push(`🎯 EXTRAORDINARY PROFIT: ${unrealizedPnLPercent.toFixed(1)}% unrealized gain - strong profit-taking signal`);
@@ -3790,8 +3796,6 @@ export class TensorAIFusionEngine {
       } else if (unrealizedPnLPercent > learnedProfitTarget) {
         reasons.push(`💵 Above target: ${unrealizedPnLPercent.toFixed(1)}% vs ${learnedProfitTarget.toFixed(1)}% target`);
       }
-    } else if (unrealizedPnLPercent === undefined) {
-      console.log(`   ⚠️ PROFIT URGENCY: unrealizedPnLPercent is UNDEFINED - cannot calculate profit urgency!`);
     }
 
     // ⏰ TIME-PROFIT INTERACTION: Longer holds with weak confidence should exit
@@ -4136,12 +4140,30 @@ export class TensorAIFusionEngine {
     
     // Handle undefined contributingSystems gracefully
     if (!contributingSystems || !Array.isArray(contributingSystems)) {
-      console.log('⚠️ contributingSystems is undefined or not array, using conservative threshold');
-      return 0.30; // Conservative 30% threshold when data is missing
+      console.log('⚠️ contributingSystems is undefined or not array, using brain-learned threshold');
+      const brain = (global as any).adaptiveProfitBrain;
+      if (brain && typeof brain.getThreshold === 'function') {
+        return brain.getThreshold('entryConfidence', { volatility: 0.02, regime: 'NEUTRAL' });
+      }
+      return 0.08; // Fallback only if brain unavailable
     }
-    
-    // 🎯 BASE THRESHOLD: Start with market regime-dependent base (optimized for more opportunities)
-    let baseThreshold = 0.10; // 10% base for aggressive trading (reduced from 20% for more entries)
+
+    // 🧠 V3.11.1: BRAIN-LEARNED BASE THRESHOLD (NO HARDCODING!)
+    // Brain learns optimal entry threshold through gradient descent from actual trade outcomes
+    const brain = (global as any).adaptiveProfitBrain;
+    let baseThreshold = 0.05; // Fallback if brain not available yet
+
+    if (brain && typeof brain.getThreshold === 'function') {
+      // Get brain's learned threshold adapted to current market conditions
+      baseThreshold = brain.getThreshold('entryConfidence', {
+        volatility: Math.abs(expectedMove) || 0.02,
+        regime: marketData.regime || 'NEUTRAL',
+        confidence: fusedConfidence
+      });
+      console.log(`🧠 BRAIN-LEARNED BASE THRESHOLD: ${(baseThreshold * 100).toFixed(1)}% (adapts from wins/losses)`);
+    } else {
+      console.log(`⚠️ Brain not available, using bootstrap threshold: ${(baseThreshold * 100).toFixed(1)}%`);
+    }
     
     // 📊 FACTOR 1: Market Volatility Adjustment
     // Higher volatility = Lower threshold needed (more opportunities)

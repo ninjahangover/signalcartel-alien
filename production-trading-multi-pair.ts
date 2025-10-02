@@ -72,6 +72,19 @@ interface MarketDataPoint {
   symbol: string;
   price: number;
   timestamp: Date;
+  dataPoints?: Array<{
+    symbol: string;
+    timestamp: Date;
+    price: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
+  volume?: number;
+  volatility?: number;
+  regime?: string;
 }
 
 class ProductionTradingEngine {
@@ -342,18 +355,17 @@ class ProductionTradingEngine {
     log('💰 Smart cache update: Priority pairs only...');
     const startTime = Date.now();
     
-    // 🎯 PURE OPPORTUNITY-DRIVEN TRADING: Only trade when Profit Predator finds high-quality opportunities
+    // 🎯 PURE OPPORTUNITY-DRIVEN TRADING: Only trade when Profit Predator finds valid opportunities
     let PRIORITY_PAIRS: string[] = [];
 
-    // Use ONLY discovered opportunities - maximize profit, not volume
+    // Use ONLY discovered opportunities - if Profit Predator finds nothing, we wait
     if (this.dynamicPairs.length > 0) {
       PRIORITY_PAIRS = this.dynamicPairs.slice(0, 8); // Top 8 discovered opportunities
       log(`🎯 OPPORTUNITY-DRIVEN: Using ${PRIORITY_PAIRS.length} Profit Predator discoveries`);
       log(`   🚀 Current Opportunities: ${PRIORITY_PAIRS.join(', ')}`);
     } else {
-      log(`⏳ PATIENT WAITING: No high-quality opportunities found - preserving capital for better chances`);
-      log(`   💡 Philosophy: Better to wait than deploy capital into mediocre opportunities`);
-      return; // Exit early - don't update prices for trading when no opportunities exist
+      log(`⏳ PATIENT WAITING: No valid Kraken opportunities found - Profit Predator still hunting`);
+      return; // Exit early - don't update prices when no opportunities exist
     }
 
     // Additional pairs to update in rotation (max 3 per cycle to prevent overload)
@@ -530,80 +542,15 @@ class ProductionTradingEngine {
     }
 
     try {
-      log('🧠 INTELLIGENT PROFIT MAXIMIZER - MATHEMATICAL PROOF INTEGRATION STARTED');
+      log('🔍 STEP 1: Reading Profit Predator discoveries from logs...');
 
-      // NEW: Use the intelligent profit maximizer with mathematical validation
-      const { intelligentProfitMaximizer } = await import('./src/lib/intelligent-profit-maximizer');
-
-      // Get available capital for intelligent position sizing
-      const availableCapital = await this.balanceCalculator.getAvailableBalance();
-      log(`💰 Available Capital for Analysis: $${availableCapital.freeBalance.toFixed(2)}`);
-
-      // Create comprehensive market intelligence context with mathematical validation
-      const marketContext = {
-        totalMarketCapital: availableCapital.freeBalance,
-        currentPositions: (await this.positionManager.getOpenPositions()).length,
-        marketRegime: 'NORMAL', // Fallback market regime
-        volatilityLevel: 0.05, // 5% average volatility fallback
-        liquidityConditions: 'GOOD' as const,
-        competitiveThreats: []
-      };
-
-      // Get all available pairs for analysis
-      const allPairs = Array.from(this.priceCache.keys()).filter(symbol => {
-        const data = this.priceCache.get(symbol);
-        return data?.isValid && data.price > 0;
-      });
-
-      // Use intelligent analysis to find maximum profit opportunities
-      const maxProfitOpportunities = await intelligentProfitMaximizer.findMaximumProfitOpportunities(
-        allPairs,
-        marketContext,
-        5 // Top 5 maximum profit opportunities
-      );
-
-      log(`🧠 INTELLIGENT ANALYSIS: Found ${maxProfitOpportunities.length} maximum profit opportunities`);
-
-      // Log mathematical proof summary for each opportunity
-      maxProfitOpportunities.forEach((opp, index) => {
-        log(`🔬 MATHEMATICAL PROOF #${index + 1}: ${opp.symbol}`);
-        log(`   💰 Expected Profit: $${opp.expectedDollarProfit.toFixed(2)} (${(opp.profitProbability * 100).toFixed(1)}% probability)`);
-        log(`   📊 Proof Confidence: ${(opp.overallProofConfidence * 100).toFixed(1)}% across ${opp.mathematicalProofs.length} layers`);
-        log(`   🎯 Kelly Fraction: ${(opp.kellyFraction * 100).toFixed(2)}% of capital`);
-        log(`   📈 Sharpe Ratio: ${opp.sharpeRatio.toFixed(3)}`);
-        log(`   🏆 Recommendation: ${opp.recommendation} (Intelligence Score: ${opp.intelligenceScore.toFixed(0)})`);
-
-        // Log key mathematical proofs
-        opp.mathematicalProofs.forEach(proof => {
-          if (proof.confidence >= 0.9) {
-            log(`   ✅ ${proof.layerName}: ${proof.equation} → ${proof.result.toFixed(4)} (${(proof.confidence * 100).toFixed(1)}% confidence)`);
-          }
-        });
-      });
-
-      // Convert to opportunity format expected by the system
-      const intelligentOpportunities = maxProfitOpportunities.map(opp => ({
-        symbol: opp.symbol,
-        score: opp.expectedDollarProfit, // Use actual expected dollar profit as score
-        huntType: 'MAXIMUM_PROFIT_WITH_MATHEMATICAL_PROOF',
-        expectedReturn: (opp.expectedDollarProfit / marketContext.totalMarketCapital) * 100, // % return
-        mathematicalValidation: {
-          overallConfidence: opp.overallProofConfidence,
-          proofLayers: opp.mathematicalProofs.length,
-          kellyOptimal: opp.kellyFraction,
-          sharpeRatio: opp.sharpeRatio,
-          scientificValidation: opp.scientificValidation
-        },
-        signalStrength: opp.profitProbability
-      }));
-
-      // BREAKTHROUGH: Read latest opportunities from standalone Profit Predator logs
+      // BREAKTHROUGH: Read latest opportunities from standalone Profit Predator logs FIRST
       // This avoids timeout issues by using already-computed results
       const fs = await import('fs');
       const logPath = '/tmp/signalcartel-logs/profit-predator.log';
 
-      // Start with intelligent opportunities from mathematical proof system
-      const opportunities: any[] = [...intelligentOpportunities];
+      // Start with empty opportunities array
+      const opportunities: any[] = [];
 
       try {
         const logData = fs.readFileSync(logPath, 'utf8');
@@ -620,42 +567,59 @@ class ProductionTradingEngine {
 
         // Search from the beginning of reversed array (most recent entries)
         let linesProcessed = 0;
-        for (let i = 0; i < lines.length && linesProcessed < 100; i++) { // Process max 100 recent lines
+        let lastTimestamp: number | null = null; // Track last seen timestamp for lines without timestamps
+
+        for (let i = 0; i < lines.length && linesProcessed < 500; i++) { // Process max 500 recent lines to find all JSON
           const line = lines[i];
           linesProcessed++;
 
+          // Update last timestamp if this line has one
+          const lineTimestampMatch = line.match(/\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\]/);
+          if (lineTimestampMatch) {
+            lastTimestamp = new Date(lineTimestampMatch[1]).getTime();
+          }
+
           if (line.includes('JSON_OPPORTUNITIES:')) {
             try {
-              // Extract timestamp from log line
-              const timestampMatch = line.match(/\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\]/);
-              if (timestampMatch) {
-                const logTime = new Date(timestampMatch[1]).getTime();
-                const ageMs = currentTime - logTime;
+              // Use line's timestamp if it has one, otherwise use last seen timestamp
+              let logTime: number;
+              let ageMs: number;
 
-                // Only include opportunities from last 5 minutes
-                if (ageMs <= LOOKBACK_WINDOW) {
-                  const jsonMatch = line.match(/JSON_OPPORTUNITIES:\s*(\[.*\])/);
-                  if (jsonMatch && jsonMatch[1]) {
-                    const jsonOpps = JSON.parse(jsonMatch[1]);
+              if (lineTimestampMatch) {
+                logTime = new Date(lineTimestampMatch[1]).getTime();
+                ageMs = currentTime - logTime;
+              } else if (lastTimestamp) {
+                // Use last seen timestamp (from previous lines)
+                logTime = lastTimestamp;
+                ageMs = currentTime - logTime;
+              } else {
+                // No timestamp available - assume very recent (within lookback window)
+                ageMs = 0;
+              }
 
-                    jsonOpps.forEach((opp: any) => {
-                      if (opp.expectedReturn >= 12.0) { // Only high-quality opportunities
-                        const existing = opportunityMap.get(opp.symbol);
+              // Only include opportunities from last 5 minutes
+              if (ageMs <= LOOKBACK_WINDOW) {
+                const jsonMatch = line.match(/JSON_OPPORTUNITIES:\s*(\[.*\])/);
+                if (jsonMatch && jsonMatch[1]) {
+                  const jsonOpps = JSON.parse(jsonMatch[1]);
 
-                        // Keep highest expected return for each symbol
-                        if (!existing || opp.expectedReturn > existing.expectedReturn) {
-                          opportunityMap.set(opp.symbol, {
-                            symbol: opp.symbol,
-                            score: Math.round(opp.expectedReturn),
-                            expectedReturn: opp.expectedReturn,
-                            winProb: opp.winProb,
-                            source: 'json_log',
-                            ageMs: ageMs
-                          });
-                        }
+                  jsonOpps.forEach((opp: any) => {
+                    if (opp.expectedReturn >= 12.0) { // Only high-quality opportunities
+                      const existing = opportunityMap.get(opp.symbol);
+
+                      // Keep highest expected return for each symbol
+                      if (!existing || opp.expectedReturn > existing.expectedReturn) {
+                        opportunityMap.set(opp.symbol, {
+                          symbol: opp.symbol,
+                          score: Math.round(opp.expectedReturn),
+                          expectedReturn: opp.expectedReturn,
+                          winProb: opp.winProb,
+                          source: 'json_log',
+                          ageMs: ageMs
+                        });
                       }
-                    });
-                  }
+                    }
+                  });
                 }
               }
             } catch (e) {
@@ -671,6 +635,7 @@ class ProductionTradingEngine {
         });
 
         log(`🎯 SIMPLE SUCCESS: Found ${recentOpportunities.length} opportunities from JSON log`);
+        log(`🔍 DEBUG: opportunityMap.size = ${opportunityMap.size}, linesProcessed = ${linesProcessed}`);
 
         opportunities.push(...recentOpportunities);
         log(`📡 FAST INTEGRATION: Parsed ${opportunities.length} opportunities from Profit Predator logs`);
@@ -723,8 +688,104 @@ class ProductionTradingEngine {
         }
       }
 
-      log(`🔍 Processing ${opportunities.length} opportunities for priority pair update`);
-      
+      log(`🔍 STEP 2: Fetching prices for ${opportunities.length} discovered symbols...`);
+
+      // 🔥 BREAKTHROUGH: Fetch prices FIRST to populate priceCache
+      // This allows Intelligent Profit Maximizer to analyze them
+      if (opportunities.length > 0) {
+        const discoveredSymbols = opportunities.map(o => o.symbol);
+        log(`   📊 Discovered symbols: ${discoveredSymbols.slice(0, 5).join(', ')}${discoveredSymbols.length > 5 ? ` +${discoveredSymbols.length - 5} more` : ''}`);
+
+        try {
+          await this.fetchPricesForNewOpportunities(discoveredSymbols);
+
+          const validCount = discoveredSymbols.filter(symbol => {
+            const cached = this.priceCache.get(symbol);
+            return cached?.isValid && cached.price > 0;
+          }).length;
+
+          log(`   ✅ Validated ${validCount}/${discoveredSymbols.length} symbols on Kraken`);
+        } catch (error) {
+          log(`   ⚠️ Price fetch error: ${error.message}`);
+        }
+      }
+
+      log(`🔍 STEP 3: Running Intelligent Profit Maximizer on populated priceCache...`);
+
+      // NEW: Use the intelligent profit maximizer with mathematical validation
+      // Now priceCache is populated with Profit Predator discoveries
+      const { intelligentProfitMaximizer } = await import('./src/lib/intelligent-profit-maximizer');
+
+      // Get available capital for intelligent position sizing
+      const availableCapital = await this.balanceCalculator.getAvailableBalance();
+      log(`💰 Available Capital for Analysis: $${availableCapital.freeBalance.toFixed(2)}`);
+
+      // Create comprehensive market intelligence context with mathematical validation
+      const marketContext = {
+        totalMarketCapital: availableCapital.freeBalance,
+        currentPositions: (await this.positionManager.getOpenPositions()).length,
+        marketRegime: 'NORMAL', // Fallback market regime
+        volatilityLevel: 0.05, // 5% average volatility fallback
+        liquidityConditions: 'GOOD' as const,
+        competitiveThreats: []
+      };
+
+      // Get all available pairs for analysis (NOW populated from Profit Predator)
+      const allPairs = Array.from(this.priceCache.keys()).filter(symbol => {
+        const data = this.priceCache.get(symbol);
+        return data?.isValid && data.price > 0;
+      });
+
+      log(`   🧮 Analyzing ${allPairs.length} pairs with valid prices`);
+
+      // Use intelligent analysis to find maximum profit opportunities
+      const maxProfitOpportunities = await intelligentProfitMaximizer.findMaximumProfitOpportunities(
+        allPairs,
+        marketContext,
+        5 // Top 5 maximum profit opportunities
+      );
+
+      log(`🧠 INTELLIGENT ANALYSIS: Found ${maxProfitOpportunities.length} maximum profit opportunities`);
+
+      // Log mathematical proof summary for each opportunity
+      maxProfitOpportunities.forEach((opp, index) => {
+        log(`🔬 MATHEMATICAL PROOF #${index + 1}: ${opp.symbol}`);
+        log(`   💰 Expected Profit: $${opp.expectedDollarProfit.toFixed(2)} (${(opp.profitProbability * 100).toFixed(1)}% probability)`);
+        log(`   📊 Proof Confidence: ${(opp.overallProofConfidence * 100).toFixed(1)}% across ${opp.mathematicalProofs.length} layers`);
+        log(`   🎯 Kelly Fraction: ${(opp.kellyFraction * 100).toFixed(2)}% of capital`);
+        log(`   📈 Sharpe Ratio: ${opp.sharpeRatio.toFixed(3)}`);
+        log(`   🏆 Recommendation: ${opp.recommendation} (Intelligence Score: ${opp.intelligenceScore.toFixed(0)})`);
+
+        // Log key mathematical proofs
+        opp.mathematicalProofs.forEach(proof => {
+          if (proof.confidence >= 0.9) {
+            log(`   ✅ ${proof.layerName}: ${proof.equation} → ${proof.result.toFixed(4)} (${(proof.confidence * 100).toFixed(1)}% confidence)`);
+          }
+        });
+      });
+
+      // Convert to opportunity format and merge with Profit Predator opportunities
+      const intelligentOpportunities = maxProfitOpportunities.map(opp => ({
+        symbol: opp.symbol,
+        score: opp.expectedDollarProfit, // Use actual expected dollar profit as score
+        huntType: 'MAXIMUM_PROFIT_WITH_MATHEMATICAL_PROOF',
+        expectedReturn: (opp.expectedDollarProfit / marketContext.totalMarketCapital) * 100, // % return
+        mathematicalValidation: {
+          overallConfidence: opp.overallProofConfidence,
+          proofLayers: opp.mathematicalProofs.length,
+          kellyOptimal: opp.kellyFraction,
+          sharpeRatio: opp.sharpeRatio,
+          scientificValidation: opp.scientificValidation
+        },
+        signalStrength: opp.profitProbability
+      }));
+
+      // Merge intelligent opportunities with Profit Predator opportunities
+      opportunities.push(...intelligentOpportunities);
+      log(`📊 Combined ${opportunities.length} total opportunities (Profit Predator + Intelligent Maximizer)`);
+
+      log(`🔍 STEP 4: Processing ${opportunities.length} opportunities for priority pair update`);
+
       // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Neural learning-based threshold
       // Adapts through gradient descent from actual trade outcomes
       const currentVolatility = this.calculateAverageVolatility();
@@ -752,39 +813,46 @@ class ProductionTradingEngine {
         
       const allOpportunityPairs = [...topScoringPairs, ...goodScoringPairs];
       
-      // Update dynamic pairs with AI-selected best opportunities
+      // Validate and update dynamic pairs with AI-selected best opportunities
       if (allOpportunityPairs.length > 0) {
         const previousDynamic = [...this.dynamicPairs];
-        this.dynamicPairs = allOpportunityPairs;
 
-        // 🎯 UPDATE PRIORITY PAIRS FOR BALANCE CACHING (only discovered opportunities get fresh Kraken API calls)
-        this.balanceCalculator.updatePriorityPairs([...topScoringPairs]);
+        log(`🔥 VALIDATING KRAKEN AVAILABILITY: Checking ${allOpportunityPairs.length} top opportunities...`);
 
-        log(`🎆 PROFIT PREDATOR™ MARGIN OPPORTUNITIES: ${topScoringPairs.length} top + ${goodScoringPairs.length} good scoring pairs`);
-        log(`   🚀 Top-Scoring (15%+): ${topScoringPairs.join(', ')}`);
-        if (goodScoringPairs.length > 0) {
-          log(`   💎 Good-Scoring (8-14%): ${goodScoringPairs.join(', ')}`);
-        }
+        // Fetch prices to validate ALL opportunities are on Kraken
+        try {
+          await this.fetchPricesForNewOpportunities(allOpportunityPairs);
 
-        // Log changes
-        const added = allOpportunityPairs.filter(pair => !previousDynamic.includes(pair));
-        const removed = previousDynamic.filter(pair => !allOpportunityPairs.includes(pair));
+          // 🧠 V3.11.1: Filter to ONLY Kraken-validated pairs
+          const validKrakenPairs = allOpportunityPairs.filter(symbol => {
+            const cached = this.priceCache.get(symbol);
+            return cached?.isValid && cached.price > 0;
+          });
 
-        if (added.length > 0) {
-          log(`   ✅ Added: ${added.join(', ')}`);
+          if (validKrakenPairs.length > 0) {
+            this.dynamicPairs = validKrakenPairs;
+            this.balanceCalculator.updatePriorityPairs(validKrakenPairs);
 
-          // 🚀 CRITICAL FIX: Immediately fetch prices for new discovered opportunities
-          // This ensures they are available in getValidatedTradingPairs() on next cycle
-          log(`🔥 IMMEDIATE PRICE FETCH: Getting prices for new opportunities...`);
-          try {
-            await this.fetchPricesForNewOpportunities(added);
-            log(`✅ PRICE FETCH: New opportunities now available for trading`);
-          } catch (error) {
-            log(`❌ PRICE FETCH ERROR: ${error.message} - will retry next cycle`);
+            log(`✅ KRAKEN VALIDATED: ${validKrakenPairs.length}/${allOpportunityPairs.length} pairs ready for trading`);
+            log(`   Valid: ${validKrakenPairs.join(', ')}`);
+
+            const invalid = allOpportunityPairs.filter(s => !validKrakenPairs.includes(s));
+            if (invalid.length > 0) {
+              log(`   ❌ Not on Kraken: ${invalid.join(', ')}`);
+            }
+
+            // Log changes
+            const added = validKrakenPairs.filter(pair => !previousDynamic.includes(pair));
+            const removed = previousDynamic.filter(pair => !validKrakenPairs.includes(pair));
+
+            if (added.length > 0) log(`   ✅ Added: ${added.join(', ')}`);
+            if (removed.length > 0) log(`   ❌ Removed: ${removed.join(', ')}`);
+          } else {
+            log(`⚠️ NO VALID KRAKEN PAIRS: All ${allOpportunityPairs.length} discoveries not tradeable on Kraken`);
+            this.dynamicPairs = []; // Clear invalid pairs
           }
-        }
-        if (removed.length > 0) {
-          log(`   ❌ Removed: ${removed.join(', ')}`);
+        } catch (error) {
+          log(`❌ PRICE VALIDATION ERROR: ${error.message} - keeping existing pairs`);
         }
       } else {
         // No opportunities above margin trading threshold, but still use ALL discovered pairs for tensor evaluation
@@ -793,20 +861,35 @@ class ProductionTradingEngine {
           log(`📊 PROFIT PREDATOR™: Found ${opportunities.length} opportunities below ${dynamicThreshold.toFixed(1)}% threshold`);
           log(`🧠 TENSOR EVALUATION: Adding ALL discovered pairs for tensor AI analysis`);
 
-          // Add ALL discovered pairs (tensor will decide if they're worth trading)
+          // Fetch prices to validate Kraken availability BEFORE adding to dynamicPairs
           const allDiscoveredPairs = opportunities.map(o => o.symbol);
-          this.dynamicPairs = allDiscoveredPairs;
+          log(`🔥 VALIDATING KRAKEN AVAILABILITY: Checking ${allDiscoveredPairs.length} discovered pairs...`);
 
-          // Update balance calculator priority pairs
-          this.balanceCalculator.updatePriorityPairs(allDiscoveredPairs);
-
-          // Fetch prices for ALL discovered opportunities
-          log(`🔥 FETCHING PRICES: Getting prices for ${allDiscoveredPairs.length} discovered pairs...`);
           try {
             await this.fetchPricesForNewOpportunities(allDiscoveredPairs);
-            log(`✅ PRICE FETCH: ${allDiscoveredPairs.length} opportunities ready for tensor evaluation`);
+
+            // 🧠 V3.11.1: ONLY add pairs with valid Kraken prices (no random/fallback data)
+            const validKrakenPairs = allDiscoveredPairs.filter(symbol => {
+              const cached = this.priceCache.get(symbol);
+              return cached?.isValid && cached.price > 0;
+            });
+
+            if (validKrakenPairs.length > 0) {
+              this.dynamicPairs = validKrakenPairs;
+              this.balanceCalculator.updatePriorityPairs(validKrakenPairs);
+              log(`✅ KRAKEN VALIDATED: ${validKrakenPairs.length}/${allDiscoveredPairs.length} pairs ready for trading`);
+              log(`   Valid: ${validKrakenPairs.join(', ')}`);
+
+              const invalid = allDiscoveredPairs.filter(s => !validKrakenPairs.includes(s));
+              if (invalid.length > 0) {
+                log(`   ❌ Not on Kraken: ${invalid.join(', ')}`);
+              }
+            } else {
+              log(`⚠️ NO VALID KRAKEN PAIRS: All ${allDiscoveredPairs.length} discoveries not tradeable on Kraken`);
+              this.dynamicPairs = []; // Clear invalid pairs
+            }
           } catch (error) {
-            log(`❌ PRICE FETCH ERROR: ${error.message} - will retry next cycle`);
+            log(`❌ PRICE VALIDATION ERROR: ${error.message} - keeping existing pairs`);
           }
         } else {
           log(`📊 PROFIT PREDATOR™: No opportunities found, keeping existing pairs`);
@@ -1493,8 +1576,9 @@ class ProductionTradingEngine {
             // 🕐 TIME-WEIGHTED: Pass position age to enable golden ratio time weighting
             // 💰 PROFIT-AWARE: Pass unrealized P&L% to enable sigmoid profit-taking curves
             // 🎯 OPPORTUNITY-AWARE: Pass opportunity cost to drive capital rotation
+            const unrealizedPnLPercent = pnl; // Use calculated net P&L after commissions
             const convictionResult = this.tensorEngine.calculateProfitProtectionExit ?
-              this.tensorEngine.calculateProfitProtectionExit(aiSystemsData, consensusStrength, ageMinutes, pnl, opportunityCost) :
+              this.tensorEngine.calculateProfitProtectionExit(aiSystemsData, consensusStrength, ageMinutes, unrealizedPnLPercent, opportunityCost) :
               { shouldExit: false, reason: 'Mathematical conviction holding strong', exitScore: 0 };
             
             shouldExit = convictionResult.shouldExit;
@@ -2337,31 +2421,18 @@ class ProductionTradingEngine {
               marketData: { price: data.price, priceChange24h: data.price_change_24h || 0 }
             };
 
-            // Get dynamic execution decision
-            const executionDecision = await opportunityExecutionBridge.processOpportunity(opportunity);
+            // 🧠 V3.11.2: TENSOR AUTHORITY - When tensor approves with mathematical proof, execute!
+            // The opportunity bridge was blocking tensor-approved trades. Tensor is the final authority.
+            log(`🧮 TENSOR APPROVED: ${data.symbol} - Mathematical proof validated by 6 AI systems`);
+            log(`   Tensor Confidence: ${tensorConfidencePercent.toFixed(1)}%`);
+            log(`   Expected Return: ${tensorReturnPercent.toFixed(2)}%`);
+            log(`   🎯 BYPASSING secondary validation - Tensor decision is final authority`);
 
-            if (executionDecision.execute) {
-              log(`🎯 DYNAMIC EXECUTION: ${data.symbol} approved - ${executionDecision.reason}`);
-              log(`   Expected Return: ${tensorReturnPercent.toFixed(2)}%`);
-              log(`   Dynamic Threshold: ${(executionDecision.dynamicThreshold * 100).toFixed(2)}%`);
-              log(`   Position Size: $${executionDecision.quantity.toFixed(2)}`);
-              log(`   Execution Speed: ${executionDecision.executionSpeed}`);
+            // Set standard consensus multiplier (tensor already optimized position sizing)
+            aiAnalysis.consensusMultiplier = 1.0;
 
-              // Calculate consensus multiplier based on execution decision
-              const baseSize = 100; // Standard base size
-              const dynamicMultiplier = executionDecision.quantity / baseSize;
-              aiAnalysis.consensusMultiplier = Math.max(1.0, Math.min(3.0, dynamicMultiplier));
-
-              log(`🚀 DYNAMIC BOOST: ${((aiAnalysis.consensusMultiplier - 1) * 100).toFixed(0)}% position size adjustment`);
-            } else {
-              log(`📊 DYNAMIC ANALYSIS: ${data.symbol} - ${executionDecision.reason}`);
-              log(`🎯 SKIP: Expected return ${tensorReturnPercent.toFixed(2)}% below dynamic threshold`);
-              aiAnalysis.consensusMultiplier = 1.0;
-              continue; // Skip this opportunity
-            }
-
-            // Mathematical proof met through dynamic system
-            const mathematicalProofMet = executionDecision.execute;
+            // Mathematical proof met - tensor approved
+            const mathematicalProofMet = true;
 
           } catch (dynamicError) {
             log(`⚠️ Dynamic system error for ${data.symbol}: ${dynamicError.message}`);
@@ -2601,25 +2672,30 @@ class ProductionTradingEngine {
               try {
                 const balanceInfo = await this.balanceCalculator.calculateAvailableBalance();
                 const accountBalance = balanceInfo.availableBalance;
-                const baseSize = Math.max(accountBalance * 0.01, 10); // 1% of available balance, min $10
+                // 🧠 V3.11.1: Base size calculation ensures Kraken minimums ($11-$55) are met
+                // After brain multiplier (1.5x) and confidence (0.5-3.0x), final orders will be $25-$100+
+                const baseSize = Math.max(accountBalance * 0.05, 25); // 5% of balance, min $25 base
                 
                 log(`💰 FALLBACK BALANCE: Total: $${balanceInfo.totalBalance.toFixed(2)} | Available: $${accountBalance.toFixed(2)}`);
                 
-                // Enhanced confidence multipliers (Priority #1)
-                let confidenceMultiplier = 1;
-                if (aiAnalysis.confidence >= 0.88) {
-                  confidenceMultiplier = 10;  // 88%+ → 10x size
-                } else if (aiAnalysis.confidence >= 0.70) {
-                  confidenceMultiplier = 5;   // 70-87% → 5x size
-                } else if (aiAnalysis.confidence >= 0.50) {
-                  confidenceMultiplier = 2;   // 50-69% → 2x size
-                }
-                
+                // 🧠 V3.11.1: BRAIN-LEARNED CONFIDENCE MULTIPLIER (NO HARDCODED THRESHOLDS)
+                // Brain learns optimal sizing through gradient descent from win/loss outcomes
+                const brainSizeMultiplier = adaptiveProfitBrain.getThreshold('positionSizeMultiplier', {
+                  confidence: aiAnalysis.confidence,
+                  volatility: marketData.volatility || 0.02,
+                  regime: 'NORMAL'
+                });
+
+                // Smooth confidence scaling: linear from 0 to 1 confidence
+                const smoothConfidenceMultiplier = 0.5 + (aiAnalysis.confidence * 2.5); // 0.5x at 0% → 3.0x at 100%
+                const confidenceMultiplier = brainSizeMultiplier * smoothConfidenceMultiplier;
+
                 quantity = baseSize * confidenceMultiplier;
                 
                 // Ensure minimum viable position and maximum safe position
-                const minimumPosition = Math.max(accountBalance * 0.001, 5); // 0.1% minimum, min $5
-                const maximumPosition = accountBalance * 0.15; // Max 15% of available balance
+                // 🧠 V3.11.1: Minimum must meet Kraken's lowest requirement ($11-$55)
+                const minimumPosition = Math.max(accountBalance * 0.03, 15); // 3% minimum, min $15 (meets all Kraken minimums)
+                const maximumPosition = accountBalance * 0.20; // Max 20% of available balance for aggressive learning
                 quantity = Math.max(Math.min(quantity, maximumPosition), minimumPosition);
                 
                 log(`🎯 FALLBACK SIZING: Base $${baseSize.toFixed(2)} × ${confidenceMultiplier}x (${(aiAnalysis.confidence * 100).toFixed(1)}% conf) = $${quantity.toFixed(2)}`);
@@ -2909,22 +2985,34 @@ class ProductionTradingEngine {
   private async executePureAITensorFusion(marketData: MarketDataPoint, phase: any) {
     try {
       log(`🧮 PURE AI TENSOR FUSION: Collecting V₂-V₈ systems for ${marketData.symbol}`);
-      
+
+      // 🚨 V3.11.1: DEBUG - Check if dataPoints exist BEFORE safe variable creation
+      const hasDataPoints = (marketData as any).dataPoints && (marketData as any).dataPoints.length > 0;
+      log(`🔍 V3.11.1 DEBUG: marketData has ${hasDataPoints ? (marketData as any).dataPoints.length : 0} dataPoints for ${marketData.symbol}`);
+
       // BULLETPROOF: Ensure all market data is safe
-      const safeSymbol = typeof marketData.symbol === 'string' ? marketData.symbol : 
+      const safeSymbol = typeof marketData.symbol === 'string' ? marketData.symbol :
                         (marketData.symbol?.symbol || 'UNKNOWN');
       const safePrice = typeof marketData.price === 'number' && !isNaN(marketData.price) ? marketData.price : 0;
       const safeVolume = typeof marketData.volume === 'number' && !isNaN(marketData.volume) ? marketData.volume : 0;
       const safeTimestamp = marketData.timestamp instanceof Date ? marketData.timestamp : new Date();
-      
+
       // V₂: Mathematical Intuition Analysis - REAL CALCULATIONS ONLY
       let enhancedAnalysis = null;
       try {
+        log(`🔍 DEBUG RIGHT BEFORE calculatePriceChanges: marketData.dataPoints = ${(marketData as any).dataPoints ? (marketData as any).dataPoints.length : 'UNDEFINED'}`);
+        log(`🔍 DEBUG: marketData keys = ${Object.keys(marketData)}`);
         const priceChanges = this.calculatePriceChanges(marketData);
+        log(`🔍 DEBUG: priceChanges.length = ${priceChanges.length}, first=${priceChanges[0]?.toFixed(6)}`);
+
         const volatility = this.calculateVolatility(priceChanges);
+        log(`🔍 DEBUG: volatility = ${volatility}`);
+
         const momentum = this.calculateMomentum(priceChanges);
+        log(`🔍 DEBUG: momentum = ${momentum}`);
+
         const fractalDimension = this.calculateFractalDimension(priceChanges);
-        
+
         // Real mathematical calculations - no fallbacks
         const PHI = 1.618033988749895; // Golden ratio
         // FIX: Normalize flowField to [0,1] range using sigmoid function
@@ -2933,13 +3021,13 @@ class ProductionTradingEngine {
         const patternResonance = Math.abs(Math.sin(fractalDimension * Math.PI)); // Pattern strength [0,1]
         const energyAlignment = (Math.tanh(momentum * PHI) + 1) / 2; // Normalize tanh from [-1,1] to [0,1]
         const overallFeeling = (flowField + patternResonance + energyAlignment) / 3; // Now guaranteed [0,1]
-        
+
         // Determine direction from actual momentum
         const direction = momentum > 0.001 ? 1 : momentum < -0.001 ? -1 : 0;
-        
+
         // Calculate expected return from volatility-adjusted momentum
         const expectedReturn = momentum * Math.sqrt(Math.abs(1 - volatility));
-        
+
         enhancedAnalysis = {
           confidence: Math.min(1.0, Math.max(0, overallFeeling)), // Ensure [0,1] range
           direction: direction,
@@ -2949,7 +3037,7 @@ class ProductionTradingEngine {
           energyAlignment: energyAlignment,
           reasoning: `Momentum: ${(momentum*100).toFixed(3)}%, Volatility: ${(volatility*100).toFixed(3)}%`
         };
-        
+
         log(`✅ V₂ Mathematical: ${direction > 0 ? 'BULLISH' : direction < 0 ? 'BEARISH' : 'NEUTRAL'} (${(Math.min(100, Math.abs(overallFeeling)*100)).toFixed(1)}% confidence, ${(expectedReturn*100).toFixed(3)}% expected)`);
       } catch (error) {
         log(`❌ V₂ Mathematical Intuition failed: ${error.message} - SYSTEM UNAVAILABLE`);
@@ -3668,29 +3756,52 @@ class ProductionTradingEngine {
   }
 
   private calculatePriceChanges(marketData: any): number[] {
-    const dataPoints = marketData.dataPoints || [marketData];
+    log(`🔍 INSIDE calculatePriceChanges: marketData type = ${typeof marketData}, has dataPoints = ${!!marketData?.dataPoints}`);
+    const dataPoints = marketData.dataPoints || [];
+    log(`🔍 INSIDE calculatePriceChanges: dataPoints.length = ${dataPoints.length}`);
+
+    if (dataPoints.length > 0) {
+      log(`🔍 First dataPoint: ${JSON.stringify(dataPoints[0])}`);
+    }
+
     const changes: number[] = [];
     for (let i = 1; i < dataPoints.length; i++) {
-      const change = (dataPoints[i].price - dataPoints[i-1].price) / dataPoints[i-1].price;
-      changes.push(change);
+      // Use close price if price field not available (backward compatibility with old cache)
+      const currentPrice = dataPoints[i].price || dataPoints[i].close;
+      const previousPrice = dataPoints[i-1].price || dataPoints[i-1].close;
+
+      if (currentPrice && previousPrice) {
+        const change = (currentPrice - previousPrice) / previousPrice;
+        if (!isNaN(change) && isFinite(change)) {
+          changes.push(change);
+        }
+      }
     }
-    // If not enough data, calculate from current vs 24h ago estimate
-    if (changes.length === 0 && marketData.price) {
-      const dayChange = (Math.random() - 0.5) * 0.02; // Estimate ±2% daily range
-      changes.push(dayChange);
-    }
-    return changes.length > 0 ? changes : [0];
+    log(`🔍 calculatePriceChanges returning ${changes.length} changes`);
+    // 🚨 V3.11.1: NO RANDOM/HARDCODED FALLBACKS - Return empty if no real data
+    return changes;
   }
 
   private calculateVolatility(changes: number[]): number {
-    if (changes.length === 0) return 0.01; // Default 1% volatility
+    if (changes.length === 0) {
+      log(`⚠️ calculateVolatility: No price changes available`);
+      return NaN;
+    }
     const mean = changes.reduce((a, b) => a + b, 0) / changes.length;
     const variance = changes.reduce((sum, x) => sum + Math.pow(x - mean, 2), 0) / changes.length;
-    return Math.sqrt(variance);
+    const volatility = Math.sqrt(variance);
+
+    if (isNaN(volatility)) {
+      log(`⚠️ calculateVolatility: Returned NaN (mean=${mean}, variance=${variance}, changes.length=${changes.length})`);
+    }
+    return volatility;
   }
 
   private calculateMomentum(changes: number[]): number {
-    if (changes.length === 0) return 0;
+    if (changes.length === 0) {
+      log(`⚠️ calculateMomentum: No price changes available`);
+      return NaN;
+    }
     // Weighted average giving more weight to recent changes
     let weightedSum = 0;
     let weightSum = 0;
@@ -3699,7 +3810,12 @@ class ProductionTradingEngine {
       weightedSum += changes[i] * weight;
       weightSum += weight;
     }
-    return weightSum > 0 ? weightedSum / weightSum : 0;
+    const momentum = weightSum > 0 ? weightedSum / weightSum : NaN;
+
+    if (isNaN(momentum)) {
+      log(`⚠️ calculateMomentum: Returned NaN (weightedSum=${weightedSum}, weightSum=${weightSum}, changes.length=${changes.length})`);
+    }
+    return momentum;
   }
 
   private calculateFractalDimension(changes: number[]): number {

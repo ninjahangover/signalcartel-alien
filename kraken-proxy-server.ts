@@ -358,3 +358,16 @@ process.on('SIGTERM', () => {
   console.log('\n🛑 Kraken Proxy Server shutting down...');
   process.exit(0);
 });
+
+// Handle uncaught errors to prevent silent crashes
+process.on('uncaughtException', (error) => {
+  console.error('❌ UNCAUGHT EXCEPTION:', error);
+  console.error('Stack:', error.stack);
+  // Don't exit - keep proxy running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ UNHANDLED REJECTION at:', promise);
+  console.error('Reason:', reason);
+  // Don't exit - keep proxy running
+});

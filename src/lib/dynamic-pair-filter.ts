@@ -37,14 +37,15 @@ export class DynamicPairFilter {
   private cacheLifetimeMs = 60000; // 1 minute cache
 
   // Default thresholds (can be adjusted dynamically)
+  // 🔥 RELAXED THRESHOLDS: Old bugs created bad historical data - allowing fresh exploration
   private thresholds: FilterThresholds = {
-    minAccuracy: 0.30,              // 30% minimum accuracy
-    minSignalsForEvaluation: 50,     // Need 50+ signals before filtering
-    blockedAccuracyThreshold: 0.10,  // <10% accuracy = blocked
-    poorAccuracyThreshold: 0.30,     // <30% accuracy = poor
-    minConfidence: 0.30,             // 30% minimum confidence
-    negativeStreakLimit: -5,         // 5 consecutive losses = warning
-    maxNegativePnL: -500.0           // More than $500 loss = blocked
+    minAccuracy: 0.20,              // 20% minimum accuracy (relaxed for fresh start)
+    minSignalsForEvaluation: 100,    // Need 100+ signals before filtering (increased to allow more exploration)
+    blockedAccuracyThreshold: 0.05,  // <5% accuracy = blocked (only extreme failures)
+    poorAccuracyThreshold: 0.20,     // <20% accuracy = poor (relaxed)
+    minConfidence: 0.15,             // 15% minimum confidence (relaxed)
+    negativeStreakLimit: -10,        // 10 consecutive losses = warning (increased tolerance)
+    maxNegativePnL: -1000.0          // More than $1000 loss = blocked (doubled allowance)
   };
 
   static getInstance(): DynamicPairFilter {
@@ -62,8 +63,19 @@ export class DynamicPairFilter {
 
   /**
    * Check if a trading pair should be allowed based on performance
+   * 🔥 DISABLED: User wants maximum opportunities - no filtering
    */
   async shouldAllowPair(symbol: string, side: 'long' | 'short' = 'long'): Promise<PairFilterResult> {
+    // 🔥 ALLOW ALL PAIRS: User wants to maximize opportunities, not filter them
+    const result: PairFilterResult = {
+      allowed: true,
+      reason: 'Filtering disabled - maximizing opportunities',
+      category: 'acceptable'
+    };
+    return result;
+
+    // ORIGINAL FILTERING CODE DISABLED BELOW
+    /*
     // Check cache first
     const cacheKey = `${symbol}_${side}`;
     const cached = this.performanceCache.get(cacheKey);
@@ -233,6 +245,7 @@ export class DynamicPairFilter {
         category: 'acceptable'
       };
     }
+    */
   }
 
   /**
