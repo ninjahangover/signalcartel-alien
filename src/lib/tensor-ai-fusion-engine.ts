@@ -3658,9 +3658,22 @@ export class TensorAIFusionEngine {
   }
   
   /**
-   * 🧠 MATHEMATICAL CONVICTION: Calculate if mathematical thesis has changed (hold until ALL validations align for exit)
-   * 🕐 TIME-WEIGHTED GOLDEN EQUATION: Conviction grows with time using φ (golden ratio)
-   * 💰 PROFIT-AWARE: Uses sigmoid curve to balance conviction holding vs profit taking
+   * 🔮 PROACTIVE PREDICTIVE EXIT ENGINE
+   *
+   * PHILOSOPHY: Don't exit on current state - exit only when AI layers predict the move is OVER
+   *
+   * Uses ALL 6 AI systems to forecast:
+   * 1. Will price continue moving in our direction? (Markov regime prediction)
+   * 2. Is mathematical momentum building or fading? (Flow field analysis)
+   * 3. Are we approaching a regime transition? (Bayesian forecasting)
+   * 4. Is order book showing continuation or exhaustion? (Depth analysis)
+   * 5. Is sentiment accelerating or decelerating? (Velocity analysis)
+   * 6. What does historical learning say about this pattern? (Adaptive memory)
+   *
+   * HOLD when: AI predicts continuation (even if profit is small)
+   * EXIT when: AI predicts reversal OR profit exceeds reasonable max
+   *
+   * Commission-aware: Never exit for <$1.00 profit (commission eats it)
    */
   public calculateProfitProtectionExit(
     contributingSystems: any[],
@@ -3673,10 +3686,12 @@ export class TensorAIFusionEngine {
     reason: string;
     exitScore: number;
     urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    futurePrediction?: string; // NEW: What AI predicts will happen next
   } {
     let exitScore = 0;
     let reasons: string[] = [];
     let urgency: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
+    let futurePrediction = 'CONTINUATION'; // Default: assume trend continues
 
     // DEBUG LOGGING (only for actual position exits, not new trade evaluations)
     const isPositionExit = positionTimeMinutes !== undefined && unrealizedPnLPercent !== undefined;

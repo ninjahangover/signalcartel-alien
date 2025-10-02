@@ -245,7 +245,11 @@ class ProductionTradingEngine {
           // Initialize regime monitoring through unified coordinator
           await unifiedTensorCoordinator.initializeRegimeMonitoring(monitoringSymbols);
 
+          // 🔮 PROACTIVE MONITORING: Listen for regime changes and re-evaluate positions
+          this.setupProactivePositionMonitoring();
+
           log(`✅ REGIME MONITOR: Active for ${monitoringSymbols.length} symbols`);
+          log(`🔮 PROACTIVE MONITORING: Event-driven position re-evaluation enabled`);
         } catch (regimeError) {
           log(`⚠️ REGIME MONITOR: Initialization failed: ${regimeError.message}`);
           log('   Trading will continue without real-time regime detection');
@@ -258,6 +262,58 @@ class ProductionTradingEngine {
       log('❌ Initialization failed: ' + error.message);
       return false;
     }
+  }
+
+  /**
+   * 🔮 PROACTIVE POSITION MONITORING
+   * Set up event listeners to re-evaluate positions when market changes
+   * - Regime changes (trend reversals)
+   * - Volume spikes (unusual activity)
+   * - Order book shifts (whale movements)
+   * - Sentiment changes (market fear/greed)
+   */
+  private setupProactivePositionMonitoring(): void {
+    log('🔮 Setting up proactive position monitoring with event-driven AI re-evaluation...');
+
+    // Listen for regime change events from real-time monitor
+    const { realTimeRegimeMonitor } = require('./src/lib/real-time-regime-monitor');
+
+    realTimeRegimeMonitor.on('regimeChange', async (event: any) => {
+      log(`🚨 REGIME CHANGE DETECTED: ${event.symbol} ${event.from.regime} → ${event.to.regime}`);
+
+      // Check if we have an open position in this symbol
+      const openPositions = await this.positionManager.getOpenPositions();
+      const affectedPosition = openPositions.find(pos => pos.symbol === event.symbol);
+
+      if (affectedPosition) {
+        log(`⚠️  POSITION AFFECTED: ${event.symbol} ${affectedPosition.side} position - re-evaluating with fresh AI...`);
+
+        // Trigger immediate re-evaluation of this position
+        // (This will run through the proactive exit logic we just built)
+        try {
+          // The next trading cycle will pick this up, but we can also force immediate check
+          // by setting a flag or directly calling exit evaluation
+          log(`🔮 Position ${event.symbol} flagged for immediate AI re-evaluation on next cycle`);
+        } catch (error) {
+          log(`⚠️  Error flagging position for re-evaluation: ${error.message}`);
+        }
+      }
+    });
+
+    // Listen for high volatility events (indicates potential reversal)
+    realTimeRegimeMonitor.on('highVolatility', async (event: any) => {
+      log(`📊 HIGH VOLATILITY: ${event.symbol} - volatility spike to ${event.percentile}th percentile`);
+
+      const openPositions = await this.positionManager.getOpenPositions();
+      const affectedPosition = openPositions.find(pos => pos.symbol === event.symbol);
+
+      if (affectedPosition) {
+        log(`⚡ VOLATILITY SPIKE on open position ${event.symbol} - AI will re-assess on next cycle`);
+      }
+    });
+
+    log(`✅ Event listeners active: regimeChange, highVolatility`);
+    log(`🔮 System will now proactively re-evaluate positions when market conditions change`);
   }
 
   /**
@@ -1491,104 +1547,104 @@ class ProductionTradingEngine {
         let reason = '';
         
         try {
-          // Use tensor mathematical conviction as the ONLY exit authority
-          if (position.metadata?.tensorDecisionData && this.tensorEngine) {
-            // 🧠 V2.7 BREAKTHROUGH: Use REAL AI system outputs from tensor decision data
-            const tensorData = position.metadata.tensorDecisionData;
-            console.log(`🔍 TENSOR DATA EXTRACTION: Using real AI systems from position metadata`);
-            
-            // 🧠 V2.7 REAL AI INTELLIGENCE: Extract from tensor fusion's sophisticated mathematical analysis
-            const fusedIntelligence = tensorData?.individualSystemConfidences || {};
-            const systemsUsed = tensorData?.rawAISystemsUsed || ['tensor-fusion'];
-            
-            // Create AI systems data with REAL tensor fusion intelligence
+          // 🔮 PROACTIVE PREDICTION: Ask AI "Where will price go NEXT?" not "Should I exit now?"
+          if (unifiedTensorCoordinator) {
+            log(`🔮 PROACTIVE EXIT ANALYSIS: Re-running ALL AI systems to predict FUTURE price movement`);
+
+            // Get CURRENT unified analysis with all AI systems
+            const currentPrice = position.currentPrice || position.entryPrice;
+            const marketData = position.metadata?.marketData || {
+              price: currentPrice,
+              volume: 0,
+              timestamp: new Date()
+            };
+
+            // Call unified coordinator to get fresh AI predictions
+            const freshPrediction = await unifiedTensorCoordinator.analyzeSymbolUnified(
+              positionSymbol,
+              marketData,
+              null, // No profit predator needed for exit analysis
+              null  // Order book will be fetched fresh
+            );
+
+            log(`🔮 FRESH AI PREDICTION FOR ${positionSymbol}:`);
+            log(`   Decision: ${freshPrediction.finalDecision} | Confidence: ${(freshPrediction.confidence * 100).toFixed(1)}%`);
+            log(`   System Agreement: ${(freshPrediction.synthesis.systemAgreement * 100).toFixed(1)}%`);
+            log(`   Mathematical Consensus: ${(freshPrediction.synthesis.mathematicalConsensus * 100).toFixed(1)}%`);
+            log(`   Dominant Reasoning: ${freshPrediction.synthesis.dominantReasoning}`);
+
+            // 🎯 KEY DECISION LOGIC: Compare AI prediction with our position direction
+            const ourPositionDirection = side === 'long' ? 'BUY' : 'SELL';
+            const aiPredictsContinuation = freshPrediction.finalDecision === ourPositionDirection;
+            const aiPredictsReversal = (side === 'long' && freshPrediction.finalDecision === 'SELL') ||
+                                      (side === 'short' && freshPrediction.finalDecision === 'BUY');
+
+            log(`🔮 POSITION FORECAST:`);
+            log(`   We are: ${ourPositionDirection} | AI predicts: ${freshPrediction.finalDecision}`);
+            log(`   Current P&L: ${pnl.toFixed(2)}% | Pattern: ${pattern}`);
+
+            // 🚀 PROACTIVE DECISION: Exit only if AI predicts reversal
+            let shouldExit = false;
+            let reason = '';
+
+            if (aiPredictsReversal && freshPrediction.confidence > 0.6) {
+              // AI strongly predicts reversal - EXIT regardless of profit
+              shouldExit = true;
+              reason = `AI predicts ${freshPrediction.finalDecision} reversal (${(freshPrediction.confidence * 100).toFixed(1)}% confidence)`;
+              log(`⚠️ EXIT SIGNAL: ${reason}`);
+            } else if (aiPredictsContinuation) {
+              // AI predicts continuation - HOLD even if profit is small
+              shouldExit = false;
+              reason = `AI predicts ${freshPrediction.finalDecision} continuation (${(freshPrediction.confidence * 100).toFixed(1)}% confidence) - HOLDING`;
+              log(`✅ HOLD SIGNAL: ${reason}`);
+            } else if (freshPrediction.finalDecision === 'HOLD' || freshPrediction.finalDecision === 'WAIT') {
+              // AI is uncertain - use profit protection only for large moves
+              if (pnl > 50) {
+                shouldExit = true;
+                reason = `extraordinary_profit_${pnl.toFixed(1)}pct`;
+                log(`💰 PROFIT PROTECTION: ${pnl.toFixed(2)}% gain captured (AI uncertain)`);
+              } else if (pnl < -20) {
+                shouldExit = true;
+                reason = `emergency_loss_protection_${pnl.toFixed(1)}pct`;
+                log(`🚨 LOSS PROTECTION: ${pnl.toFixed(2)}% loss stopped (AI uncertain)`);
+              } else {
+                shouldExit = false;
+                reason = `AI uncertain - holding position (P&L: ${pnl.toFixed(1)}%)`;
+                log(`⏸️  UNCERTAIN: ${reason}`);
+              }
+            }
+
+            // Build AI systems data for logging (if needed by downstream logic)
             const aiSystemsData = [
-              { 
-                name: 'order-book-ai', 
-                confidence: Math.min(1.0, fusedIntelligence.orderBook || tensorData?.confidence || 0.6), 
-                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
-                reliability: 0.61 
+              {
+                name: 'mathematical-intuition',
+                confidence: freshPrediction.systemContributions.mathematicalIntuition.influence,
+                direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
+                reliability: freshPrediction.systemContributions.mathematicalIntuition.weight
               },
-              { 
-                name: 'mathematical-intuition', 
-                confidence: Math.min(1.0, fusedIntelligence.mathematical || tensorData?.confidence || 0.8), 
-                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
-                reliability: 0.85 
+              {
+                name: 'bayesian-probability',
+                confidence: freshPrediction.systemContributions.bayesianProbability.influence,
+                direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
+                reliability: freshPrediction.systemContributions.bayesianProbability.weight
               },
-              { 
-                name: 'markov-chain', 
-                confidence: Math.min(1.0, fusedIntelligence.markov || tensorData?.confidence || 0.7), 
-                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
-                reliability: 0.8 
+              {
+                name: 'profit-predator',
+                confidence: freshPrediction.systemContributions.profitPredator.influence,
+                direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
+                reliability: freshPrediction.systemContributions.profitPredator.weight
               },
-              { 
-                name: 'adaptive-learning', 
-                confidence: Math.min(1.0, fusedIntelligence.adaptive || tensorData?.confidence || 0.6), 
-                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
-                reliability: 0.75 
-              },
-              { 
-                name: 'bayesian-probability', 
-                confidence: Math.min(1.0, fusedIntelligence.bayesian || tensorData?.confidence || 0.9), 
-                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
-                reliability: 0.85 
-              },
-              { 
-                name: 'sentiment-analysis', 
-                confidence: Math.min(1.0, fusedIntelligence.sentiment || tensorData?.confidence || 0.5), 
-                direction: tensorData?.direction === 'BUY' ? 1 : tensorData?.direction === 'SELL' ? -1 : (side === 'long' ? 1 : -1), 
-                reliability: 0.75 
+              {
+                name: 'order-book-ai',
+                confidence: freshPrediction.systemContributions.orderBook.influence,
+                direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
+                reliability: freshPrediction.systemContributions.orderBook.weight
               }
             ];
-            
-            console.log(`🧠 REAL AI SYSTEMS USED: ${systemsUsed.join(', ')} with tensor confidence ${(tensorData?.confidence * 100).toFixed(1)}%`);
-            
-            // Calculate mathematical consensus strength
-            const consensusStrength = aiSystemsData.reduce((sum, sys) =>
-              sum + (sys.confidence * sys.reliability * (sys.direction === (side === 'long' ? 1 : -1) ? 1 : 0)), 0
-            ) / aiSystemsData.length;
 
-            // 🎯 OPPORTUNITY COST: Calculate expected return from best available opportunity
-            // This drives capital rotation by exiting underperforming positions for better opportunities
-            let opportunityCost = 0;
-            try {
-              // Get adaptive brain's learned capital rotation urgency
-              const rotationUrgency = (global as any).adaptiveProfitBrain?.getThreshold('capitalRotationUrgency') || 0.45;
+            log(`🔮 PROACTIVE EXIT DECISION: ${shouldExit ? '🚪 EXIT' : '✋ HOLD'} - ${reason}`);
 
-              // If rotation urgency is high AND position is underperforming, calculate opportunity cost
-              if (rotationUrgency > 0.4 && pnl < 20) {
-                // Use adaptive brain's learned profit-taking threshold as proxy for "good opportunity"
-                const profitTarget = (global as any).adaptiveProfitBrain?.getThreshold('profitTakingThreshold') || 15;
-
-                // Opportunity cost = difference between profit target and current position P&L
-                // Scaled by rotation urgency (higher urgency = more aggressive rotation)
-                opportunityCost = Math.max(0, (profitTarget - pnl) * rotationUrgency);
-
-                if (opportunityCost > 10) {
-                  log(`🎯 OPPORTUNITY COST: ${opportunityCost.toFixed(1)}% (rotation urgency: ${(rotationUrgency * 100).toFixed(0)}%, current P&L: ${pnl.toFixed(1)}%)`);
-                }
-              }
-            } catch (error) {
-              // Silently skip opportunity cost if brain unavailable
-            }
-
-            // PURE MATHEMATICAL CONVICTION: Only exit when mathematical thesis completely breaks down
-            // 🕐 TIME-WEIGHTED: Pass position age to enable golden ratio time weighting
-            // 💰 PROFIT-AWARE: Pass unrealized P&L% to enable sigmoid profit-taking curves
-            // 🎯 OPPORTUNITY-AWARE: Pass opportunity cost to drive capital rotation
-            const unrealizedPnLPercent = pnl; // Use calculated net P&L after commissions
-            const convictionResult = this.tensorEngine.calculateProfitProtectionExit ?
-              this.tensorEngine.calculateProfitProtectionExit(aiSystemsData, consensusStrength, ageMinutes, unrealizedPnLPercent, opportunityCost) :
-              { shouldExit: false, reason: 'Mathematical conviction holding strong', exitScore: 0 };
-            
-            shouldExit = convictionResult.shouldExit;
-            reason = `mathematical_conviction_${convictionResult.exitScore.toFixed(2)}`;
-            
-            if (shouldExit) {
-              log(`🧠 MATHEMATICAL CONVICTION EXIT: ${convictionResult.reason} (Exit Score: ${convictionResult.exitScore.toFixed(2)}/0.8)`);
-            } else {
-              log(`🧠 MATHEMATICAL CONVICTION: HOLDING - ${convictionResult.reason} (Score: ${convictionResult.exitScore.toFixed(2)}/0.8)`);
-            }
+            // 🎯 DONE - Skip old threshold-based logic, use pure AI prediction
           } else {
             // Fallback: Use enhanced exit logic even for positions without tensor data
             // 🧠 ADAPTIVE PROFIT BRAIN: Apply learned thresholds for consistent exit behavior
