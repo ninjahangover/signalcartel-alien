@@ -40,6 +40,10 @@ import { realTimePositionUpdater } from './src/lib/real-time-position-updater';
 import { adaptiveProfitBrain } from './src/lib/adaptive-profit-brain';
 // Make brain available globally for tensor engine
 (global as any).adaptiveProfitBrain = adaptiveProfitBrain;
+// 🌍 CMC GLOBAL METRICS - Market-wide sentiment and regime detection
+import { coinMarketCapService } from './src/lib/coinmarketcap-service';
+// Make CMC service available globally for Bayesian and Sentiment AI
+(global as any).cmcService = coinMarketCapService;
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -341,7 +345,7 @@ class ProductionTradingEngine {
     // 🎯 PURE OPPORTUNITY-DRIVEN TRADING: Only trade when Profit Predator finds high-quality opportunities
     let PRIORITY_PAIRS: string[] = [];
 
-    // Use ONLY discovered opportunities - no hardcoded fallback pairs
+    // Use ONLY discovered opportunities - maximize profit, not volume
     if (this.dynamicPairs.length > 0) {
       PRIORITY_PAIRS = this.dynamicPairs.slice(0, 8); // Top 8 discovered opportunities
       log(`🎯 OPPORTUNITY-DRIVEN: Using ${PRIORITY_PAIRS.length} Profit Predator discoveries`);
@@ -606,43 +610,65 @@ class ProductionTradingEngine {
         const lines = logData.split('\n').reverse(); // Start from most recent
         log(`🔍 DEBUG: Reading ${lines.length} lines from profit predator log`);
 
-        // MUCH SIMPLER: Just find the most recent JSON_OPPORTUNITIES in the log
+        // 🎯 CUMULATIVE WINDOW: Aggregate opportunities from last 5 minutes to capture all valid signals
         const recentOpportunities = [];
-        log(`🔍 SIMPLE SEARCH: Looking for most recent JSON_OPPORTUNITIES in log`);
+        const opportunityMap = new Map(); // Use map to deduplicate and keep highest scores
+        const LOOKBACK_WINDOW = 5 * 60 * 1000; // 5 minutes
+        const currentTime = Date.now();
+
+        log(`🔍 WINDOW SEARCH: Looking for JSON_OPPORTUNITIES in last 5 minutes`);
+
         // Search from the beginning of reversed array (most recent entries)
-        for (let i = 0; i < lines.length; i++) {
+        let linesProcessed = 0;
+        for (let i = 0; i < lines.length && linesProcessed < 100; i++) { // Process max 100 recent lines
           const line = lines[i];
+          linesProcessed++;
+
           if (line.includes('JSON_OPPORTUNITIES:')) {
-            log(`🎯 FOUND: Most recent JSON opportunities at line ${i}`);
             try {
-              const jsonMatch = line.match(/JSON_OPPORTUNITIES:\s*(\[.*\])/);
-              if (jsonMatch && jsonMatch[1]) {
-                const jsonOpps = JSON.parse(jsonMatch[1]);
-                log(`🎯 PARSED: ${jsonOpps.length} JSON opportunities successfully!`);
+              // Extract timestamp from log line
+              const timestampMatch = line.match(/\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\]/);
+              if (timestampMatch) {
+                const logTime = new Date(timestampMatch[1]).getTime();
+                const ageMs = currentTime - logTime;
 
-                jsonOpps.forEach((opp: any) => {
-                  if (opp.expectedReturn >= 12.0) { // Only high-quality opportunities
-                    recentOpportunities.push({
-                      symbol: opp.symbol,
-                      score: Math.round(opp.expectedReturn),
-                      expectedReturn: opp.expectedReturn,
-                      winProb: opp.winProb,
-                      source: 'json_log'
+                // Only include opportunities from last 5 minutes
+                if (ageMs <= LOOKBACK_WINDOW) {
+                  const jsonMatch = line.match(/JSON_OPPORTUNITIES:\s*(\[.*\])/);
+                  if (jsonMatch && jsonMatch[1]) {
+                    const jsonOpps = JSON.parse(jsonMatch[1]);
+
+                    jsonOpps.forEach((opp: any) => {
+                      if (opp.expectedReturn >= 12.0) { // Only high-quality opportunities
+                        const existing = opportunityMap.get(opp.symbol);
+
+                        // Keep highest expected return for each symbol
+                        if (!existing || opp.expectedReturn > existing.expectedReturn) {
+                          opportunityMap.set(opp.symbol, {
+                            symbol: opp.symbol,
+                            score: Math.round(opp.expectedReturn),
+                            expectedReturn: opp.expectedReturn,
+                            winProb: opp.winProb,
+                            source: 'json_log',
+                            ageMs: ageMs
+                          });
+                        }
+                      }
                     });
-                    log(`✅ HIGH-QUALITY: ${opp.symbol} = ${opp.expectedReturn}% expected, ${opp.winProb}% win prob`);
-                  } else {
-                    log(`⚠️ LOW-QUALITY: ${opp.symbol} = ${opp.expectedReturn}% expected (below 12% threshold)`);
                   }
-                });
-
-                // Found the most recent JSON opportunities, stop searching
-                break;
+                }
               }
             } catch (e) {
               log(`❌ JSON PARSE ERROR: ${e.message}`);
             }
           }
         }
+
+        // Convert map to array
+        opportunityMap.forEach(opp => {
+          recentOpportunities.push(opp);
+          log(`✅ WINDOW CAPTURE: ${opp.symbol} = ${opp.expectedReturn}% (${Math.round(opp.ageMs/1000)}s ago)`);
+        });
 
         log(`🎯 SIMPLE SUCCESS: Found ${recentOpportunities.length} opportunities from JSON log`);
 
@@ -807,7 +833,9 @@ class ProductionTradingEngine {
       
       // 🚀 TENSOR MODE: Skip all Pine Script and phase logic, use pure AI only
       if (this.tensorMode) {
-        return this.executePureAITensorFusion(marketData, phase);
+        // Enhance marketData with real OHLC candles for better AI predictions
+        const enhancedMarketData = await this.enhanceMarketDataWithOHLC(marketData);
+        return this.executePureAITensorFusion(enhancedMarketData, phase);
       }
       
       // ⚠️ LEGACY PHASE SYSTEM - DEPRECATED IN FAVOR OF TENSOR FUSION
@@ -1621,21 +1649,79 @@ class ProductionTradingEngine {
               let predictionScore = 0;
               
               try {
-                // MARKOV CHAIN PREDICTION - Process market data for state transitions
-                const cachedPrices = this.priceHistoryCache.get(positionSymbol) || [];
+                // MARKOV CHAIN PREDICTION - Fetch REAL OHLC candles directly from Kraken
+                let candleData: any[] = [];
+
+                // Check cache first (5-minute cache to limit API calls)
+                const cacheKey = `ohlc_${positionSymbol}`;
+                const cachedOHLC = (this as any).ohlcCache?.get(cacheKey);
+                const now = Date.now();
+
+                if (cachedOHLC && (now - cachedOHLC.timestamp) < 5 * 60 * 1000) {
+                  candleData = cachedOHLC.data;
+                  console.log(`📦 CACHED OHLC: ${positionSymbol} using cached candles (${Math.floor((now - cachedOHLC.timestamp) / 1000)}s old)`);
+                } else {
+                  try {
+                    // Map to Kraken pair name (e.g., BTCUSD -> XXBTZUSD, AVAXUSD -> AVAXUSD)
+                    let krakenPair = positionSymbol;
+                    if (positionSymbol === 'BTCUSD') krakenPair = 'XXBTZUSD';
+                    else if (positionSymbol === 'ETHUSD') krakenPair = 'XETHZUSD';
+                    else if (positionSymbol === 'XRPUSD') krakenPair = 'XXRPZUSD';
+                    else if (positionSymbol === 'LTCUSD') krakenPair = 'XLTCZUSD';
+
+                    // Fetch OHLC data directly from Kraken public API (5-minute candles for more volatility)
+                    const ohlcResponse = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=5`);
+                    const ohlcData = await ohlcResponse.json();
+
+                    if (ohlcData.result && ohlcData.result[krakenPair]) {
+                      const candles = ohlcData.result[krakenPair];
+                      // Take last 100 candles, convert to our format
+                      candleData = candles.slice(-100).map((c: any[]) => ({
+                        symbol: positionSymbol,
+                        timestamp: new Date(c[0] * 1000), // Unix timestamp to Date
+                        open: parseFloat(c[1]),
+                        high: parseFloat(c[2]),
+                        low: parseFloat(c[3]),
+                        close: parseFloat(c[4]),
+                        volume: parseFloat(c[6])
+                      }));
+
+                      // Cache the result for 5 minutes
+                      if (!(this as any).ohlcCache) (this as any).ohlcCache = new Map();
+                      (this as any).ohlcCache.set(cacheKey, { data: candleData, timestamp: now });
+
+                      console.log(`📊 KRAKEN OHLC: ${positionSymbol} fetched ${candleData.length} real 5-min candles (cached 5min)`);
+                      if (candleData.length > 0) {
+                        const sample = candleData[candleData.length - 1]; // Most recent
+                        const priceChange = ((sample.close - sample.open) / sample.open * 100).toFixed(2);
+                        const range = ((sample.high - sample.low) / sample.low * 100).toFixed(2);
+                        console.log(`📊 LATEST CANDLE: O=${sample.open.toFixed(2)} H=${sample.high.toFixed(2)} L=${sample.low.toFixed(2)} C=${sample.close.toFixed(2)} (${priceChange}% move, ${range}% range)`);
+                      }
+                    }
+                  } catch (ohlcError) {
+                    console.log(`⚠️ Kraken OHLC fetch failed for ${positionSymbol}:`, ohlcError.message);
+                  }
+                }
+
+                // Fallback: if no Kraken OHLC data, use current price as single candle
+                if (candleData.length === 0 && price) {
+                  console.log(`📊 FALLBACK: Using current price for ${positionSymbol} (no Kraken OHLC available)`);
+                  candleData.push({
+                    symbol: positionSymbol,
+                    open: price,
+                    high: price * 1.001,
+                    low: price * 0.999,
+                    close: price,
+                    volume: 1000,
+                    timestamp: new Date()
+                  });
+                }
+
                 const markovPrediction = enhancedMarkovPredictor.processMarketData(
                   positionSymbol,
                   currentMarketData,
                   marketIntelligence,
-                  cachedPrices.map(p => ({
-                    symbol: positionSymbol,
-                    open: p,
-                    high: p,
-                    low: p,
-                    close: p,
-                    volume: 1000,
-                    timestamp: new Date()
-                  }))
+                  candleData
                 );
                 
                 // BAYESIAN PROBABILITY - Calculate profit probability  
@@ -1663,7 +1749,8 @@ class ProductionTradingEngine {
                 
                 // LAW OF LARGE NUMBERS - Statistical convergence prediction
                 expectedValue = markovPrediction.expectedReturn || 0;
-                probabilityOfProfit = side === 'long' ? bayesianProb.bullishProbability : bayesianProb.bearishProbability;
+                // Use Bayesian confidence instead of raw regime probabilities
+                probabilityOfProfit = bayesianProb.confidence || 0.5;
                 correlationSignal = correlations.aggregateScore || 0;
                 
                 // COMPOSITE PREDICTION SCORE
@@ -2870,23 +2957,35 @@ class ProductionTradingEngine {
         enhancedAnalysis = null;
       }
       
-      // V₃: Bayesian Probability Analysis - REAL REGIME DETECTION
+      // V₃: Bayesian Probability Analysis - REAL REGIME DETECTION + CMC GLOBAL METRICS
       let bayesianAnalysis = null;
       try {
         const priceChanges = this.calculatePriceChanges(marketData);
         const returns = this.calculateReturns(priceChanges);
-        
+
         // Calculate actual regime probabilities using Bayesian inference
         const meanReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
         const variance = returns.reduce((a, r) => a + Math.pow(r - meanReturn, 2), 0) / returns.length;
         const skewness = this.calculateSkewness(returns, meanReturn, variance);
         const kurtosis = this.calculateKurtosis(returns, meanReturn, variance);
-        
+
+        // 🌍 CMC Global Metrics Enhancement (1-hour cache, 720 calls/month)
+        let globalRegime: any = null;
+        try {
+          const cmcService = (global as any).cmcService;
+          if (cmcService && typeof cmcService.getMarketRegimeFromGlobalMetrics === 'function') {
+            globalRegime = await cmcService.getMarketRegimeFromGlobalMetrics();
+            log(`🌍 CMC Global: ${globalRegime.regime} (${(globalRegime.confidence*100).toFixed(1)}% confidence, ${globalRegime.signals[0] || 'no signal'})`);
+          }
+        } catch (cmcError) {
+          // Silent fail - global metrics are enhancement, not critical
+        }
+
         // Bayesian regime classification based on statistical moments
         let regime = 'NEUTRAL';
         let confidence = 0;
         let directionBias = 0;
-        
+
         // Strong trend detection
         if (Math.abs(meanReturn) > 0.002) { // 0.2% threshold
           if (meanReturn > 0) {
@@ -2911,10 +3010,33 @@ class ProductionTradingEngine {
           directionBias = 0;
           confidence = Math.max(0.3, 0.5 - variance * 1000);
         }
-        
+
+        // 🌍 Enhance regime with global market context
+        if (globalRegime) {
+          // Adjust confidence based on global market alignment
+          if ((regime === 'BULL' || regime === 'STRONG_BULL') && globalRegime.regime === 'BULL_MARKET') {
+            confidence = Math.min(0.98, confidence * 1.15); // Boost bull confidence
+            log(`🌍 Global market confirms BULL - confidence boosted to ${(confidence*100).toFixed(1)}%`);
+          } else if ((regime === 'BEAR' || regime === 'STRONG_BEAR') && globalRegime.regime === 'BEAR_MARKET') {
+            confidence = Math.min(0.98, confidence * 1.15); // Boost bear confidence
+            log(`🌍 Global market confirms BEAR - confidence boosted to ${(confidence*100).toFixed(1)}%`);
+          } else if (globalRegime.regime === 'EXTREME_FEAR' && (regime === 'BEAR' || regime === 'STRONG_BEAR')) {
+            confidence = Math.min(0.99, confidence * 1.25); // Strong fear confirmation
+            log(`🌍 EXTREME FEAR detected - bear confidence boosted to ${(confidence*100).toFixed(1)}%`);
+          } else if (globalRegime.regime === 'ALTCOIN_SEASON' && marketData.symbol !== 'BTCUSD') {
+            // Boost altcoin confidence during altseason
+            confidence = Math.min(0.95, confidence * 1.1);
+            log(`🌍 ALTCOIN SEASON active - altcoin confidence boosted to ${(confidence*100).toFixed(1)}%`);
+          } else if (globalRegime.regime === 'BTC_DOMINANCE' && marketData.symbol !== 'BTCUSD') {
+            // Reduce altcoin confidence when BTC is dominant
+            confidence = Math.max(0.2, confidence * 0.85);
+            log(`🌍 BTC DOMINANCE (${globalRegime.signals[0]}) - altcoin confidence reduced to ${(confidence*100).toFixed(1)}%`);
+          }
+        }
+
         // Calculate expected return using Bayesian posterior
         const expectedReturn = meanReturn * (1 + Math.sign(skewness) * 0.1) * confidence;
-        
+
         bayesianAnalysis = {
           mostLikelyRegime: regime,
           confidence: confidence,
@@ -2922,6 +3044,8 @@ class ProductionTradingEngine {
           expectedReturn: expectedReturn,
           regimeProbability: confidence,
           posteriorEntropy: -confidence * Math.log(confidence + 0.001),
+          globalMarketRegime: globalRegime?.regime || 'UNKNOWN',
+          globalMarketHealth: globalRegime?.market_health || 'UNKNOWN',
           statistics: {
             mean: meanReturn,
             variance: variance,
@@ -2929,7 +3053,7 @@ class ProductionTradingEngine {
             kurtosis: kurtosis
           }
         };
-        
+
         log(`✅ V₃ Bayesian: ${regime} (${(confidence * 100).toFixed(1)}%, ${(expectedReturn*100).toFixed(3)}% expected)`);
       } catch (error) {
         log(`❌ V₃ Bayesian failed: ${error.message} - SYSTEM UNAVAILABLE`);
@@ -3059,15 +3183,63 @@ class ProductionTradingEngine {
       // V₆: Order Book Intelligence + Profit Predator - REAL MARKET MICROSTRUCTURE + PROFIT HUNTING
       let orderBookAnalysis = null;
       try {
-        // Calculate real order book metrics from market data with safe fallbacks
-        const ask = marketData.ask || (marketData.price * 1.0005); // 0.05% above price if no ask
-        const bid = marketData.bid || (marketData.price * 0.9995); // 0.05% below price if no bid
-        const askVolume = marketData.askVolume || 1000; // Default volume if missing
-        const bidVolume = marketData.bidVolume || 1000; // Default volume if missing
-        
-        const spread = (ask - bid) / marketData.price || 0.001;
+        // 📊 ENHANCED: Derive order book signals from OHLC candle data
+        let ask, bid, askVolume, bidVolume, spread, imbalance;
+
+        if (marketData.dataPoints && marketData.dataPoints.length > 0) {
+          // Use real OHLC candles to derive order book pressure
+          const recentCandles = marketData.dataPoints.slice(-10); // Last 10 candles
+          const latestCandle = recentCandles[recentCandles.length - 1];
+
+          // Calculate buy/sell pressure from candle wicks and volume
+          const bodySize = Math.abs(latestCandle.close - latestCandle.open);
+          const upperWick = latestCandle.high - Math.max(latestCandle.open, latestCandle.close);
+          const lowerWick = Math.min(latestCandle.open, latestCandle.close) - latestCandle.low;
+          const totalRange = latestCandle.high - latestCandle.low;
+
+          // Imbalance from candle structure: upper wick rejection = selling pressure
+          const wickImbalance = totalRange > 0 ? (lowerWick - upperWick) / totalRange : 0;
+
+          // Volume-weighted direction from recent candles
+          let bullishVolume = 0;
+          let bearishVolume = 0;
+          recentCandles.forEach(c => {
+            if (c.close > c.open) bullishVolume += c.volume || 1000;
+            else bearishVolume += c.volume || 1000;
+          });
+          const volumeImbalance = (bullishVolume - bearishVolume) / (bullishVolume + bearishVolume + 1);
+
+          // Combine wick and volume imbalance
+          imbalance = (wickImbalance * 0.4 + volumeImbalance * 0.6); // 40% wick, 60% volume
+
+          // Spread from recent price volatility
+          const prices = recentCandles.map(c => c.close);
+          const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+          const volatility = Math.sqrt(prices.reduce((sum, p) => sum + Math.pow(p - avgPrice, 2), 0) / prices.length) / avgPrice;
+          spread = Math.max(0.0001, Math.min(0.005, volatility * 2)); // 0.01-0.5% spread from volatility
+
+          // Synthetic ask/bid based on pressure
+          const pressureSpread = spread * (1 + Math.abs(imbalance) * 0.5); // Widen spread with imbalance
+          ask = latestCandle.close * (1 + pressureSpread / 2);
+          bid = latestCandle.close * (1 - pressureSpread / 2);
+
+          // Volume distribution based on imbalance
+          const totalVolume = latestCandle.volume || 1000;
+          askVolume = totalVolume * (0.5 - imbalance / 2); // More asks if selling pressure
+          bidVolume = totalVolume * (0.5 + imbalance / 2); // More bids if buying pressure
+
+          log(`📊 OHLC-derived order book: spread=${(spread*100).toFixed(3)}%, imbalance=${(imbalance*100).toFixed(1)}% (wick: ${(wickImbalance*100).toFixed(1)}%, vol: ${(volumeImbalance*100).toFixed(1)}%)`);
+        } else {
+          // Fallback to synthetic values if no OHLC data
+          ask = marketData.ask || (marketData.price * 1.0005);
+          bid = marketData.bid || (marketData.price * 0.9995);
+          askVolume = marketData.askVolume || 1000;
+          bidVolume = marketData.bidVolume || 1000;
+          spread = (ask - bid) / marketData.price || 0.001;
+          imbalance = (bidVolume - askVolume) / (askVolume + bidVolume + 1);
+        }
+
         const midPrice = (ask + bid) / 2 || marketData.price;
-        const imbalance = (askVolume - bidVolume) / (askVolume + bidVolume + 1);
         
         // 🐅 INTEGRATE PROFIT PREDATOR HUNT DATA
         let profitHuntBoost = 0;
@@ -3139,58 +3311,111 @@ class ProductionTradingEngine {
         orderBookAnalysis = null;
       }
       
-      // V₇: Sentiment Analysis - REAL MARKET SENTIMENT
+      // V₇: Sentiment Analysis - REAL MARKET SENTIMENT + CMC GLOBAL METRICS
       let sentimentAnalysis = null;
       try {
         // Use safe fallbacks for missing market data
         const priceChanges = this.calculatePriceChanges(marketData) || [0, 0, 0];
         const volume = marketData.volume || 1000; // Default volume if missing
         const volumeMA = this.calculateVolumeMA(marketData) || 1000; // Default volume MA if missing
-        
+
         // Volume-weighted sentiment with safe calculations
         const volumeRatio = volume / Math.max(1, volumeMA);
         const priceVelocity = (priceChanges && priceChanges.length > 0) ? (priceChanges[priceChanges.length - 1] || 0) : 0;
         const acceleration = this.calculateAcceleration(priceChanges) || 0;
-        
+
         // Fear & Greed components with safe fallbacks
         const momentum = this.calculateMomentum(priceChanges) || 0;
         const volatility = this.calculateVolatility(priceChanges) || 0.02; // Default 2% volatility
         const volumePressure = isNaN(volumeRatio) ? 0 : (volumeRatio - 1) * Math.sign(priceVelocity);
-        
+
         // Ensure all inputs are valid numbers before calculation
         const safeMomentum = isNaN(momentum) ? 0 : momentum;
         const safeVolumePressure = isNaN(volumePressure) ? 0 : volumePressure;
         const safeAcceleration = isNaN(acceleration) ? 0 : acceleration;
         const safeVolatility = isNaN(volatility) ? 0.02 : volatility;
-        
-        // Composite sentiment score (-1 to 1) with safe inputs
+
+        // 🌍 CMC Global Metrics Sentiment Enhancement (1-hour cache, 720 calls/month)
+        let globalSentimentAdjustment = 0;
+        let globalSentimentSignals: string[] = [];
+        try {
+          const cmcService = (global as any).cmcService;
+          if (cmcService && typeof cmcService.getMarketRegimeFromGlobalMetrics === 'function') {
+            const globalRegime = await cmcService.getMarketRegimeFromGlobalMetrics();
+
+            // Adjust sentiment based on global market conditions
+            if (globalRegime.regime === 'EXTREME_FEAR') {
+              globalSentimentAdjustment = -0.4; // Strong bearish sentiment
+              globalSentimentSignals.push('Global EXTREME FEAR detected');
+            } else if (globalRegime.regime === 'FEAR') {
+              globalSentimentAdjustment = -0.2; // Moderate bearish sentiment
+              globalSentimentSignals.push('Global FEAR detected');
+            } else if (globalRegime.regime === 'BULL_MARKET' && globalRegime.confidence > 0.7) {
+              globalSentimentAdjustment = +0.3; // Strong bullish sentiment
+              globalSentimentSignals.push('Global BULL market confirmed');
+            } else if (globalRegime.regime === 'BEAR_MARKET' && globalRegime.confidence > 0.7) {
+              globalSentimentAdjustment = -0.3; // Strong bearish sentiment
+              globalSentimentSignals.push('Global BEAR market confirmed');
+            }
+
+            // DeFi momentum as additional sentiment signal
+            if (Math.abs(globalRegime.defi_momentum) > 5) {
+              const defiSignal = globalRegime.defi_momentum > 0 ? +0.1 : -0.1;
+              globalSentimentAdjustment += defiSignal;
+              globalSentimentSignals.push(`DeFi ${globalRegime.defi_momentum > 0 ? 'strength' : 'weakness'} ${globalRegime.defi_momentum.toFixed(1)}%`);
+            }
+
+            // Volume trend as confirmation
+            if (globalRegime.volume_trend === 'INCREASING' && globalSentimentAdjustment > 0) {
+              globalSentimentAdjustment *= 1.15; // Boost positive sentiment with volume
+              globalSentimentSignals.push('Volume surge confirms sentiment');
+            } else if (globalRegime.volume_trend === 'DECREASING' && globalSentimentAdjustment < 0) {
+              globalSentimentAdjustment *= 1.15; // Boost negative sentiment with volume drop
+              globalSentimentSignals.push('Volume decline confirms sentiment');
+            }
+
+            if (globalSentimentSignals.length > 0) {
+              log(`🌍 CMC Global Sentiment: ${globalSentimentSignals.join(', ')} (adjustment: ${(globalSentimentAdjustment*100).toFixed(1)}%)`);
+            }
+          }
+        } catch (cmcError) {
+          // Silent fail - global metrics are enhancement, not critical
+        }
+
+        // Composite sentiment score (-1 to 1) with safe inputs + CMC global enhancement
         let sentimentScore = Math.tanh(
           safeMomentum * 0.4 +           // 40% weight on momentum
           safeVolumePressure * 0.3 +      // 30% weight on volume pressure
           safeAcceleration * 0.2 +        // 20% weight on acceleration
-          -safeVolatility * 0.1          // 10% weight on volatility (negative)
+          -safeVolatility * 0.1 +        // 10% weight on volatility (negative)
+          globalSentimentAdjustment       // 🌍 Global market sentiment overlay
         );
-        
+
         // Final safety check - if still NaN, default to neutral
         if (isNaN(sentimentScore)) {
           sentimentScore = 0; // Neutral sentiment if calculation fails
         }
-        
+
         // Determine market sentiment
         let sentiment = 'NEUTRAL';
         if (sentimentScore > 0.3) sentiment = sentimentScore > 0.6 ? 'EXTREME_GREED' : 'GREED';
         else if (sentimentScore < -0.3) sentiment = sentimentScore < -0.6 ? 'EXTREME_FEAR' : 'FEAR';
-        
+
         // Confidence based on signal strength with safety check
-        const confidence = isNaN(sentimentScore) ? 0.5 : Math.abs(sentimentScore);
-        
+        let confidence = isNaN(sentimentScore) ? 0.5 : Math.abs(sentimentScore);
+
+        // 🌍 Boost confidence if global metrics confirm sentiment
+        if (globalSentimentSignals.length > 0 && Math.abs(globalSentimentAdjustment) > 0.1) {
+          confidence = Math.min(0.95, confidence * 1.2);
+        }
+
         // Expected return (contrarian on extremes, trend-following otherwise)
         let expectedReturn = sentimentScore * 0.01; // Base expectation
         if (Math.abs(sentimentScore) > 0.7) {
           // Contrarian on extremes
           expectedReturn = -sentimentScore * 0.005;
         }
-        
+
         sentimentAnalysis = {
           sentimentScore: sentimentScore,
           sentiment: sentiment,
@@ -3199,10 +3424,15 @@ class ProductionTradingEngine {
           expectedReturn: expectedReturn,
           volumeRatio: volumeRatio,
           fearGreedIndex: (sentimentScore + 1) * 50, // Convert to 0-100 scale
-          reasoning: `Sentiment: ${sentiment}, Fear&Greed: ${((sentimentScore + 1) * 50).toFixed(1)}`
+          globalSentimentSignals: globalSentimentSignals,
+          globalSentimentAdjustment: globalSentimentAdjustment,
+          reasoning: globalSentimentSignals.length > 0
+            ? `Sentiment: ${sentiment}, Fear&Greed: ${((sentimentScore + 1) * 50).toFixed(1)}, 🌍 Global: ${globalSentimentSignals[0]}`
+            : `Sentiment: ${sentiment}, Fear&Greed: ${((sentimentScore + 1) * 50).toFixed(1)}`
         };
-        
-        log(`✅ V₇ Sentiment: ${sentiment} (${(confidence * 100).toFixed(1)}%, score: ${sentimentScore.toFixed(3)})`);
+
+        const globalStatus = globalSentimentSignals.length > 0 ? ` 🌍${globalSentimentSignals.length} signals` : '';
+        log(`✅ V₇ Sentiment: ${sentiment} (${(confidence * 100).toFixed(1)}%, score: ${sentimentScore.toFixed(3)}${globalStatus})`);
       } catch (error) {
         log(`❌ V₇ Sentiment failed: ${error.message} - SYSTEM UNAVAILABLE`);
         sentimentAnalysis = null;
@@ -3373,6 +3603,70 @@ class ProductionTradingEngine {
   }
 
   // Mathematical helper functions for real AI calculations
+  /**
+   * Enhance market data with real OHLC candles from Kraken for accurate AI predictions
+   */
+  private async enhanceMarketDataWithOHLC(marketData: any): Promise<any> {
+    try {
+      const symbol = marketData.symbol;
+
+      // Check OHLC cache first (5-minute cache)
+      const cacheKey = `ohlc_${symbol}`;
+      const cachedOHLC = (this as any).ohlcCache?.get(cacheKey);
+      const now = Date.now();
+
+      let candleData: any[] = [];
+
+      if (cachedOHLC && (now - cachedOHLC.timestamp) < 5 * 60 * 1000) {
+        candleData = cachedOHLC.data;
+      } else {
+        // Map to Kraken pair name
+        let krakenPair = symbol;
+        if (symbol === 'BTCUSD') krakenPair = 'XXBTZUSD';
+        else if (symbol === 'ETHUSD') krakenPair = 'XETHZUSD';
+        else if (symbol === 'XRPUSD') krakenPair = 'XXRPZUSD';
+        else if (symbol === 'LTCUSD') krakenPair = 'XLTCZUSD';
+
+        // Fetch OHLC from Kraken (5-minute candles)
+        const ohlcResponse = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=5`);
+        const ohlcData = await ohlcResponse.json();
+
+        if (ohlcData.result && ohlcData.result[krakenPair]) {
+          const candles = ohlcData.result[krakenPair];
+          candleData = candles.slice(-100).map((c: any[]) => ({
+            symbol,
+            timestamp: new Date(c[0] * 1000),
+            price: parseFloat(c[4]), // Use close price
+            open: parseFloat(c[1]),
+            high: parseFloat(c[2]),
+            low: parseFloat(c[3]),
+            close: parseFloat(c[4]),
+            volume: parseFloat(c[6])
+          }));
+
+          // Cache the result
+          if (!(this as any).ohlcCache) (this as any).ohlcCache = new Map();
+          (this as any).ohlcCache.set(cacheKey, { data: candleData, timestamp: now });
+        }
+      }
+
+      // If we have candle data, enhance marketData with dataPoints
+      if (candleData.length > 0) {
+        return {
+          ...marketData,
+          dataPoints: candleData,
+          volume: candleData[candleData.length - 1]?.volume || marketData.volume
+        };
+      }
+
+      // Return original if no OHLC data available
+      return marketData;
+    } catch (error) {
+      console.log(`⚠️ OHLC enhancement failed for ${marketData.symbol}:`, error.message);
+      return marketData;
+    }
+  }
+
   private calculatePriceChanges(marketData: any): number[] {
     const dataPoints = marketData.dataPoints || [marketData];
     const changes: number[] = [];
@@ -3629,8 +3923,8 @@ class ProductionTradingEngine {
       const marketVolatility = this.calculateAverageVolatility();
 
       // 🎯 DYNAMIC CALCULATION: Adaptive threshold based on performance
-      // Base threshold starts at 12% (more aggressive than hardcoded 15%)
-      let baseThreshold = 12.0;
+      // 🔥 MAXIMUM OPPORTUNITIES: Base threshold at 5% for aggressive trading
+      let baseThreshold = 5.0;
 
       // 📈 PERFORMANCE ADJUSTMENT: Better performance = lower threshold (more opportunities)
       const performanceAdjustment = (systemWinRate - 0.5) * -10; // +50% win rate = -5% threshold

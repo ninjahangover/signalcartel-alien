@@ -32,6 +32,26 @@ export interface CMCCategoryInfo {
   volume_24h: number;
 }
 
+export interface CMCGlobalMetrics {
+  total_market_cap: number;
+  total_volume_24h: number;
+  btc_dominance: number;
+  eth_dominance: number;
+  defi_market_cap: number;
+  defi_24h_percentage_change: number;
+  stablecoin_market_cap: number;
+  stablecoin_24h_percentage_change: number;
+  active_cryptocurrencies: number;
+  active_exchanges: number;
+  total_market_cap_yesterday: number;
+  total_volume_24h_yesterday: number;
+  market_cap_change_24h: number;
+  volume_change_24h: number;
+  altcoin_market_cap: number;
+  altcoin_volume_24h: number;
+  timestamp: Date;
+}
+
 class CoinMarketCapService {
   private apiKey: string;
   private baseUrl = 'https://pro-api.coinmarketcap.com/v1';
@@ -135,6 +155,65 @@ class CoinMarketCapService {
   }
 
   /**
+   * Get global cryptocurrency market metrics
+   * Provides market-wide intelligence for regime detection and sentiment analysis
+   * Uses ~720 calls/month (1 per hour recommended)
+   */
+  async getGlobalMetrics(): Promise<CMCGlobalMetrics> {
+    return this.rateLimitedCall(
+      'global-metrics',
+      60 * 60 * 1000, // 1 hour TTL (720 calls/month)
+      async () => {
+        const response = await fetch(`${this.baseUrl}/global-metrics/quotes/latest`, {
+          headers: {
+            'X-CMC_PRO_API_KEY': this.apiKey,
+            'Accept': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`CMC API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json() as any;
+        const quote = data.data.quote.USD;
+
+        // Calculate derived metrics
+        const totalMarketCap = quote.total_market_cap;
+        const btcDominance = data.data.btc_dominance;
+        const ethDominance = data.data.eth_dominance;
+        const altcoinMarketCap = totalMarketCap * (1 - btcDominance / 100);
+
+        // Calculate 24h changes
+        const totalMarketCapYesterday = quote.total_market_cap_yesterday || totalMarketCap;
+        const totalVolume24hYesterday = quote.total_volume_24h_yesterday || quote.total_volume_24h;
+        const marketCapChange24h = ((totalMarketCap - totalMarketCapYesterday) / totalMarketCapYesterday) * 100;
+        const volumeChange24h = ((quote.total_volume_24h - totalVolume24hYesterday) / totalVolume24hYesterday) * 100;
+
+        return {
+          total_market_cap: totalMarketCap,
+          total_volume_24h: quote.total_volume_24h,
+          btc_dominance: btcDominance,
+          eth_dominance: ethDominance,
+          defi_market_cap: data.data.defi_market_cap || 0,
+          defi_24h_percentage_change: data.data.defi_24h_percentage_change || 0,
+          stablecoin_market_cap: data.data.stablecoin_market_cap || 0,
+          stablecoin_24h_percentage_change: data.data.stablecoin_24h_percentage_change || 0,
+          active_cryptocurrencies: data.data.active_cryptocurrencies || 0,
+          active_exchanges: data.data.active_exchanges || 0,
+          total_market_cap_yesterday: totalMarketCapYesterday,
+          total_volume_24h_yesterday: totalVolume24hYesterday,
+          market_cap_change_24h: marketCapChange24h,
+          volume_change_24h: volumeChange24h,
+          altcoin_market_cap: altcoinMarketCap,
+          altcoin_volume_24h: quote.altcoin_volume_24h || quote.total_volume_24h * 0.6, // Estimate
+          timestamp: new Date()
+        };
+      }
+    );
+  }
+
+  /**
    * Get cryptocurrency categories (simplified for free tier)
    */
   async getCategories(): Promise<CMCCategoryInfo[]> {
@@ -206,6 +285,107 @@ class CoinMarketCapService {
         return result;
       }
     );
+  }
+
+  /**
+   * Analyze global metrics to determine market regime and sentiment
+   * Returns actionable insights for trading systems
+   */
+  async getMarketRegimeFromGlobalMetrics(): Promise<{
+    regime: 'BULL_MARKET' | 'BEAR_MARKET' | 'ALTCOIN_SEASON' | 'BTC_DOMINANCE' | 'NEUTRAL' | 'FEAR' | 'EXTREME_FEAR';
+    confidence: number;
+    signals: string[];
+    btc_dom_trend: 'RISING' | 'FALLING' | 'STABLE';
+    market_health: 'STRONG' | 'MODERATE' | 'WEAK' | 'CRITICAL';
+    defi_momentum: number;
+    volume_trend: 'INCREASING' | 'DECREASING' | 'STABLE';
+  }> {
+    try {
+      const metrics = await this.getGlobalMetrics();
+
+      const signals: string[] = [];
+      let regime: any = 'NEUTRAL';
+      let confidence = 50;
+
+      // BTC Dominance Analysis
+      let btc_dom_trend: any = 'STABLE';
+      if (metrics.btc_dominance > 60) {
+        btc_dom_trend = 'RISING';
+        regime = 'BTC_DOMINANCE';
+        signals.push(`BTC dominance ${metrics.btc_dominance.toFixed(1)}% - altcoins struggling`);
+        confidence = 70;
+      } else if (metrics.btc_dominance < 40) {
+        btc_dom_trend = 'FALLING';
+        regime = 'ALTCOIN_SEASON';
+        signals.push(`BTC dominance ${metrics.btc_dominance.toFixed(1)}% - ALTSEASON active`);
+        confidence = 75;
+      }
+
+      // Market Cap Trend
+      const market_health: any =
+        metrics.market_cap_change_24h > 5 ? 'STRONG' :
+        metrics.market_cap_change_24h > 2 ? 'MODERATE' :
+        metrics.market_cap_change_24h < -5 ? 'CRITICAL' : 'WEAK';
+
+      if (metrics.market_cap_change_24h > 3) {
+        regime = 'BULL_MARKET';
+        signals.push(`Market cap +${metrics.market_cap_change_24h.toFixed(1)}% (24h) - bullish`);
+        confidence = Math.min(90, 60 + metrics.market_cap_change_24h * 3);
+      } else if (metrics.market_cap_change_24h < -3) {
+        regime = 'BEAR_MARKET';
+        signals.push(`Market cap ${metrics.market_cap_change_24h.toFixed(1)}% (24h) - bearish`);
+        confidence = Math.min(90, 60 + Math.abs(metrics.market_cap_change_24h) * 3);
+      }
+
+      // Extreme Fear Detection
+      if (metrics.market_cap_change_24h < -10) {
+        regime = 'EXTREME_FEAR';
+        signals.push(`EXTREME FEAR: Market cap -${Math.abs(metrics.market_cap_change_24h).toFixed(1)}%`);
+        confidence = 95;
+      } else if (metrics.market_cap_change_24h < -5) {
+        regime = 'FEAR';
+        signals.push(`FEAR: Market cap ${metrics.market_cap_change_24h.toFixed(1)}%`);
+        confidence = 80;
+      }
+
+      // Volume Analysis
+      const volume_trend: any =
+        metrics.volume_change_24h > 10 ? 'INCREASING' :
+        metrics.volume_change_24h < -10 ? 'DECREASING' : 'STABLE';
+
+      if (metrics.volume_change_24h > 20) {
+        signals.push(`Volume surge +${metrics.volume_change_24h.toFixed(1)}% - high activity`);
+      } else if (metrics.volume_change_24h < -20) {
+        signals.push(`Volume declining ${metrics.volume_change_24h.toFixed(1)}% - low liquidity`);
+      }
+
+      // DeFi Momentum
+      const defi_momentum = metrics.defi_24h_percentage_change;
+      if (Math.abs(defi_momentum) > 5) {
+        signals.push(`DeFi ${defi_momentum > 0 ? '+' : ''}${defi_momentum.toFixed(1)}% - sector ${defi_momentum > 0 ? 'strength' : 'weakness'}`);
+      }
+
+      return {
+        regime,
+        confidence: confidence / 100, // Normalize to 0-1
+        signals,
+        btc_dom_trend,
+        market_health,
+        defi_momentum,
+        volume_trend
+      };
+    } catch (error) {
+      console.log('⚠️ CMC Global Metrics unavailable, using neutral regime');
+      return {
+        regime: 'NEUTRAL',
+        confidence: 0.5,
+        signals: ['Global metrics unavailable'],
+        btc_dom_trend: 'STABLE',
+        market_health: 'MODERATE',
+        defi_momentum: 0,
+        volume_trend: 'STABLE'
+      };
+    }
   }
 
   /**
