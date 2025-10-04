@@ -230,9 +230,62 @@ export class AdaptiveProfitBrain {
       optimalEstimate: 1.0
     });
 
+    // 🎯 NEW: Minimum loss threshold before exit consideration (start -0.5%, guide toward -2%)
+    this.thresholds.set('minLossBeforeExit', {
+      name: 'minLossBeforeExit',
+      currentValue: -0.005, // Start at -0.5%, brain will learn to increase toward -2%
+      learningRate: baseLearningRate * 1.8, // Fast learning - critical for profitability
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: -0.10, // Never more aggressive than -10% (emergency stop)
+      maxValue: -0.001, // Never less aggressive than -0.1% (allows some flexibility)
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.10, // Moderate exploration
+      optimalEstimate: -0.02 // Guide toward -2%
+    });
+
+    // 🧠 NEW: AI confidence respect threshold (when AI says HOLD with >X%, trust it)
+    this.thresholds.set('aiConfidenceRespectThreshold', {
+      name: 'aiConfidenceRespectThreshold',
+      currentValue: 0.70, // Start at 70%, guide toward 85%
+      learningRate: baseLearningRate * 1.2,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.50, // Minimum 50% confidence to respect
+      maxValue: 0.95, // Maximum 95% (always allow emergency overrides)
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.08,
+      optimalEstimate: 0.85 // Guide toward 85%
+    });
+
+    // ⏱️ NEW: Minimum hold time in minutes (start 2min, guide toward 5-15min)
+    this.thresholds.set('minHoldTimeMinutes', {
+      name: 'minHoldTimeMinutes',
+      currentValue: 2.0, // Start conservative at 2 minutes
+      learningRate: baseLearningRate * 1.5,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.5, // Absolute minimum 30 seconds (emergencies only)
+      maxValue: 30.0, // Maximum 30 minutes hold requirement
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.12,
+      optimalEstimate: 10.0 // Guide toward 10 minutes
+    });
+
     console.log('📊 Initialized self-learning thresholds:');
     for (const [name, param] of this.thresholds) {
-      console.log(`   ${name}: ${(param.currentValue * 100).toFixed(1)}% (range: ${(param.minValue * 100).toFixed(0)}-${(param.maxValue * 100).toFixed(0)}%)`);
+      const displayValue = name === 'minLossBeforeExit'
+        ? `${(param.currentValue * 100).toFixed(1)}%`
+        : name === 'minHoldTimeMinutes'
+        ? `${param.currentValue.toFixed(1)}min`
+        : `${(param.currentValue * 100).toFixed(1)}%`;
+      console.log(`   ${name}: ${displayValue}`);
     }
   }
 
@@ -843,6 +896,7 @@ export class AdaptiveProfitBrain {
 
   /**
    * Calculate profit gradient with respect to threshold
+   * ENHANCED: Includes premature exit penalties and AI confidence rewards
    */
   private calculateProfitGradient(
     thresholdName: string,
@@ -858,6 +912,10 @@ export class AdaptiveProfitBrain {
 
     const avgProfit = recentDecisions.reduce((sum, d) => sum + d.profitImpact, 0) / recentDecisions.length;
     const normalizedProfit = (actualProfit - avgProfit) / (Math.abs(avgProfit) + 1);
+
+    // Get most recent trade for context
+    const latestTrade = this.tradeHistory[this.tradeHistory.length - 1];
+    const timeHeld = latestTrade?.decisionFactors?.timeHeld || 0;
 
     let gradient = 0;
 
@@ -876,11 +934,30 @@ export class AdaptiveProfitBrain {
         }
       }
     } else if (thresholdName === 'exitScore') {
-      if (actualProfit > avgProfit * 1.5) {
-        gradient = -0.01; // Could exit earlier
-      } else if (actualProfit < avgProfit * 0.5) {
-        gradient = 0.01; // Exited too early
-      } else {
+      // 🎯 ENHANCED: Penalize premature exits, reward patience
+      const minHoldTime = this.thresholds.get('minHoldTimeMinutes')?.currentValue || 5;
+      const minLossThreshold = Math.abs(this.thresholds.get('minLossBeforeExit')?.currentValue || 0.02);
+
+      // Premature exit penalty: exited too quickly with small loss
+      if (timeHeld < minHoldTime && actualProfit < 0 && Math.abs(actualProfit) < minLossThreshold * 100) {
+        // Strong negative gradient: learn to hold longer
+        gradient = 0.05; // Increase exit threshold (make exits harder)
+        console.log(`🚨 PREMATURE EXIT PENALTY: Held ${timeHeld.toFixed(1)}min (target: ${minHoldTime.toFixed(1)}min), Loss: ${actualProfit.toFixed(2)}%`);
+      }
+      // Good hold - profit after patience
+      else if (timeHeld > minHoldTime && actualProfit > avgProfit * 1.2) {
+        gradient = -0.02; // Decrease exit threshold (allow similar holds)
+        console.log(`✅ PATIENCE REWARD: Held ${timeHeld.toFixed(1)}min, Profit: ${actualProfit.toFixed(2)}%`);
+      }
+      // Exited too early - left profit on table
+      else if (actualProfit < avgProfit * 0.5 && actualProfit > 0) {
+        gradient = 0.01; // Increase threshold - hold longer for better profits
+      }
+      // Good exit timing
+      else if (actualProfit > avgProfit * 1.5) {
+        gradient = -0.005; // Slight decrease - timing was good
+      }
+      else {
         gradient = 0.001 * normalizedProfit;
       }
     }

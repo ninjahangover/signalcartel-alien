@@ -1579,66 +1579,106 @@ class ProductionTradingEngine {
             const aiPredictsReversal = (side === 'long' && freshPrediction.finalDecision === 'SELL') ||
                                       (side === 'short' && freshPrediction.finalDecision === 'BUY');
 
+            // 🧠 ADAPTIVE BRAIN: Get learned thresholds
+            const brain = (global as any).adaptiveProfitBrain;
+            const aiConfidenceRespectThreshold = brain?.getThreshold('aiConfidenceRespectThreshold') || 0.85;
+            const minLossBeforeExit = brain?.getThreshold('minLossBeforeExit') || -0.02;
+            const minHoldTimeMinutes = brain?.getThreshold('minHoldTimeMinutes') || 5;
+
+            // Calculate time held in minutes
+            const timeHeldMinutes = ageMinutes || 0;
+
             log(`🔮 POSITION FORECAST:`);
             log(`   We are: ${ourPositionDirection} | AI predicts: ${freshPrediction.finalDecision}`);
             log(`   Current P&L: ${pnl.toFixed(2)}% | Pattern: ${pattern}`);
+            log(`   Time held: ${timeHeldMinutes.toFixed(1)}min | Min hold: ${minHoldTimeMinutes.toFixed(1)}min`);
+            log(`   AI confidence: ${(freshPrediction.confidence * 100).toFixed(1)}% | Respect threshold: ${(aiConfidenceRespectThreshold * 100).toFixed(1)}%`);
 
             // 🚀 PROACTIVE DECISION: Exit only if AI predicts reversal
             let shouldExit = false;
             let reason = '';
 
-            if (aiPredictsReversal && freshPrediction.confidence > 0.6) {
-              // AI strongly predicts reversal - EXIT regardless of profit
+            // 🧠 PRIORITY 1: Respect high-confidence AI HOLD decisions
+            if ((aiPredictsContinuation || freshPrediction.finalDecision === 'HOLD') &&
+                freshPrediction.confidence >= aiConfidenceRespectThreshold) {
+              // AI has high confidence - trust it regardless of P&L
+              shouldExit = false;
+              reason = `AI high-confidence ${freshPrediction.finalDecision} (${(freshPrediction.confidence * 100).toFixed(1)}% >= ${(aiConfidenceRespectThreshold * 100).toFixed(1)}%) - RESPECTING`;
+              log(`🧠 AI CONFIDENCE RESPECTED: ${reason}`);
+            }
+            // 🎯 PRIORITY 2: Minimum hold time protection (prevent premature exits)
+            else if (timeHeldMinutes < minHoldTimeMinutes && pnl > minLossBeforeExit * 100 && pnl < 50) {
+              // Haven't held long enough and not emergency - HOLD
+              shouldExit = false;
+              reason = `min_hold_time_protection (${timeHeldMinutes.toFixed(1)}min < ${minHoldTimeMinutes.toFixed(1)}min, P&L: ${pnl.toFixed(1)}%)`;
+              log(`⏱️ MIN HOLD TIME: ${reason}`);
+            }
+            // 🎯 PRIORITY 3: Minimum loss threshold (don't exit on noise)
+            else if (pnl < 0 && pnl > minLossBeforeExit * 100 && !aiPredictsReversal) {
+              // Small loss but above minimum threshold - HOLD unless AI says reversal
+              shouldExit = false;
+              reason = `loss_too_small_to_exit (${pnl.toFixed(2)}% > ${(minLossBeforeExit * 100).toFixed(2)}%)`;
+              log(`📊 NOISE PROTECTION: ${reason}`);
+            }
+            // Emergency exits (override all)
+            else if (pnl < -20) {
+              shouldExit = true;
+              reason = `emergency_loss_protection_${pnl.toFixed(1)}pct`;
+              log(`🚨 EMERGENCY STOP: ${pnl.toFixed(2)}% loss`);
+            }
+            else if (pnl > 50) {
+              shouldExit = true;
+              reason = `extraordinary_profit_${pnl.toFixed(1)}pct`;
+              log(`💰 EXTRAORDINARY PROFIT: ${pnl.toFixed(2)}% gain captured`);
+            }
+            // AI reversal prediction
+            else if (aiPredictsReversal && freshPrediction.confidence > 0.6) {
+              // AI strongly predicts reversal - EXIT
               shouldExit = true;
               reason = `AI predicts ${freshPrediction.finalDecision} reversal (${(freshPrediction.confidence * 100).toFixed(1)}% confidence)`;
-              log(`⚠️ EXIT SIGNAL: ${reason}`);
-            } else if (aiPredictsContinuation) {
+              log(`⚠️ AI REVERSAL: ${reason}`);
+            }
+            // AI continuation
+            else if (aiPredictsContinuation) {
               // AI predicts continuation - HOLD even if profit is small
               shouldExit = false;
               reason = `AI predicts ${freshPrediction.finalDecision} continuation (${(freshPrediction.confidence * 100).toFixed(1)}% confidence) - HOLDING`;
-              log(`✅ HOLD SIGNAL: ${reason}`);
-            } else if (freshPrediction.finalDecision === 'HOLD' || freshPrediction.finalDecision === 'WAIT') {
-              // AI is uncertain - use profit protection only for large moves
-              if (pnl > 50) {
-                shouldExit = true;
-                reason = `extraordinary_profit_${pnl.toFixed(1)}pct`;
-                log(`💰 PROFIT PROTECTION: ${pnl.toFixed(2)}% gain captured (AI uncertain)`);
-              } else if (pnl < -20) {
-                shouldExit = true;
-                reason = `emergency_loss_protection_${pnl.toFixed(1)}pct`;
-                log(`🚨 LOSS PROTECTION: ${pnl.toFixed(2)}% loss stopped (AI uncertain)`);
-              } else {
-                shouldExit = false;
-                reason = `AI uncertain - holding position (P&L: ${pnl.toFixed(1)}%)`;
-                log(`⏸️  UNCERTAIN: ${reason}`);
-              }
+              log(`✅ AI CONTINUATION: ${reason}`);
+            }
+            // AI uncertain
+            else if (freshPrediction.finalDecision === 'HOLD' || freshPrediction.finalDecision === 'WAIT') {
+              shouldExit = false;
+              reason = `AI uncertain - holding position (P&L: ${pnl.toFixed(1)}%)`;
+              log(`⏸️  AI UNCERTAIN: ${reason}`);
             }
 
             // Build AI systems data for logging (if needed by downstream logic)
+            // 🛡️ SAFETY: Null-safe access to systemContributions (may be empty on fallback paths)
+            const contributions = freshPrediction.systemContributions || {};
             const aiSystemsData = [
               {
                 name: 'mathematical-intuition',
-                confidence: freshPrediction.systemContributions.mathematicalIntuition.influence,
+                confidence: contributions.mathematicalIntuition?.influence || 0,
                 direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
-                reliability: freshPrediction.systemContributions.mathematicalIntuition.weight
+                reliability: contributions.mathematicalIntuition?.weight || 0
               },
               {
                 name: 'bayesian-probability',
-                confidence: freshPrediction.systemContributions.bayesianProbability.influence,
+                confidence: contributions.bayesianProbability?.influence || 0,
                 direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
-                reliability: freshPrediction.systemContributions.bayesianProbability.weight
+                reliability: contributions.bayesianProbability?.weight || 0
               },
               {
                 name: 'profit-predator',
-                confidence: freshPrediction.systemContributions.profitPredator.influence,
+                confidence: contributions.profitPredator?.influence || 0,
                 direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
-                reliability: freshPrediction.systemContributions.profitPredator.weight
+                reliability: contributions.profitPredator?.weight || 0
               },
               {
                 name: 'order-book-ai',
-                confidence: freshPrediction.systemContributions.orderBook.influence,
+                confidence: contributions.orderBook?.influence || 0,
                 direction: freshPrediction.finalDecision === 'BUY' ? 1 : freshPrediction.finalDecision === 'SELL' ? -1 : 0,
-                reliability: freshPrediction.systemContributions.orderBook.weight
+                reliability: contributions.orderBook?.weight || 0
               }
             ];
 
@@ -2041,7 +2081,8 @@ class ProductionTradingEngine {
             try {
               const entryTime = position.openTime?.getTime ? position.openTime : new Date(Date.now() - 60000);
               const exitTime = new Date();
-              const timeHeldHours = (exitTime.getTime() - (entryTime.getTime ? entryTime.getTime() : exitTime.getTime() - 60000)) / (1000 * 60 * 60);
+              const timeHeldMinutes = (exitTime.getTime() - (entryTime.getTime ? entryTime.getTime() : exitTime.getTime() - 60000)) / (1000 * 60);
+              const timeHeldHours = timeHeldMinutes / 60;
 
               await adaptiveProfitBrain.recordTradeOutcome({
                 symbol: position.symbol,
@@ -2050,7 +2091,7 @@ class ProductionTradingEngine {
                 winProbability: position.metadata?.tensorDecisionData?.confidence || 0.5,
                 actualWin: result.pnl > 0,
                 decisionFactors: {
-                  timeHeld: timeHeldHours,
+                  timeHeld: timeHeldMinutes, // 🎯 CHANGED: Now in minutes for premature exit penalty
                   marketRegime: 'NEUTRAL',
                   convictionLevel: position.metadata?.tensorDecisionData?.confidence || 0.5,
                   opportunityCost: 0,
@@ -2063,7 +2104,7 @@ class ProductionTradingEngine {
                 confidenceLevel: position.metadata?.tensorDecisionData?.confidence || 0.5
               });
 
-              log(`🧠 BRAIN LEARNING: Recorded ${winLoss} for threshold optimization ($${result.pnl.toFixed(2)} P&L)`);
+              log(`🧠 BRAIN LEARNING: Recorded ${winLoss} for threshold optimization (Held: ${timeHeldMinutes.toFixed(1)}min, P&L: $${result.pnl.toFixed(2)})`);
             } catch (brainError) {
               log(`⚠️ BRAIN LEARNING ERROR: ${brainError.message} - Brain learning skipped`);
             }
