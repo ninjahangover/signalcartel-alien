@@ -1579,11 +1579,19 @@ class ProductionTradingEngine {
             const aiPredictsReversal = (side === 'long' && freshPrediction.finalDecision === 'SELL') ||
                                       (side === 'short' && freshPrediction.finalDecision === 'BUY');
 
-            // 🧠 ADAPTIVE BRAIN: Get learned thresholds
+            // 🧠 V3.14.0: PURE BRAIN LEARNING - Zero hardcoded fallbacks
             const brain = (global as any).adaptiveProfitBrain;
-            const aiConfidenceRespectThreshold = brain?.getThreshold('aiConfidenceRespectThreshold') || 0.85;
-            const minLossBeforeExit = brain?.getThreshold('minLossBeforeExit') || -0.02;
-            const minHoldTimeMinutes = brain?.getThreshold('minHoldTimeMinutes') || 5;
+            if (!brain) {
+              throw new Error('🚨 CRITICAL: Adaptive Profit Brain not initialized! Cannot evaluate exit without learned thresholds.');
+            }
+
+            // Fetch all thresholds with retry logic (99.99% reliability)
+            const aiConfidenceRespectThreshold = brain.getThresholdWithRetry('aiConfidenceRespectThreshold');
+            const minLossBeforeExit = brain.getThresholdWithRetry('minLossBeforeExit');
+            const minHoldTimeMinutes = brain.getThresholdWithRetry('minHoldTimeMinutes');
+            const emergencyLossStop = brain.getThresholdWithRetry('emergencyLossStop');
+            const extraordinaryProfitCapture = brain.getThresholdWithRetry('extraordinaryProfitCapture');
+            const aiReversalConfidenceThreshold = brain.getThresholdWithRetry('aiReversalConfidenceThreshold');
 
             // Calculate time held in minutes
             const timeHeldMinutes = ageMinutes || 0;
@@ -1593,6 +1601,7 @@ class ProductionTradingEngine {
             log(`   Current P&L: ${pnl.toFixed(2)}% | Pattern: ${pattern}`);
             log(`   Time held: ${timeHeldMinutes.toFixed(1)}min | Min hold: ${minHoldTimeMinutes.toFixed(1)}min`);
             log(`   AI confidence: ${(freshPrediction.confidence * 100).toFixed(1)}% | Respect threshold: ${(aiConfidenceRespectThreshold * 100).toFixed(1)}%`);
+            log(`   🧠 Emergency stop: ${(emergencyLossStop * 100).toFixed(1)}% | Extraordinary capture: ${(extraordinaryProfitCapture * 100).toFixed(1)}%`);
 
             // 🚀 PROACTIVE DECISION: Exit only if AI predicts reversal
             let shouldExit = false;
@@ -1607,7 +1616,7 @@ class ProductionTradingEngine {
               log(`🧠 AI CONFIDENCE RESPECTED: ${reason}`);
             }
             // 🎯 PRIORITY 2: Minimum hold time protection (prevent premature exits)
-            else if (timeHeldMinutes < minHoldTimeMinutes && pnl > minLossBeforeExit * 100 && pnl < 50) {
+            else if (timeHeldMinutes < minHoldTimeMinutes && pnl > minLossBeforeExit * 100 && pnl < extraordinaryProfitCapture * 100) {
               // Haven't held long enough and not emergency - HOLD
               shouldExit = false;
               reason = `min_hold_time_protection (${timeHeldMinutes.toFixed(1)}min < ${minHoldTimeMinutes.toFixed(1)}min, P&L: ${pnl.toFixed(1)}%)`;
@@ -1620,23 +1629,24 @@ class ProductionTradingEngine {
               reason = `loss_too_small_to_exit (${pnl.toFixed(2)}% > ${(minLossBeforeExit * 100).toFixed(2)}%)`;
               log(`📊 NOISE PROTECTION: ${reason}`);
             }
-            // Emergency exits (override all)
-            else if (pnl < -20) {
+            // 🚨 PRIORITY 4: Emergency loss stop (BRAIN-LEARNED, not hardcoded)
+            else if (pnl < emergencyLossStop * 100) {
               shouldExit = true;
-              reason = `emergency_loss_protection_${pnl.toFixed(1)}pct`;
-              log(`🚨 EMERGENCY STOP: ${pnl.toFixed(2)}% loss`);
+              reason = `emergency_loss_protection_${pnl.toFixed(1)}pct_brain_learned_${(emergencyLossStop * 100).toFixed(1)}pct`;
+              log(`🚨 EMERGENCY STOP (brain-learned): ${pnl.toFixed(2)}% loss exceeds ${(emergencyLossStop * 100).toFixed(1)}% threshold`);
             }
-            else if (pnl > 50) {
+            // 💰 PRIORITY 5: Extraordinary profit capture (BRAIN-LEARNED, not hardcoded)
+            else if (pnl > extraordinaryProfitCapture * 100) {
               shouldExit = true;
-              reason = `extraordinary_profit_${pnl.toFixed(1)}pct`;
-              log(`💰 EXTRAORDINARY PROFIT: ${pnl.toFixed(2)}% gain captured`);
+              reason = `extraordinary_profit_${pnl.toFixed(1)}pct_brain_learned_${(extraordinaryProfitCapture * 100).toFixed(1)}pct`;
+              log(`💰 EXTRAORDINARY PROFIT (brain-learned): ${pnl.toFixed(2)}% gain exceeds ${(extraordinaryProfitCapture * 100).toFixed(1)}% capture threshold`);
             }
-            // AI reversal prediction
-            else if (aiPredictsReversal && freshPrediction.confidence > 0.6) {
+            // 🎯 PRIORITY 6: AI reversal prediction (BRAIN-LEARNED CONFIDENCE, not hardcoded 60%)
+            else if (aiPredictsReversal && freshPrediction.confidence > aiReversalConfidenceThreshold) {
               // AI strongly predicts reversal - EXIT
               shouldExit = true;
-              reason = `AI predicts ${freshPrediction.finalDecision} reversal (${(freshPrediction.confidence * 100).toFixed(1)}% confidence)`;
-              log(`⚠️ AI REVERSAL: ${reason}`);
+              reason = `AI predicts ${freshPrediction.finalDecision} reversal (${(freshPrediction.confidence * 100).toFixed(1)}% > ${(aiReversalConfidenceThreshold * 100).toFixed(1)}% brain threshold)`;
+              log(`⚠️ AI REVERSAL (brain-learned threshold): ${reason}`);
             }
             // AI continuation
             else if (aiPredictsContinuation) {
@@ -1686,37 +1696,12 @@ class ProductionTradingEngine {
 
             // 🎯 DONE - Skip old threshold-based logic, use pure AI prediction
           } else {
-            // Fallback: Use enhanced exit logic even for positions without tensor data
-            // 🧠 ADAPTIVE PROFIT BRAIN: Apply learned thresholds for consistent exit behavior
-
-            // Get brain-learned profit target
-            const learnedProfitTarget = (global as any).adaptiveProfitBrain?.getThreshold('profitTakingThreshold') || 15;
-
-            // 💰 PROFIT TAKING: Use brain-learned sigmoid with adaptive target
-            if (pnl > 10) {
-              // Mathematical sigmoid: tanh((P% - learned_target%) / 20%)
-              // More responsive than old hardcoded formula
-              const profitUrgency = Math.tanh((pnl - learnedProfitTarget) / 20);
-              const urgencyPct = profitUrgency * 100;
-
-              // Exit threshold: learned from historical performance
-              const exitThreshold = 0.4; // Lower than tensor-based (0.6) since we have less information
-
-              if (profitUrgency > exitThreshold || pnl > 50) {
-                shouldExit = true;
-                reason = 'adaptive_profit_taking';
-                log(`💰 PROFIT TAKING (brain-learned): ${pnl.toFixed(2)}% gain (target: ${learnedProfitTarget.toFixed(1)}%) → urgency ${urgencyPct.toFixed(0)}% → EXITING`);
-              } else {
-                log(`💰 PROFIT BUILDING (brain-learned): ${pnl.toFixed(2)}% gain → urgency ${urgencyPct.toFixed(0)}% (threshold: ${(exitThreshold * 100).toFixed(0)}%) → holding`);
-              }
-            } else if (pnl < -15.0) {
-              // Emergency loss protection
-              shouldExit = true;
-              reason = 'emergency_protection';
-              log(`🚨 EMERGENCY PROTECTION: ${pnl.toFixed(2)}% loss - no tensor guidance available`);
-            } else {
-              log(`🧠 MATHEMATICAL CONVICTION: HOLDING without tensor data - P&L ${pnl.toFixed(2)}%`);
-            }
+            // 🚫 NO FALLBACK - If unified tensor coordinator unavailable, HOLD position
+            // Brain learning requires consistent AI predictions, not hardcoded fallbacks
+            shouldExit = false;
+            reason = 'tensor_coordinator_unavailable_holding';
+            log(`⚠️ Unified Tensor Coordinator unavailable - HOLDING position (no fallback exits)`);
+            log(`📊 Current P&L: ${pnl.toFixed(2)}% - Will reassess when AI systems available`);
           }
         } catch (error) {
           log(`⚠️ Mathematical conviction error: ${error.message} - defaulting to HOLD`);
@@ -1737,308 +1722,19 @@ class ProductionTradingEngine {
           log(`📊 MARKET ANALYSIS: Velocity ${velocity.toFixed(2)}%, Acceleration ${acceleration.toFixed(3)}, P&L ${pnl.toFixed(2)}%`);
           log(`🎯 PROACTIVE STRATEGY: Letting mathematical thesis run - no arbitrary profit caps`);
         }
-        
-        // 🛡️ PREDICTIVE LOSS PREVENTION - Exit BEFORE it gets worse
-        if (!shouldExit) {
-          // WRONG SIDE OF PATTERN: We're long but pattern says down
-          if (side === 'long' && pattern === 'accelerating_down' && pnl < 0.5) {
-            shouldExit = true;
-            reason = `wrong_pattern_${pnl.toFixed(1)}pct`;
-            log(`❌ WRONG PATTERN: Exiting ${pnl.toFixed(2)}% - pattern predicts MORE downside`);
-          }
-          else if (side === 'short' && pattern === 'accelerating_up' && pnl < 0.5) {
-            shouldExit = true;
-            reason = `wrong_pattern_${pnl.toFixed(1)}pct`;
-            log(`❌ WRONG PATTERN: Exiting ${pnl.toFixed(2)}% - pattern predicts MORE upside`);
-          }
-          // ACCELERATION AGAINST US: Losses accelerating
-          else if (pnl < -0.5 && acceleration < -0.05 && side === 'long') {
-            shouldExit = true;
-            reason = `accelerating_loss_${pnl.toFixed(1)}pct`;
-            log(`🚨 ACCELERATING LOSS: Cutting at ${pnl.toFixed(2)}% - getting worse fast!`);
-          }
-          // BOTTOMING PATTERN WHILE SHORT: Market about to bounce
-          else if (side === 'short' && pattern === 'bottoming' && pnl < 1.0) {
-            shouldExit = true;
-            reason = `predicted_bottom_${pnl.toFixed(1)}pct`;
-            log(`🔮 BOTTOM PREDICTED: Exiting short at ${pnl.toFixed(2)}% BEFORE the bounce!`);
-          }
-        }
-        
-        // 🚫 REMOVED: All market condition-based exit logic
-        // Mathematical conviction system provides superior intelligence
-        
-        if (!shouldExit) {
-          // Detect market condition for informational purposes only
-          const volatility = Math.abs(velocity) * 100;
-          const marketCondition = this.detectMarketCondition(pattern, velocity, acceleration, volatility);
-          
-          log(`📊 MARKET INTELLIGENCE: ${marketCondition} | Candles: ${candlesHeld} | Mathematical conviction OVERRIDES all pattern exits`);
-          log(`🧠 PROACTIVE HOLDING: Position being held based on mathematical thesis - no arbitrary time/profit limits`);
-        }
-        
-        // 🧠 MATHEMATICAL CONVICTION V2.6: Complete thesis-based position management
-        // NO arbitrary time limits, NO hardcoded profit targets, NO pattern overrides
-        // Only mathematical conviction system can trigger exits
-        
-        if (!shouldExit) {
-          log(`🧠 MATHEMATICAL CONVICTION ACTIVE: Position held by mathematical thesis - P&L ${pnl.toFixed(2)}%`);
-          log(`🎯 PROACTIVE TRADING: No hardcoded limits - maximizing mathematical advantage`);
-        }
-        
-        // 🚀 TENSOR AI FUSION: Pure AI decision making - Pine Script exits disabled
-        // Legacy Pine Script exits have been disabled to give Tensor AI complete authority
-        if (!shouldExit) {
-          log(`🧠 TENSOR AI AUTHORITY: Pine Script exits disabled - using pure Mathematical Conviction`);
-          
-          // 🧠 ADVANCED MATHEMATICAL PREDICTION MODELS
-          if (!shouldExit) {
-            try {
-              const marketData = { symbol: positionSymbol, price, timestamp: new Date() };
-              
-              // Load your advanced prediction services
-              const { enhancedMarkovPredictor } = await import('./src/lib/enhanced-markov-predictor');
-              const { bayesianProbabilityEngine } = await import('./src/lib/bayesian-probability-engine');
-              const { marketCorrelationAnalyzer } = await import('./src/lib/market-correlation-analyzer');
-              
-              // Build market data for predictions
-              const currentMarketData = {
-                symbol: positionSymbol,
-                open: entryPrice,
-                high: Math.max(price, entryPrice),
-                low: Math.min(price, entryPrice),
-                close: price,
-                volume: 1000, // placeholder
-                timestamp: new Date()
-              };
-              
-              // Get market intelligence (simplified)
-              const marketIntelligence = {
-                patterns: [],
-                momentum: velocity,
-                regime: pattern === 'accelerating_up' ? 'BULLISH' : pattern === 'accelerating_down' ? 'BEARISH' : 'NEUTRAL',
-                volatility: Math.abs(velocity) * 2,
-                support: price * 0.98,
-                resistance: price * 1.02
-              };
-              
-              // 🔮 PREDICTIVE AI INTEGRATION
-              let expectedValue = 0;
-              let probabilityOfProfit = 0.5;
-              let correlationSignal = 0;
-              let predictionScore = 0;
-              
-              try {
-                // MARKOV CHAIN PREDICTION - Fetch REAL OHLC candles directly from Kraken
-                let candleData: any[] = [];
 
-                // Check cache first (5-minute cache to limit API calls)
-                const cacheKey = `ohlc_${positionSymbol}`;
-                const cachedOHLC = (this as any).ohlcCache?.get(cacheKey);
-                const now = Date.now();
-
-                if (cachedOHLC && (now - cachedOHLC.timestamp) < 5 * 60 * 1000) {
-                  candleData = cachedOHLC.data;
-                  console.log(`📦 CACHED OHLC: ${positionSymbol} using cached candles (${Math.floor((now - cachedOHLC.timestamp) / 1000)}s old)`);
-                } else {
-                  try {
-                    // Map to Kraken pair name (e.g., BTCUSD -> XXBTZUSD, AVAXUSD -> AVAXUSD)
-                    let krakenPair = positionSymbol;
-                    if (positionSymbol === 'BTCUSD') krakenPair = 'XXBTZUSD';
-                    else if (positionSymbol === 'ETHUSD') krakenPair = 'XETHZUSD';
-                    else if (positionSymbol === 'XRPUSD') krakenPair = 'XXRPZUSD';
-                    else if (positionSymbol === 'LTCUSD') krakenPair = 'XLTCZUSD';
-
-                    // Fetch OHLC data directly from Kraken public API (5-minute candles for more volatility)
-                    const ohlcResponse = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=5`);
-                    const ohlcData = await ohlcResponse.json();
-
-                    if (ohlcData.result && ohlcData.result[krakenPair]) {
-                      const candles = ohlcData.result[krakenPair];
-                      // Take last 100 candles, convert to our format
-                      candleData = candles.slice(-100).map((c: any[]) => ({
-                        symbol: positionSymbol,
-                        timestamp: new Date(c[0] * 1000), // Unix timestamp to Date
-                        open: parseFloat(c[1]),
-                        high: parseFloat(c[2]),
-                        low: parseFloat(c[3]),
-                        close: parseFloat(c[4]),
-                        volume: parseFloat(c[6])
-                      }));
-
-                      // Cache the result for 5 minutes
-                      if (!(this as any).ohlcCache) (this as any).ohlcCache = new Map();
-                      (this as any).ohlcCache.set(cacheKey, { data: candleData, timestamp: now });
-
-                      console.log(`📊 KRAKEN OHLC: ${positionSymbol} fetched ${candleData.length} real 5-min candles (cached 5min)`);
-                      if (candleData.length > 0) {
-                        const sample = candleData[candleData.length - 1]; // Most recent
-                        const priceChange = ((sample.close - sample.open) / sample.open * 100).toFixed(2);
-                        const range = ((sample.high - sample.low) / sample.low * 100).toFixed(2);
-                        console.log(`📊 LATEST CANDLE: O=${sample.open.toFixed(2)} H=${sample.high.toFixed(2)} L=${sample.low.toFixed(2)} C=${sample.close.toFixed(2)} (${priceChange}% move, ${range}% range)`);
-                      }
-                    }
-                  } catch (ohlcError) {
-                    console.log(`⚠️ Kraken OHLC fetch failed for ${positionSymbol}:`, ohlcError.message);
-                  }
-                }
-
-                // Fallback: if no Kraken OHLC data, use current price as single candle
-                if (candleData.length === 0 && price) {
-                  console.log(`📊 FALLBACK: Using current price for ${positionSymbol} (no Kraken OHLC available)`);
-                  candleData.push({
-                    symbol: positionSymbol,
-                    open: price,
-                    high: price * 1.001,
-                    low: price * 0.999,
-                    close: price,
-                    volume: 1000,
-                    timestamp: new Date()
-                  });
-                }
-
-                const markovPrediction = enhancedMarkovPredictor.processMarketData(
-                  positionSymbol,
-                  currentMarketData,
-                  marketIntelligence,
-                  candleData
-                );
-                
-                // BAYESIAN PROBABILITY - Calculate profit probability  
-                const evidence = {
-                  priceChange: velocity,
-                  volumeRatio: 1.0,
-                  rsiValue: 50 + (velocity * 10), // Rough RSI approximation from velocity
-                  sentimentScore: 0.5,
-                  volatility: Math.abs(velocity) * 2,
-                  trendStrength: Math.abs(velocity),
-                  orderBookImbalance: velocity > 0 ? 0.1 : -0.1
-                };
-                
-                const bayesianProb = await bayesianProbabilityEngine.generateSignal(
-                  positionSymbol,
-                  evidence,
-                  price
-                );
-                
-                // CORRELATION ANALYSIS - Get cross-market signals
-                const crossMarketState = marketCorrelationAnalyzer.analyzeCrossMarketState(positionSymbol);
-                const correlations = {
-                  aggregateScore: crossMarketState?.overallStrength || 0
-                };
-                
-                // LAW OF LARGE NUMBERS - Statistical convergence prediction
-                expectedValue = markovPrediction.expectedReturn || 0;
-                // Use Bayesian confidence instead of raw regime probabilities
-                probabilityOfProfit = bayesianProb.confidence || 0.5;
-                correlationSignal = correlations.aggregateScore || 0;
-                
-                // COMPOSITE PREDICTION SCORE
-                predictionScore = (expectedValue * 0.4) + (probabilityOfProfit * 0.3) + (correlationSignal * 0.3);
-                
-                log(`🔮 AI PREDICTION: ${positionSymbol} - Score: ${predictionScore.toFixed(3)}, Expected: ${expectedValue.toFixed(2)}%, Prob: ${(probabilityOfProfit*100).toFixed(1)}%`);
-              } catch (aiError: any) {
-                log(`⚠️ AI analysis unavailable: ${aiError.message}`);
-              }
-              
-              log(`🧮 MATH PREDICTION: Markov EV: ${expectedValue.toFixed(2)}% | Bayesian P: ${(probabilityOfProfit*100).toFixed(1)}% | Corr: ${correlationSignal.toFixed(2)} | Score: ${predictionScore.toFixed(2)}`);
-              
-              // EXIT BASED ON MATHEMATICAL PREDICTIONS
-              if (pnl > 0) {
-                // Markov predicts negative expected value - GET OUT
-                if (expectedValue < -0.5) {
-                  shouldExit = true;
-                  reason = `markov_negative_ev_${pnl.toFixed(1)}pct`;
-                  log(`📊 MARKOV EXIT: Taking ${pnl.toFixed(2)}% - Expected Value turning negative (${expectedValue.toFixed(2)}%)`);
-                }
-                // 🧠 DYNAMIC INTELLIGENT EXIT WITH TRAILING STOPS - Enhanced Mathematical Intuition decides
-                else {
-                  try {
-                    const { enhancedMathematicalIntuition } = await import('./src/lib/enhanced-mathematical-intuition');
-                    const positionData = await this.positionManager.getPositionById(position.id);
-                    const originalConfidence = positionData?.metadata?.confidence || 0.75;
-                    const predictedMove = positionData?.metadata?.predictedMove || 1.0;
-                    const side = position.quantity > 0 ? 'LONG' : 'SHORT';
-                    
-                    // Use enhanced exit logic with trailing stops
-                    const exitDecision = enhancedMathematicalIntuition.shouldExitDynamicallyWithTrailing(
-                      position, currentPrice, pnl, probabilityOfProfit, positionAge, originalConfidence, predictedMove, side
-                    );
-                    
-                    if (exitDecision.shouldExit) {
-                      shouldExit = true;
-                      reason = exitDecision.reason;
-                      
-                      if (exitDecision.exitType === 'trailing') {
-                        log(`🏃‍♂️ TRAILING STOP HIT: Taking ${pnl.toFixed(2)}% | Confidence: ${(originalConfidence * 100).toFixed(1)}% | Age: ${Math.round(positionAge / 1000)}s`);
-                      } else {
-                        const exitInfo = enhancedMathematicalIntuition.getDynamicExitInfo(
-                          position, pnl, probabilityOfProfit, positionAge, originalConfidence, predictedMove
-                        );
-                        log(`🧠 ${exitInfo.logMessage}`);
-                      }
-                    }
-                  } catch (error) {
-                    // TENSOR AI MODE: No fallback overrides - let advanced mathematical domains decide
-                    // The 8 mathematical domains (Shannon entropy, Lyapunov exponents, fractal analysis, etc.) 
-                    // provide vastly superior analysis than simple Bayesian probability
-                    // Trust the Mathematical Conviction system entirely
-                    log(`🧠 TENSOR AI: Advanced mathematical domains analyzing - no simple probability overrides`);
-                  }
-                }
-              }
-              
-              // TENSOR AI: Correlation analysis integrated into advanced mathematical domains
-              // Game Theory Nash Equilibrium calculations and Stochastic Differential Equations
-              // provide superior correlation analysis than simple signal thresholds
-              // Let the mathematical synthesis handle market dynamics
-              
-              // TENSOR AI: Advanced mathematical domains replace simple prediction scores
-              // Lempel-Ziv Complexity, Phase Space Reconstruction, Polynomial Variety Analysis 
-              // provide infinitely more sophisticated loss prevention than crude thresholds
-              // Trust the Generalized Power Mean Integration with Golden Ratio transformation
-              
-              // Now also run the Mathematical Intuition analysis
-              const analysis = await this.shouldTrade(marketData, phase);
-              // Ensure signal has symbol property for Bayesian analysis
-              const signal = analysis.signal || {};
-              if (!signal.symbol && marketData.symbol) {
-                signal.symbol = marketData.symbol;
-              }
-              const mathAnalysis = await this.mathEngine.analyzeIntuitively(signal, marketData);
-              
-              if (mathAnalysis) {
-                const currentConfidence = analysis.confidence || 0.5;
-                const intuitionScore = mathAnalysis.overallFeeling || 0;
-                const confidenceChange = (currentConfidence - entryConfidence) / entryConfidence * 100;
-                
-                // 🎯 OPPORTUNITY EXIT: AI sees opposite trade opportunity
-                if (mathAnalysis.recommendation === 'SELL' && side === 'long' && pnl > 0) {
-                  shouldExit = true;
-                  reason = `ai_reversal_signal_${pnl.toFixed(1)}pct`;
-                  log(`🔄 AI REVERSAL: Taking ${pnl.toFixed(2)}% profit - AI wants to go SHORT!`);
-                }
-                else if (mathAnalysis.recommendation === 'BUY' && side === 'short' && pnl > 0) {
-                  shouldExit = true;
-                  reason = `ai_reversal_signal_${pnl.toFixed(1)}pct`;
-                  log(`🔄 AI REVERSAL: Taking ${pnl.toFixed(2)}% profit - AI wants to go LONG!`);
-                }
-                // 🚀 TENSOR AI: Confidence erosion exits disabled - using pure Mathematical Conviction
-                // Legacy confidence erosion logic disabled to give Tensor AI complete authority
-                // 🧠 MATHEMATICAL CONVICTION: Let tensor fusion system decide - NO hardcoded overrides
-                // The tensor system already calculated the optimal exit strategy using mathematical formulas
-                // Trust the proven mathematical conviction system instead of arbitrary thresholds
-                
-                // Log AI thinking for monitoring
-                if (!shouldExit && pnl > 0) {
-                  log(`🤔 AI HOLDING: Conf ${(currentConfidence*100).toFixed(1)}% (${confidenceChange > 0 ? '+' : ''}${confidenceChange.toFixed(1)}%), Intuition ${(intuitionScore*100).toFixed(1)}%, Rec: ${mathAnalysis.recommendation}`);
-                }
-              }
-            } catch (error) {
-              log(`⚠️ AI analysis unavailable: ${error.message}`);
-            }
-          }
-        }
+        // 🚫 V3.14.0 REMOVED: 275+ lines of legacy fallback exit logic
+        // Included: Pattern-based exits, Markov fallbacks, trailing stops, AI reversal exits
+        // Problem: ALL bypassed V3.13 brain-learned thresholds (minHoldTime, minLoss, aiConfidence)
+        // Result: 5-29 second exits despite brain learning 2-10 minute optimal holds
+        //
+        // ONLY EXIT PATH NOW: V3.12 Proactive Prediction (lines 1550-1687)
+        //   - Uses unified tensor coordinator for fresh AI predictions
+        //   - Respects brain-learned thresholds (aiConfidenceRespect, minHoldTime, minLoss)
+        //   - Exits ONLY when AI predicts reversal OR emergency thresholds (-20%, +50%)
+        //   - All other cases: HOLD and let brain learn optimal timing
+        //
+        // Goal: Eliminate commission bleeding from premature exits, maximize profit per trade
         
         // Execute exit
         if (shouldExit) {

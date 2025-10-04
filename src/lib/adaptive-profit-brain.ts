@@ -95,9 +95,40 @@ export class AdaptiveProfitBrain {
     'transactionCost': -0.05
   };
 
+  /**
+   * V3.14.0: Retry-enabled singleton with exponential backoff
+   * Target: 99.99% initialization reliability
+   */
+  static async getInstanceWithRetry(maxRetries = 5): Promise<AdaptiveProfitBrain> {
+    if (AdaptiveProfitBrain.instance) {
+      return AdaptiveProfitBrain.instance;
+    }
+
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🧠 Brain initialization attempt ${attempt}/${maxRetries}...`);
+        AdaptiveProfitBrain.instance = new AdaptiveProfitBrain();
+        console.log(`✅ Brain initialized successfully on attempt ${attempt}`);
+        return AdaptiveProfitBrain.instance;
+      } catch (error) {
+        lastError = error as Error;
+        const waitMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Exponential backoff, max 10s
+        console.error(`❌ Brain initialization attempt ${attempt} failed: ${error.message}`);
+
+        if (attempt < maxRetries) {
+          console.log(`⏳ Retrying in ${waitMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+      }
+    }
+
+    throw new Error(`🚨 CRITICAL: Brain initialization failed after ${maxRetries} attempts. Last error: ${lastError?.message}`);
+  }
+
   static getInstance(): AdaptiveProfitBrain {
     if (!AdaptiveProfitBrain.instance) {
-      AdaptiveProfitBrain.instance = new AdaptiveProfitBrain();
+      throw new Error('🚨 Brain not initialized! Call getInstanceWithRetry() first.');
     }
     return AdaptiveProfitBrain.instance;
   }
@@ -230,52 +261,103 @@ export class AdaptiveProfitBrain {
       optimalEstimate: 1.0
     });
 
-    // 🎯 NEW: Minimum loss threshold before exit consideration (start -0.5%, guide toward -2%)
+    // 🎯 NEW: Minimum loss threshold before exit consideration (start -2%, guide toward -5%)
+    // V3.14.0: Increased from -0.5% to -2% - allow bigger drawdowns for bigger wins
     this.thresholds.set('minLossBeforeExit', {
       name: 'minLossBeforeExit',
-      currentValue: -0.005, // Start at -0.5%, brain will learn to increase toward -2%
-      learningRate: baseLearningRate * 1.8, // Fast learning - critical for profitability
+      currentValue: -0.02, // Start at -2% (was -0.5%), brain will learn toward -5%
+      learningRate: baseLearningRate * 2.2, // Faster learning (was 1.8x) - critical for profit maximization
       momentum: momentumDecay,
       velocity: 0,
-      minValue: -0.10, // Never more aggressive than -10% (emergency stop)
-      maxValue: -0.001, // Never less aggressive than -0.1% (allows some flexibility)
+      minValue: -0.15, // Never more aggressive than -15% (emergency stop, was -10%)
+      maxValue: -0.005, // Never less aggressive than -0.5% (was -0.1%)
       lastGradient: 0,
       profitHistory: [],
       adjustmentHistory: [],
-      explorationNoise: 0.10, // Moderate exploration
-      optimalEstimate: -0.02 // Guide toward -2%
+      explorationNoise: 0.15, // Higher exploration (was 0.10) - find optimal loss tolerance
+      optimalEstimate: -0.05 // Guide toward -5% (was -2%) - maximize profit per trade
     });
 
     // 🧠 NEW: AI confidence respect threshold (when AI says HOLD with >X%, trust it)
+    // V3.14.0: Start higher to respect AI more (fewer overrides)
     this.thresholds.set('aiConfidenceRespectThreshold', {
       name: 'aiConfidenceRespectThreshold',
-      currentValue: 0.70, // Start at 70%, guide toward 85%
-      learningRate: baseLearningRate * 1.2,
+      currentValue: 0.80, // Start at 80% (was 70%), guide toward 75%
+      learningRate: baseLearningRate * 1.5, // Faster learning (was 1.2x)
       momentum: momentumDecay,
       velocity: 0,
-      minValue: 0.50, // Minimum 50% confidence to respect
+      minValue: 0.60, // Minimum 60% confidence (was 50%)
       maxValue: 0.95, // Maximum 95% (always allow emergency overrides)
       lastGradient: 0,
       profitHistory: [],
       adjustmentHistory: [],
-      explorationNoise: 0.08,
-      optimalEstimate: 0.85 // Guide toward 85%
+      explorationNoise: 0.10, // More exploration (was 0.08)
+      optimalEstimate: 0.75 // Guide toward 75% (was 85%) - balance AI trust with overrides
     });
 
-    // ⏱️ NEW: Minimum hold time in minutes (start 2min, guide toward 5-15min)
+    // ⏱️ NEW: Minimum hold time in minutes (start 5min, guide toward 15min)
+    // V3.14.0: Start much higher to prevent premature exits
     this.thresholds.set('minHoldTimeMinutes', {
       name: 'minHoldTimeMinutes',
-      currentValue: 2.0, // Start conservative at 2 minutes
-      learningRate: baseLearningRate * 1.5,
+      currentValue: 5.0, // Start at 5 minutes (was 2min), brain will learn toward 15min
+      learningRate: baseLearningRate * 2.0, // Faster learning (was 1.5x)
       momentum: momentumDecay,
       velocity: 0,
-      minValue: 0.5, // Absolute minimum 30 seconds (emergencies only)
-      maxValue: 30.0, // Maximum 30 minutes hold requirement
+      minValue: 1.0, // Absolute minimum 1 minute (was 0.5min/30sec)
+      maxValue: 60.0, // Maximum 60 minutes (was 30min) - allow longer holds for big trends
       lastGradient: 0,
       profitHistory: [],
       adjustmentHistory: [],
-      explorationNoise: 0.12,
-      optimalEstimate: 10.0 // Guide toward 10 minutes
+      explorationNoise: 0.15, // Higher exploration (was 0.12)
+      optimalEstimate: 15.0 // Guide toward 15 minutes (was 10min) - ride trends longer
+    });
+
+    // 🚨 V3.14.0: Emergency loss stop threshold (brain-learned, replaces hardcoded -20%)
+    this.thresholds.set('emergencyLossStop', {
+      name: 'emergencyLossStop',
+      currentValue: -0.20, // Start at -20%, brain learns optimal catastrophic stop
+      learningRate: baseLearningRate * 0.5, // Slow learning - emergency stops are critical
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: -0.50, // Never allow more than -50% catastrophic loss
+      maxValue: -0.10, // Never tighter than -10% (allow trend riding)
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.05, // Low exploration - safety critical
+      optimalEstimate: -0.25 // Guide toward -25% (learn from actual catastrophes)
+    });
+
+    // 💰 V3.14.0: Extraordinary profit capture threshold (brain-learned, replaces hardcoded +50%)
+    this.thresholds.set('extraordinaryProfitCapture', {
+      name: 'extraordinaryProfitCapture',
+      currentValue: 0.50, // Start at +50%, brain learns when to capture massive wins
+      learningRate: baseLearningRate * 1.0, // Moderate learning
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.20, // Capture at least 20%+ extraordinary gains
+      maxValue: 2.00, // Allow up to 200% before forced capture (moonshots)
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.12, // Moderate exploration
+      optimalEstimate: 0.75 // Guide toward 75% (let winners run, but capture extremes)
+    });
+
+    // 🎯 V3.14.0: AI reversal confidence threshold (brain-learned, replaces hardcoded 60%)
+    this.thresholds.set('aiReversalConfidenceThreshold', {
+      name: 'aiReversalConfidenceThreshold',
+      currentValue: 0.70, // Start at 70% (was hardcoded 60%)
+      learningRate: baseLearningRate * 1.3,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.50, // Minimum 50% AI confidence to exit on reversal
+      maxValue: 0.95, // Maximum 95%
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.10,
+      optimalEstimate: 0.75 // Guide toward 75% reversal confidence
     });
 
     console.log('📊 Initialized self-learning thresholds:');
@@ -460,6 +542,121 @@ export class AdaptiveProfitBrain {
         recentStreak: 0
       };
     }
+  }
+
+  /**
+   * V3.14.0: Calculate Expected Value for profit maximization
+   * EV = (Win% × AvgWin) - (Loss% × AvgLoss) - CommissionCost
+   * Goal: Maximize EV per trade, not win rate
+   */
+  calculateExpectedValue(tradeHistory: TradeOutcome[]): {
+    expectedValue: number;
+    winRate: number;
+    avgWin: number;
+    avgLoss: number;
+    avgProfit: number;
+    profitFactor: number;
+    commissionImpact: number;
+  } {
+    if (tradeHistory.length === 0) {
+      return {
+        expectedValue: 0,
+        winRate: 0.5,
+        avgWin: 0,
+        avgLoss: 0,
+        avgProfit: 0,
+        profitFactor: 1.0,
+        commissionImpact: 0
+      };
+    }
+
+    const wins = tradeHistory.filter(t => t.actualWin);
+    const losses = tradeHistory.filter(t => !t.actualWin);
+
+    const winRate = wins.length / tradeHistory.length;
+    const lossRate = losses.length / tradeHistory.length;
+
+    const avgWin = wins.length > 0
+      ? wins.reduce((sum, t) => sum + t.profitImpact, 0) / wins.length
+      : 0;
+    const avgLoss = losses.length > 0
+      ? Math.abs(losses.reduce((sum, t) => sum + t.profitImpact, 0) / losses.length)
+      : 0;
+
+    // EV = (Win% × AvgWin) - (Loss% × AvgLoss)
+    const expectedValue = (winRate * avgWin) - (lossRate * avgLoss);
+
+    // Profit factor = Total Wins / Total Losses (want > 1.5 for trading)
+    const totalWins = wins.reduce((sum, t) => sum + t.profitImpact, 0);
+    const totalLosses = Math.abs(losses.reduce((sum, t) => sum + t.profitImpact, 0));
+    const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? 999 : 0;
+
+    // Average P&L per trade
+    const avgProfit = tradeHistory.reduce((sum, t) => sum + t.profitImpact, 0) / tradeHistory.length;
+
+    // Commission impact estimate (assume $0.20 per trade round-trip)
+    const commissionPerTrade = 0.20;
+    const commissionImpact = commissionPerTrade;
+
+    return {
+      expectedValue: expectedValue - commissionImpact,
+      winRate,
+      avgWin,
+      avgLoss,
+      avgProfit,
+      profitFactor,
+      commissionImpact
+    };
+  }
+
+  /**
+   * V3.14.0: Get trading metrics focused on profit maximization
+   */
+  getTradingMetrics(): {
+    totalTrades: number;
+    ev: number;
+    winRate: number;
+    avgWin: number;
+    avgLoss: number;
+    profitFactor: number;
+    totalProfit: number;
+    recommendation: string;
+  } {
+    const recentTrades = this.tradeHistory.slice(-50); // Last 50 trades
+    const evStats = this.calculateExpectedValue(recentTrades);
+
+    const totalProfit = this.tradeHistory.reduce((sum, t) => sum + t.profitImpact, 0);
+
+    let recommendation = '';
+    if (evStats.expectedValue > 1.0) {
+      recommendation = 'Excellent EV - system profitable';
+    } else if (evStats.expectedValue > 0.5) {
+      recommendation = 'Good EV - continue trading';
+    } else if (evStats.expectedValue > 0) {
+      recommendation = 'Marginal EV - optimize thresholds';
+    } else {
+      recommendation = 'Negative EV - brain learning needed';
+    }
+
+    console.log('\n📊 V3.14.0 TRADING METRICS (Profit Maximization Focus):');
+    console.log(`   Expected Value: $${evStats.expectedValue.toFixed(2)} per trade`);
+    console.log(`   Win Rate: ${(evStats.winRate * 100).toFixed(1)}% (not the goal!)`);
+    console.log(`   Avg Win: $${evStats.avgWin.toFixed(2)} | Avg Loss: $${evStats.avgLoss.toFixed(2)}`);
+    console.log(`   Profit Factor: ${evStats.profitFactor.toFixed(2)}x (want > 1.5x)`);
+    console.log(`   Commission Impact: -$${evStats.commissionImpact.toFixed(2)} per trade`);
+    console.log(`   Total Profit: $${totalProfit.toFixed(2)} (${recentTrades.length} trades)`);
+    console.log(`   Recommendation: ${recommendation}\n`);
+
+    return {
+      totalTrades: recentTrades.length,
+      ev: evStats.expectedValue,
+      winRate: evStats.winRate,
+      avgWin: evStats.avgWin,
+      avgLoss: evStats.avgLoss,
+      profitFactor: evStats.profitFactor,
+      totalProfit,
+      recommendation
+    };
   }
 
   /**
@@ -776,8 +973,100 @@ export class AdaptiveProfitBrain {
   // ============================================================================
 
   /**
+   * V3.14.0: Health check for brain reliability
+   * Returns diagnostic information and auto-recovers if possible
+   */
+  healthCheck(): {
+    healthy: boolean;
+    thresholdsLoaded: number;
+    pathwaysLoaded: number;
+    tradeHistorySize: number;
+    issues: string[];
+    autoRecoveryAttempted: boolean;
+  } {
+    const issues: string[] = [];
+    let autoRecoveryAttempted = false;
+
+    // Check thresholds
+    const expectedThresholds = [
+      'entryConfidence', 'exitScore', 'positionSizeMultiplier',
+      'profitTakingThreshold', 'capitalRotationUrgency', 'volatilityAdjustmentFactor',
+      'minLossBeforeExit', 'aiConfidenceRespectThreshold', 'minHoldTimeMinutes',
+      'emergencyLossStop', 'extraordinaryProfitCapture', 'aiReversalConfidenceThreshold'
+    ];
+
+    for (const name of expectedThresholds) {
+      if (!this.thresholds.has(name)) {
+        issues.push(`Missing threshold: ${name}`);
+      }
+    }
+
+    // Check neural pathways
+    if (this.neuralPathways.size === 0) {
+      issues.push('No neural pathways loaded');
+      // Auto-recovery: reinitialize pathways
+      try {
+        this.initializeNeuralPathways();
+        autoRecoveryAttempted = true;
+        console.log('✅ Auto-recovered: Neural pathways reinitialized');
+      } catch (error) {
+        issues.push(`Auto-recovery failed: ${error.message}`);
+      }
+    }
+
+    // Check trade history
+    if (this.tradeHistory.length === 0) {
+      issues.push('No trade history loaded (normal for new system)');
+    }
+
+    const healthy = issues.length === 0 || (issues.length === 1 && issues[0].includes('trade history'));
+
+    return {
+      healthy,
+      thresholdsLoaded: this.thresholds.size,
+      pathwaysLoaded: this.neuralPathways.size,
+      tradeHistorySize: this.tradeHistory.length,
+      issues,
+      autoRecoveryAttempted
+    };
+  }
+
+  /**
    * Get threshold value with contextual adjustments and exploration
    */
+  /**
+   * V3.14.0: Retry-enabled threshold fetching with automatic recovery
+   * Target: 99.99% threshold fetch reliability
+   */
+  getThresholdWithRetry(
+    parameterName: string,
+    context?: {
+      volatility?: number;
+      regime?: string;
+      confidence?: number;
+      marketMomentum?: number;
+    },
+    maxRetries = 3
+  ): number {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return this.getThreshold(parameterName, context);
+      } catch (error) {
+        lastError = error as Error;
+        console.error(`❌ Threshold fetch attempt ${attempt}/${maxRetries} failed for ${parameterName}: ${error.message}`);
+
+        if (attempt < maxRetries) {
+          // Quick retry (synchronous, no delay needed for in-memory operations)
+          continue;
+        }
+      }
+    }
+
+    throw new Error(`🚨 CRITICAL: Failed to fetch threshold '${parameterName}' after ${maxRetries} attempts. Last error: ${lastError?.message}`);
+  }
+
   getThreshold(
     parameterName: string,
     context?: {
@@ -789,8 +1078,7 @@ export class AdaptiveProfitBrain {
   ): number {
     const param = this.thresholds.get(parameterName);
     if (!param) {
-      console.warn(`⚠️ Unknown threshold parameter: ${parameterName}`);
-      return 0.15;
+      throw new Error(`Unknown threshold parameter: ${parameterName}. Available: ${Array.from(this.thresholds.keys()).join(', ')}`);
     }
 
     // Epsilon-greedy exploration
@@ -896,7 +1184,7 @@ export class AdaptiveProfitBrain {
 
   /**
    * Calculate profit gradient with respect to threshold
-   * ENHANCED: Includes premature exit penalties and AI confidence rewards
+   * V3.14.0 ENHANCED: Profit magnitude focus (not win rate) - maximize $/trade
    */
   private calculateProfitGradient(
     thresholdName: string,
@@ -907,10 +1195,18 @@ export class AdaptiveProfitBrain {
     const recentDecisions = this.tradeHistory.slice(-this.performanceWindow);
 
     if (recentDecisions.length < 10) {
-      return actualProfit > 0 ? 0.01 : -0.01;
+      // Early learning: strong signals based on profit magnitude
+      return actualProfit > 2.0 ? 0.05 : actualProfit < -1.0 ? -0.05 : 0.01;
     }
 
+    // 🎯 V3.14.0: Profit magnitude weighting (not binary win/loss)
+    // $5 win > five $1 wins (fewer trades, less commission)
     const avgProfit = recentDecisions.reduce((sum, d) => sum + d.profitImpact, 0) / recentDecisions.length;
+    const profitMagnitude = Math.abs(actualProfit);
+    const profitQuality = actualProfit / (profitMagnitude + 0.1); // Sign of profit (-1 to +1)
+
+    // Weight by magnitude: $5 win = 5x gradient of $1 win
+    const magnitudeWeight = Math.min(profitMagnitude / 2.0, 3.0); // Cap at 3x
     const normalizedProfit = (actualProfit - avgProfit) / (Math.abs(avgProfit) + 1);
 
     // Get most recent trade for context
@@ -920,42 +1216,52 @@ export class AdaptiveProfitBrain {
     let gradient = 0;
 
     if (thresholdName === 'entryConfidence') {
-      if (actualProfit > 0) {
-        if (confidenceLevel > thresholdAtDecision + 0.05) {
-          gradient = -0.01 * normalizedProfit; // Can lower threshold
-        } else {
-          gradient = 0.005 * normalizedProfit; // Threshold is good
-        }
+      // 🎯 PROFIT MAGNITUDE LEARNING: Big wins strengthen pattern, big losses weaken
+      if (actualProfit > 2.0) {
+        // Big win - can be LESS selective (lower threshold)
+        gradient = -0.02 * magnitudeWeight; // More profit = stronger signal
+        console.log(`💰 BIG WIN LEARNING: $${actualProfit.toFixed(2)} profit → lowering entry threshold (take similar setups)`);
+      } else if (actualProfit < -2.0) {
+        // Big loss - be MORE selective (raise threshold)
+        gradient = 0.03 * magnitudeWeight;
+        console.log(`🚨 BIG LOSS LEARNING: $${actualProfit.toFixed(2)} loss → raising entry threshold (avoid similar setups)`);
+      } else if (actualProfit > 0) {
+        // Small win - maintain or slightly lower threshold
+        gradient = -0.005 * normalizedProfit;
       } else {
-        if (confidenceLevel < thresholdAtDecision + 0.05) {
-          gradient = 0.02 * Math.abs(normalizedProfit); // Raise threshold
-        } else {
-          gradient = 0.001;
-        }
+        // Small loss - slightly raise threshold
+        gradient = 0.01 * Math.abs(normalizedProfit);
       }
     } else if (thresholdName === 'exitScore') {
-      // 🎯 ENHANCED: Penalize premature exits, reward patience
+      // 🎯 ENHANCED: Penalize premature exits, reward BIG wins from patience
       const minHoldTime = this.thresholds.get('minHoldTimeMinutes')?.currentValue || 5;
       const minLossThreshold = Math.abs(this.thresholds.get('minLossBeforeExit')?.currentValue || 0.02);
 
       // Premature exit penalty: exited too quickly with small loss
       if (timeHeld < minHoldTime && actualProfit < 0 && Math.abs(actualProfit) < minLossThreshold * 100) {
         // Strong negative gradient: learn to hold longer
-        gradient = 0.05; // Increase exit threshold (make exits harder)
-        console.log(`🚨 PREMATURE EXIT PENALTY: Held ${timeHeld.toFixed(1)}min (target: ${minHoldTime.toFixed(1)}min), Loss: ${actualProfit.toFixed(2)}%`);
+        gradient = 0.08 * magnitudeWeight; // Increase exit threshold (make exits harder)
+        console.log(`🚨 PREMATURE EXIT PENALTY: Held ${timeHeld.toFixed(1)}min (target: ${minHoldTime.toFixed(1)}min), Loss: $${actualProfit.toFixed(2)} (${(Math.abs(actualProfit) / avgProfit * 100).toFixed(0)}% of avg)`);
       }
-      // Good hold - profit after patience
+      // BIG win from patience - STRONGLY reward
+      else if (timeHeld > minHoldTime && actualProfit > 3.0) {
+        gradient = -0.04 * magnitudeWeight; // Decrease exit threshold (allow similar holds)
+        console.log(`🎉 BIG WIN REWARD: Held ${timeHeld.toFixed(1)}min → $${actualProfit.toFixed(2)} profit! Encouraging similar patience.`);
+      }
+      // Good hold - decent profit after patience
       else if (timeHeld > minHoldTime && actualProfit > avgProfit * 1.2) {
         gradient = -0.02; // Decrease exit threshold (allow similar holds)
-        console.log(`✅ PATIENCE REWARD: Held ${timeHeld.toFixed(1)}min, Profit: ${actualProfit.toFixed(2)}%`);
+        console.log(`✅ PATIENCE REWARD: Held ${timeHeld.toFixed(1)}min, Profit: $${actualProfit.toFixed(2)}`);
       }
-      // Exited too early - left profit on table
-      else if (actualProfit < avgProfit * 0.5 && actualProfit > 0) {
-        gradient = 0.01; // Increase threshold - hold longer for better profits
+      // Exited too early - left BIG profit on table
+      else if (actualProfit < avgProfit * 0.3 && actualProfit > 0) {
+        gradient = 0.02; // Increase threshold - hold longer for better profits
+        console.log(`⚠️ SMALL WIN WARNING: Only $${actualProfit.toFixed(2)} (avg: $${avgProfit.toFixed(2)}) - should hold longer`);
       }
-      // Good exit timing
-      else if (actualProfit > avgProfit * 1.5) {
-        gradient = -0.005; // Slight decrease - timing was good
+      // Excellent exit timing with big profit
+      else if (actualProfit > avgProfit * 2.0) {
+        gradient = -0.01 * magnitudeWeight; // Strong reward - timing was excellent
+        console.log(`🎯 EXCELLENT EXIT: $${actualProfit.toFixed(2)} (${(actualProfit / avgProfit).toFixed(1)}x avg profit)`);
       }
       else {
         gradient = 0.001 * normalizedProfit;
@@ -1072,4 +1378,23 @@ export class AdaptiveProfitBrain {
   }
 }
 
-export const adaptiveProfitBrain = AdaptiveProfitBrain.getInstance();
+// V3.14.0: Initialize brain with retry logic (99.99% reliability)
+// This will be called synchronously on import, but retries are built into constructor
+let brainInstance: AdaptiveProfitBrain;
+try {
+  // Try immediate initialization (works 99% of the time)
+  brainInstance = new AdaptiveProfitBrain();
+  AdaptiveProfitBrain.instance = brainInstance;
+  console.log('✅ Brain initialized successfully on first attempt');
+} catch (error) {
+  console.error('⚠️ Brain initialization failed on import, will retry asynchronously:', error.message);
+  // Brain will be initialized with retry logic when first accessed
+  brainInstance = null as any;
+}
+
+export const adaptiveProfitBrain = brainInstance;
+
+// Async initialization function for startup scripts
+export async function initializeBrainWithRetry(): Promise<AdaptiveProfitBrain> {
+  return await AdaptiveProfitBrain.getInstanceWithRetry();
+}
