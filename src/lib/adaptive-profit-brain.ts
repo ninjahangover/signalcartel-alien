@@ -379,7 +379,47 @@ export class AdaptiveProfitBrain {
     try {
       const { prisma } = await import('./prisma');
 
-      // Load from AdaptiveLearningPerformance - real historical data with no fallbacks
+      // 🔧 V3.14.1: PRIORITY 1 - Load from actual closed ManagedPosition trades (if any exist)
+      const closedPositions = await prisma.managedPosition.findMany({
+        where: {
+          status: 'closed',
+          realizedPnL: { not: null }
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 100 // Last 100 closed trades
+      });
+
+      console.log(`📊 Found ${closedPositions.length} closed positions with realized P&L`);
+
+      for (const pos of closedPositions) {
+        if (!pos.realizedPnL || !pos.exitPrice) continue;
+
+        const holdingTime = pos.exitTime && pos.entryTime
+          ? (pos.exitTime.getTime() - pos.entryTime.getTime()) / (1000 * 60 * 60)
+          : 24; // Default 24h if no exit time
+
+        const outcome: TradeOutcome = {
+          symbol: pos.symbol,
+          expectedReturn: pos.realizedPnL, // Was the expected return
+          actualReturn: pos.realizedPnL, // Actual realized P&L
+          winProbability: pos.realizedPnL > 0 ? 0.7 : 0.3,
+          actualWin: pos.realizedPnL > 0,
+          decisionFactors: {
+            timeHeld: holdingTime,
+            marketRegime: 'normal',
+            convictionLevel: 0.5,
+            opportunityCost: 0,
+            rotationScore: 0
+          },
+          profitImpact: pos.realizedPnL,
+          timestamp: pos.updatedAt
+        };
+        this.tradeHistory.push(outcome);
+      }
+
+      console.log(`✅ Loaded ${this.tradeHistory.length} outcomes from closed ManagedPosition trades`);
+
+      // PRIORITY 2: Supplement with AdaptiveLearningPerformance aggregates
       const adaptivePerformance = await prisma.adaptiveLearningPerformance.findMany({
         where: {
           totalSignals: { gte: 10 } // Only load pairs with meaningful history
@@ -413,12 +453,32 @@ export class AdaptiveProfitBrain {
       // No disconnect needed - using singleton
       console.log(`📊 Loaded ${this.tradeHistory.length} historical outcomes from AdaptiveLearningPerformance`);
 
+      // 🚨 V3.14.1: Safeguard against empty trade history
+      if (this.tradeHistory.length === 0) {
+        console.warn('');
+        console.warn('⚠️⚠️⚠️  CRITICAL WARNING: ZERO TRADE HISTORY LOADED  ⚠️⚠️⚠️');
+        console.warn('   Brain has NO historical data to learn from!');
+        console.warn('   This likely means:');
+        console.warn('   1. Database was wiped by position sync (FIXED in V3.14.1)');
+        console.warn('   2. System is starting fresh with no prior trades');
+        console.warn('   3. AdaptiveLearningPerformance table is empty');
+        console.warn('');
+        console.warn('   🧠 Brain will use DEFAULT thresholds until live trades provide data');
+        console.warn('   📈 Learning will begin as soon as first trades close');
+        console.warn('   ✅ Position sync fix will preserve future closed trades');
+        console.warn('');
+      } else if (this.tradeHistory.length < 10) {
+        console.warn(`⚠️  LOW TRADE HISTORY: Only ${this.tradeHistory.length} trades loaded - brain learning will be limited`);
+        console.warn('   🧠 Recommend at least 20+ closed trades for optimal threshold learning');
+      }
+
       if (this.tradeHistory.length > 0) {
         this.evolveFromHistory();
       }
     } catch (error) {
       console.warn('⚠️ Could not load historical data for learning:', error.message);
       // Fail gracefully - brain will learn from live data only
+      console.warn('   🧠 Brain will start with default thresholds and learn from new trades');
     }
   }
 

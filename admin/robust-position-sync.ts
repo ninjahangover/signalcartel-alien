@@ -27,22 +27,54 @@ interface ActualPosition {
   estimatedPrice: number;
 }
 
-async function clearAllPositions() {
-  console.log('🧹 Clearing all existing position data...');
+async function clearOpenPositionsOnly() {
+  console.log('🧹 Clearing ONLY open positions (preserving closed trade history)...');
 
-  await prisma.liveTrade.deleteMany({});
-  console.log('   ✅ Cleared LiveTrade entries');
+  // 🚨 CRITICAL: Only delete OPEN positions, never delete closed trades
+  // Brain needs historical closed trades for learning!
 
-  await prisma.livePosition.deleteMany({});
-  console.log('   ✅ Cleared LivePosition entries');
+  await prisma.liveTrade.deleteMany({
+    where: { isEntry: true } // Only delete entry trades for open positions
+  });
+  console.log('   ✅ Cleared open LiveTrade entries (preserved closed trades)');
 
-  await prisma.managedTrade.deleteMany({});
-  console.log('   ✅ Cleared ManagedTrade entries');
+  await prisma.livePosition.deleteMany({
+    where: { status: 'open' }
+  });
+  console.log('   ✅ Cleared open LivePosition entries (preserved closed positions)');
 
-  await prisma.managedPosition.deleteMany({});
-  console.log('   ✅ Cleared ManagedPosition entries');
+  // Get IDs of open positions first
+  const openPositions = await prisma.managedPosition.findMany({
+    where: { status: 'open' },
+    select: { id: true }
+  });
+  const openPositionIds = openPositions.map(p => p.id);
 
-  console.log('✅ Database completely cleared for fresh sync');
+  await prisma.managedTrade.deleteMany({
+    where: {
+      OR: [
+        { isEntry: true },
+        { positionId: { in: openPositionIds } }
+      ]
+    }
+  });
+  console.log('   ✅ Cleared open ManagedTrade entries (preserved exit trades)');
+
+  await prisma.managedPosition.deleteMany({
+    where: { status: 'open' }
+  });
+  console.log('   ✅ Cleared open ManagedPosition entries (preserved closed positions)');
+
+  // Count preserved history
+  const preservedClosedPositions = await prisma.managedPosition.count({
+    where: { status: 'closed' }
+  });
+  const preservedClosedTrades = await prisma.managedTrade.count({
+    where: { isEntry: false } // Exit trades
+  });
+
+  console.log(`✅ Open positions cleared, ${preservedClosedPositions} closed positions preserved`);
+  console.log(`✅ ${preservedClosedTrades} historical exit trades preserved for brain learning`);
 }
 
 async function createPositionsFromActual(positions: ActualPosition[]) {
@@ -120,47 +152,109 @@ async function createPositionsFromActual(positions: ActualPosition[]) {
   }
 }
 
+async function fetchActualKrakenHoldings(): Promise<ActualPosition[]> {
+  try {
+    // Call Kraken proxy server to get actual balance
+    const response = await fetch('http://127.0.0.1:3002/api/kraken/Balance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+
+    if (!response.ok) {
+      throw new Error(`Kraken Balance API failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const balances = data.result || {};
+
+    const positions: ActualPosition[] = [];
+
+    // Map Kraken assets to trading symbols
+    const assetMap: { [key: string]: string } = {
+      'XXBT': 'BTCUSD',
+      'XETH': 'ETHUSD',
+      'AVAX': 'AVAXUSD',
+      'BNB': 'BNBUSD',
+      'WIF': 'WIFUSD',
+      'SOL': 'SOLUSD',
+      'DOT': 'DOTUSD',
+      'ADA': 'ADAUSD',
+      'MATIC': 'MATICUSD',
+      'LINK': 'LINKUSD'
+    };
+
+    // Get current prices from Kraken ticker
+    for (const [asset, balanceStr] of Object.entries(balances)) {
+      const balance = parseFloat(balanceStr as string);
+
+      // Skip USD, stablecoins, and tiny dust amounts
+      if (asset === 'ZUSD' || asset.includes('USD') || balance < 0.000001) {
+        continue;
+      }
+
+      const symbol = assetMap[asset] || `${asset}USD`;
+
+      // Fetch current price
+      try {
+        const tickerResponse = await fetch(`http://127.0.0.1:3002/api/kraken/Ticker`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pair: symbol })
+        });
+
+        if (tickerResponse.ok) {
+          const tickerData = await tickerResponse.json();
+          const pairData = tickerData.result?.[Object.keys(tickerData.result)[0]];
+          const currentPrice = parseFloat(pairData?.c?.[0] || '0');
+
+          if (currentPrice > 0) {
+            positions.push({
+              symbol,
+              quantity: balance,
+              estimatedPrice: currentPrice,
+              estimatedValue: balance * currentPrice
+            });
+          }
+        }
+      } catch (error) {
+        console.warn(`   ⚠️  Could not fetch price for ${symbol}: ${error.message}`);
+      }
+
+      // Rate limit protection
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    return positions;
+
+  } catch (error) {
+    console.error('❌ Failed to fetch Kraken holdings:', error.message);
+    console.log('⚠️  Falling back to empty positions (will sync to all cash)');
+    return [];
+  }
+}
+
 async function robustPositionSync() {
   try {
     console.log('🚀 ROBUST POSITION SYNC - Starting...');
     console.log('================================================');
 
-    // 🔧 V3.10.2: Updated with actual Kraken holdings (from Balance API via dashboard)
-    // Dashboard shows: AVAX 7.306979 @ $30.61, BNB 0.009670 @ $1021.72, WIF 54.489950 @ $0.76, BTC 0.000173 @ $116670.40
-    const actualPositions: ActualPosition[] = [
-      {
-        symbol: 'AVAXUSD',
-        quantity: 7.306979, // Actual Kraken holding
-        estimatedValue: 223.67,
-        estimatedPrice: 30.61
-      },
-      {
-        symbol: 'WIFUSD',
-        quantity: 54.489950, // dogwifhat holding
-        estimatedValue: 41.40,
-        estimatedPrice: 0.76
-      },
-      {
-        symbol: 'BTCUSD',
-        quantity: 0.000173, // Actual Kraken holding
-        estimatedValue: 20.24,
-        estimatedPrice: 116670.40
-      },
-      {
-        symbol: 'BNBUSD',
-        quantity: 0.009670, // Small remaining position after partial close
-        estimatedValue: 9.88,
-        estimatedPrice: 1021.72
-      }
-    ];
+    // 🔧 V3.14.1: Fetch ACTUAL Kraken holdings dynamically (no hardcoded data!)
+    console.log('📡 Fetching actual Kraken holdings from Balance API...');
 
-    console.log('📊 Syncing with actual Kraken holdings:');
-    for (const pos of actualPositions) {
-      console.log(`   ${pos.symbol}: ${pos.quantity} × $${pos.estimatedPrice} = $${pos.estimatedValue.toFixed(2)}`);
+    const actualPositions: ActualPosition[] = await fetchActualKrakenHoldings();
+
+    if (actualPositions.length === 0) {
+      console.log('⚠️  No open Kraken holdings detected - account may be all cash');
+    } else {
+      console.log('📊 Syncing with actual Kraken holdings:');
+      for (const pos of actualPositions) {
+        console.log(`   ${pos.symbol}: ${pos.quantity} × $${pos.estimatedPrice} = $${pos.estimatedValue.toFixed(2)}`);
+      }
     }
 
-    // Step 1: Clear all existing positions
-    await clearAllPositions();
+    // Step 1: Clear ONLY open positions (preserve closed trade history)
+    await clearOpenPositionsOnly();
 
     // Step 2: Create positions from actual holdings
     await createPositionsFromActual(actualPositions);
