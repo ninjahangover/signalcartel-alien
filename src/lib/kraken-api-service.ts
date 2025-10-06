@@ -6,15 +6,24 @@ class KrakenApiService {
   private isAuthenticated = false;
   private requestQueue: Promise<any> = Promise.resolve();
   private lastRequestTime = 0;
+  private rateLimitBackoffUntil = 0; // 🛡️ V3.14.2: Track when rate limit cooldown expires
 
   async authenticate(apiKey: string, apiSecret: string): Promise<boolean> {
     const maxRetries = 3;
     let lastError: any;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
+
+        // 🛡️ V3.14.3: Check rate limit backoff BEFORE attempting authentication
+        const now = Date.now();
+        if (this.rateLimitBackoffUntil > now) {
+          const waitSeconds = Math.ceil((this.rateLimitBackoffUntil - now) / 1000);
+          console.warn(`⚠️ Rate limit active - waiting ${waitSeconds}s before authentication attempt ${attempt}`);
+          await new Promise(resolve => setTimeout(resolve, this.rateLimitBackoffUntil - now + 1000));
+        }
 
         // Try to make a test call to verify credentials
         const accountInfo = await this.getAccountBalance();
@@ -27,12 +36,15 @@ class KrakenApiService {
       } catch (error: any) {
         lastError = error;
         console.error(`Authentication attempt ${attempt} failed:`, error?.message || error);
-        
+
         // If rate limited, wait longer before retry
         if (error?.message?.includes('Rate limit')) {
-          const waitTime = Math.min(30000, attempt * 10000); // 10s, 20s, 30s
-          console.log(`⏳ Rate limited - waiting ${waitTime/1000}s before retry...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          // Don't retry immediately - the backoff is already set by makeRequest()
+          if (attempt < maxRetries) {
+            const waitTime = Math.min(60000, attempt * 15000); // 15s, 30s, 60s
+            console.log(`⏳ Rate limited - waiting ${waitTime/1000}s before retry ${attempt + 1}...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
         } else {
           // Regular retry with exponential backoff
           const waitTime = Math.min(5000, attempt * 2000); // 2s, 4s, 5s
@@ -40,7 +52,7 @@ class KrakenApiService {
         }
       }
     }
-    
+
     console.error(`❌ Authentication failed after ${maxRetries} attempts:`, lastError);
     this.isAuthenticated = false;
     return false;
@@ -66,6 +78,13 @@ class KrakenApiService {
 
   private async makeRequest(endpoint: string, params: any = {}): Promise<any> {
     return this.queueRequest(async () => {
+      // 🛡️ V3.14.2: Check if we're in rate limit backoff period
+      const now = Date.now();
+      if (this.rateLimitBackoffUntil > now) {
+        const waitSeconds = Math.ceil((this.rateLimitBackoffUntil - now) / 1000);
+        throw new Error(`Rate limited - waiting ${waitSeconds}s before retry (backoff active)`);
+      }
+
       const maxRetries = 3;
       let lastError: any;
 
@@ -117,6 +136,19 @@ class KrakenApiService {
 
           // Check for Kraken API errors
           if (data.error && data.error.length > 0) {
+            // 🛡️ V3.14.2: RATE LIMIT DETECTION - Enter backoff mode
+            const isRateLimited = data.error.some(err =>
+              err.includes('Rate limit') || err.includes('EAPI:Rate limit exceeded')
+            );
+
+            if (isRateLimited) {
+              const backoffMinutes = 5; // Wait 5 minutes before allowing any requests
+              this.rateLimitBackoffUntil = Date.now() + (backoffMinutes * 60 * 1000);
+              console.error(`🚨 RATE LIMIT DETECTED: Entering ${backoffMinutes}-minute cooldown period`);
+              console.error(`🚨 All API calls blocked until: ${new Date(this.rateLimitBackoffUntil).toISOString()}`);
+              throw new Error(`EAPI:Rate limit exceeded - cooldown active for ${backoffMinutes}min`);
+            }
+
             // 💡 GRACEFUL HANDLING: "Insufficient funds" for sell orders is a known state, not an error
             if (data.error.some(err => err.includes('EOrder:Insufficient funds')) &&
                 endpoint === 'AddOrder' &&
@@ -368,16 +400,38 @@ class KrakenApiService {
       try {
         const balance = await this.getAccountBalance();
         const usdCash = parseFloat(balance?.result?.ZUSD || '0') + parseFloat(balance?.result?.USDT || '0');
-        const estimatedOrderValue = parseFloat(params.volume) * (parseFloat(params.price || '0') || 50); // Conservative estimate
-        
+
+        // 🔧 V3.14.3: Get current market price for market orders
+        let estimatedPrice = parseFloat(params.price || '0');
+        if (!estimatedPrice || params.ordertype === 'market') {
+          try {
+            // Fetch current ticker price from Kraken
+            const tickerResponse = await fetch(`http://127.0.0.1:3002/public/Ticker?pair=${params.pair}`);
+            const tickerData = await tickerResponse.json();
+            if (tickerData?.result) {
+              const pairKey = Object.keys(tickerData.result)[0];
+              const currentPrice = parseFloat(tickerData.result[pairKey]?.c?.[0]);
+              if (currentPrice > 0) {
+                estimatedPrice = currentPrice * 1.02; // Add 2% slippage buffer for market orders
+                console.log(`📊 Fetched market price for ${params.pair}: $${currentPrice.toFixed(4)} (with 2% buffer: $${estimatedPrice.toFixed(4)})`);
+              }
+            }
+          } catch (priceError) {
+            console.warn(`⚠️ Could not fetch market price, using conservative estimate`);
+            estimatedPrice = 100; // Fallback for unknown price (conservative)
+          }
+        }
+
+        const estimatedOrderValue = parseFloat(params.volume) * estimatedPrice;
+
         console.log(`💰 USD Cash Check: Available $${usdCash.toFixed(2)}, Order needs ~$${estimatedOrderValue.toFixed(2)}`);
-        
+
         if (usdCash < estimatedOrderValue) {
           const error = new Error(`Insufficient USD cash: $${usdCash.toFixed(2)} available, $${estimatedOrderValue.toFixed(2)} required`);
           console.error(`❌ ${error.message}`);
           throw error;
         }
-        
+
         console.log(`✅ Cash validation passed: Sufficient USD for buy order`);
       } catch (error) {
         if (error.message.includes('Insufficient USD')) {
