@@ -19,14 +19,16 @@ export class Phase2MathematicalOptimizer {
   private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
   // Exchange minimum volumes (in USD)
+  // 🔧 V3.14.3 FIX: Lowered minimums for small account compatibility
+  // $75 account with 20% sizing = $15 positions, so minimums must be ≤$15
   private readonly MINIMUM_VOLUMES: { [key: string]: number } = {
-    'BTCUSD': 50,
-    'ETHUSD': 30,
-    'BNBUSD': 20,
-    'SOLUSD': 20,
-    'AVAXUSD': 20,
-    'DOTUSD': 20,
-    'DEFAULT': 10
+    'BTCUSD': 50,  // Keep high for BTC (price-sensitive)
+    'ETHUSD': 15,  // Lowered from 30
+    'BNBUSD': 12,  // Lowered from 20
+    'SOLUSD': 12,  // Lowered from 20
+    'AVAXUSD': 12, // Lowered from 20
+    'DOTUSD': 12,  // Lowered from 20
+    'DEFAULT': 10  // Unchanged - good default
   };
 
   /**
@@ -186,11 +188,12 @@ export class Phase2MathematicalOptimizer {
     // Get minimum volume requirement
     const minVolumeUSD = this.MINIMUM_VOLUMES[symbol] || this.MINIMUM_VOLUMES.DEFAULT;
 
-    // Add 10% buffer to avoid edge cases
-    const requiredUSD = minVolumeUSD * 1.1;
+    // 🔧 V3.14.3 FIX: For small accounts (<$100), use actual minimums without buffer
+    // This allows $75 account with 20% sizing ($15) to trade $10 minimum pairs
+    const requiredUSD = minVolumeUSD; // Removed 1.1x buffer that was blocking small accounts
 
     if (orderSizeUSD < requiredUSD) {
-      // Check if we can meet minimum by adjusting up
+      // Check if we can meet minimum by adjusting up (within 20% tolerance)
       if (orderSizeUSD > minVolumeUSD * 0.8) {
         // Close enough - adjust up to minimum
         return {

@@ -75,17 +75,11 @@ else
 fi
 
 # Step 5: Final position sync before shutdown
-echo "🔄 STEP 5: Final position sync before shutdown..."
-# Load environment variables first
-source .env 2>/dev/null || true
-# Sync positions one final time to ensure consistency
-DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
-timeout 20s npx tsx admin/robust-position-sync.ts > /tmp/signalcartel-logs/shutdown-position-sync.log 2>&1
-if [ $? -eq 0 ]; then
-    echo "✅ Final position sync completed - database ready for next startup"
-else
-    echo "⚠️  Final position sync failed or timed out - database may need manual sync"
-fi
+echo "🔄 STEP 5: Skipping shutdown position sync (database preserved)..."
+
+# 🔧 V3.14.3 FIX: Shutdown sync was also wiping database positions
+# Database is the source of truth - positions persist across restarts
+echo "✅ Shutdown sync skipped - database positions will persist"
 
 # Step 6: Clean up any remaining Node processes
 echo "🧹 STEP 6: Cleaning up any remaining processes..."

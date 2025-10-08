@@ -200,7 +200,7 @@ export class AdaptiveProfitBrain {
     // Position sizing multiplier - Learn optimal trade sizes
     this.thresholds.set('positionSizeMultiplier', {
       name: 'positionSizeMultiplier',
-      currentValue: 1.5, // Start at 1.5x - more aggressive
+      currentValue: 1.0, // Start at 1.0x - conservative (V3.14.2 reduced from 1.5x)
       learningRate: baseLearningRate * 1.0,
       momentum: momentumDecay,
       velocity: 0,
@@ -210,7 +210,25 @@ export class AdaptiveProfitBrain {
       profitHistory: [],
       adjustmentHistory: [],
       explorationNoise: 0.10,
-      optimalEstimate: 1.5
+      optimalEstimate: 1.0 // Let brain discover optimal through learning
+    });
+
+    // 🧠 V3.14.2: Maximum position size as % of balance (brain-learned, NO hardcoding!)
+    // Replaces hardcoded 0.15 (15%) cap in EnhancedPositionSizing
+    // Brain learns optimal cap based on expected return, opportunity cost, and trade outcomes
+    this.thresholds.set('maxPositionPercentage', {
+      name: 'maxPositionPercentage',
+      currentValue: 0.20, // Start at 20% - higher for significant opportunities
+      learningRate: baseLearningRate * 1.2, // Good learning speed
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.05, // Never less than 5% (too conservative)
+      maxValue: 0.50, // Never more than 50% (too risky)
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.12,
+      optimalEstimate: 0.25 // Guide toward 25% for high-conviction trades
     });
 
     // Profit taking threshold - Learn optimal profit capture
@@ -1049,7 +1067,7 @@ export class AdaptiveProfitBrain {
 
     // Check thresholds
     const expectedThresholds = [
-      'entryConfidence', 'exitScore', 'positionSizeMultiplier',
+      'entryConfidence', 'exitScore', 'positionSizeMultiplier', 'maxPositionPercentage',
       'profitTakingThreshold', 'capitalRotationUrgency', 'volatilityAdjustmentFactor',
       'minLossBeforeExit', 'aiConfidenceRespectThreshold', 'minHoldTimeMinutes',
       'emergencyLossStop', 'extraordinaryProfitCapture', 'aiReversalConfidenceThreshold'

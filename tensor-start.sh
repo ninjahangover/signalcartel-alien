@@ -65,17 +65,12 @@ else
 fi
 
 # Step 3.5: Robust position sync with actual Kraken holdings
-echo "🔄 STEP 3.5: Robust position sync with actual Kraken holdings..."
-# Load environment variables first
-source .env 2>/dev/null || true
-# Use robust position sync for perfect database alignment
-DATABASE_URL="postgresql://warehouse_user:quantum_forge_warehouse_2024@localhost:5433/signalcartel?schema=public" \
-timeout 20s npx tsx admin/robust-position-sync.ts > /tmp/signalcartel-logs/position-sync.log 2>&1
-if [ $? -eq 0 ]; then
-    echo "✅ Robust position sync completed successfully - database perfectly aligned"
-else
-    echo "⚠️  Robust position sync failed or timed out - continuing anyway"
-fi
+echo "🔄 STEP 3.5: Skipping position sync (database tracks trades directly)..."
+
+# 🔧 V3.14.3 FIX: Position sync was destructively wiping database positions
+# Positions are now persisted when trades are placed (V3.14.3 fix)
+# Database is the source of truth - NO need to sync from Kraken on startup
+echo "✅ Position sync skipped - database positions preserved"
 
 # Step 4: Start Kraken Proxy Server V2.6 (First to establish API connection)
 echo "🔧 STEP 4: Starting Kraken Proxy Server V2.6..."

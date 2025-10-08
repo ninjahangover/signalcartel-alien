@@ -9,7 +9,7 @@ export interface PositionSizingConfig {
   basePositionSize: number;
   confidenceMultipliers: {
     highConfidence: number;    // 88%+ confidence
-    mediumConfidence: number;  // 70-87% confidence  
+    mediumConfidence: number;  // 70-87% confidence
     lowConfidence: number;     // 50-69% confidence
   };
   winStreakMultipliers: {
@@ -25,6 +25,18 @@ export interface PositionSizingConfig {
     reinvestmentRate: number;  // % of profits to reinvest
     maxCompoundingMultiplier: number;
   };
+}
+
+// V3.14.2: Additional parameters for brain-driven sizing
+export interface PositionSizingParams {
+  symbol: string;
+  confidence: number;
+  accountBalance: number;
+  currentPrice: number;
+  action: 'BUY' | 'SELL';
+  brainMaxPositionPct?: number;     // 🧠 Brain-learned max % of balance
+  expectedReturn?: number;           // 📊 AI-predicted expected return %
+  opportunityCost?: number;          // 💰 Opportunity cost score
 }
 
 export interface PairPerformanceData {
@@ -89,21 +101,44 @@ export class EnhancedPositionSizing {
   }
 
   /**
+   * V3.14.2: New method using PositionSizingParams interface
+   */
+  async calculateOptimalSize(params: PositionSizingParams): Promise<PositionSizingResult> {
+    return this.calculatePositionSize(
+      params.symbol,
+      params.confidence,
+      params.accountBalance,
+      params.brainMaxPositionPct,
+      params.expectedReturn,
+      params.opportunityCost
+    );
+  }
+
+  /**
    * Calculate optimal position size based on all factors
+   * V3.14.2: Added brain multiplier and expected return for dynamic sizing
    */
   async calculatePositionSize(
     symbol: string,
     confidence: number,
-    currentBalance: number
+    currentBalance: number,
+    brainMaxPositionPct?: number,      // 🧠 Brain-learned max % (replaces hardcoded 0.15)
+    expectedReturn?: number,            // 📊 Expected return % from AI analysis
+    opportunityCost?: number            // 💰 Opportunity cost of capital
   ): Promise<PositionSizingResult> {
     const reasoning: string[] = [];
-    
-    // Dynamic base size calculation based on current balance
-    // Use 2% of available balance as base, with min $10 and max $500
-    const dynamicBaseSize = Math.min(Math.max(currentBalance * 0.02, 10), 500);
+
+    // Dynamic base size calculation based on current balance AND expected return
+    // Higher expected returns = larger base size (within brain-learned limits)
+    const returnMultiplier = expectedReturn ? Math.max(1.0, Math.min(2.0, 1 + (expectedReturn / 10))) : 1.0;
+    const dynamicBaseSize = Math.min(Math.max(currentBalance * 0.02 * returnMultiplier, 10), 500);
     let baseSize = dynamicBaseSize;
-    
-    reasoning.push(`Dynamic base: 2% of $${currentBalance.toFixed(2)} = $${baseSize.toFixed(2)}`);
+
+    if (expectedReturn && expectedReturn > 5) {
+      reasoning.push(`Dynamic base: 2% of $${currentBalance.toFixed(2)} × ${returnMultiplier.toFixed(2)}x (${expectedReturn.toFixed(1)}% expected) = $${baseSize.toFixed(2)}`);
+    } else {
+      reasoning.push(`Dynamic base: 2% of $${currentBalance.toFixed(2)} = $${baseSize.toFixed(2)}`);
+    }
     
     // 1. CONFIDENCE-BASED MULTIPLIER
     const confidenceMultiplier = this.getConfidenceMultiplier(confidence);
@@ -128,11 +163,16 @@ export class EnhancedPositionSizing {
       reasoning.push(`Profit compounding → ${compoundingMultiplier.toFixed(2)}x multiplier`);
     }
 
-    // 5. CALCULATE FINAL SIZE
-    const finalPositionSize = Math.min(
-      baseSize * confidenceMultiplier * winStreakMultiplier * pairPerformanceMultiplier * compoundingMultiplier,
-      currentBalance * 0.15 // Max 15% of balance per trade
-    );
+    // 5. CALCULATE FINAL SIZE (V3.14.2: Brain-learned max % replaces hardcoded 0.15)
+    const maxPositionPct = brainMaxPositionPct || 0.20; // Default 20% if brain not available
+    const calculatedSize = baseSize * confidenceMultiplier * winStreakMultiplier * pairPerformanceMultiplier * compoundingMultiplier;
+    const maxAllowedSize = currentBalance * maxPositionPct;
+
+    const finalPositionSize = Math.min(calculatedSize, maxAllowedSize);
+
+    if (calculatedSize > maxAllowedSize) {
+      reasoning.push(`🧠 Brain cap: $${calculatedSize.toFixed(2)} → $${finalPositionSize.toFixed(2)} (${(maxPositionPct * 100).toFixed(0)}% max)`);
+    }
 
     // 6. EXPECTED PROFIT CALCULATION
     const pairData = this.pairPerformanceCache.get(symbol);

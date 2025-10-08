@@ -20,8 +20,9 @@ export class AvailableBalanceCalculator {
   private priorityPairs: Set<string> = new Set();
   private krakenProxyUrl: string = 'http://127.0.0.1:3002';
 
-  // Rate limit: 30 seconds between API calls to avoid overloading
-  private static minApiInterval: number = 30000;
+  // Rate limit: 2 minutes between API calls to avoid rate limiting (V3.14.2 - reduced from 30s)
+  // Analysis showed 5,252 Balance calls in 16hrs (330/hr) causing Kraken rate limits
+  private static minApiInterval: number = 120000;
 
   private constructor() {
     console.log(chalk.cyan('💰 Balance Calculator Initialized (Real Kraken API)'));
@@ -50,7 +51,7 @@ export class AvailableBalanceCalculator {
     const cacheAge = this.lastBalance ? now - this.lastBalance.timestamp : Infinity;
     const timeSinceLastApiCall = now - this.lastUpdateTime;
 
-    // Use cached data if recent enough (30 seconds) to avoid API spam
+    // Use cached data if recent enough (2 minutes) to avoid API spam and rate limiting
     if (this.lastBalance && cacheAge < AvailableBalanceCalculator.minApiInterval) {
       console.log(`📊 Using cached Kraken balance: $${this.lastBalance.availableBalance.toFixed(2)} (${Math.round(cacheAge / 1000)}s old)`);
       return this.lastBalance;

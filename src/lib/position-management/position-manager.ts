@@ -248,73 +248,209 @@ export class PositionManager {
       confidence?: number;
       aiSystems?: string[];
       phase?: number;
+      krakenOrderId?: string; // V3.14.3: Accept pre-placed Kraken order ID
       [key: string]: any;
     };
   }): Promise<{ action: 'opened'; position: Position; trade: PositionTrade }> {
 
-    console.log(`🔥 KRAKEN-ONLY MODE: Placing direct ${params.side.toUpperCase()} order for ${params.quantity} ${params.symbol}`);
+    // 🔧 V3.14.3 FIX: Positions are tracked in database for exit logic and brain learning
+    // Kraken order is ALREADY PLACED by calling code - we just need to persist for tracking
 
-    // NO DATABASE POSITIONS - DIRECT KRAKEN EXECUTION ONLY
+    const krakenOrderId = params.metadata?.krakenOrderId;
+    if (!krakenOrderId) {
+      throw new Error('🚨 CRITICAL: Kraken order ID required for position tracking (order must be placed before calling openPosition)');
+    }
+
+    const positionId = `kraken-${krakenOrderId}`;
+    const tradeId = `trade-${krakenOrderId}`;
+
+    // Create entry trade record
+    // 🔧 V3.14.3: Ensure timestamp is a Date object for database compatibility
+    const executedAt = params.timestamp instanceof Date ? params.timestamp : new Date(params.timestamp);
+
+    const entryTrade: PositionTrade = {
+      id: tradeId,
+      positionId,
+      side: params.side === 'long' ? 'buy' : 'sell',
+      symbol: params.symbol,
+      quantity: params.quantity,
+      price: params.price,
+      value: params.quantity * params.price,
+      strategy: params.strategy,
+      executedAt: executedAt,
+      isEntry: true
+    };
+
+    // Get exit strategy for this position
+    const exitStrategy = this.getExitStrategy(params.strategy, params.symbol);
+
+    // Create position object
+    const position: Position = {
+      id: positionId,
+      strategy: params.strategy,
+      symbol: params.symbol,
+      side: params.side,
+      entryPrice: params.price,
+      quantity: params.quantity,
+      entryTradeId: tradeId,
+      entryTime: executedAt,
+      openTime: executedAt,
+      status: 'open',
+      metadata: params.metadata || {},
+
+      // Apply exit strategy rules
+      stopLoss: exitStrategy?.stopLossPercent ?
+        params.price * (1 - (params.side === 'long' ? exitStrategy.stopLossPercent : -exitStrategy.stopLossPercent)) :
+        undefined,
+      takeProfit: exitStrategy?.takeProfitPercent ?
+        params.price * (1 + (params.side === 'long' ? exitStrategy.takeProfitPercent : -exitStrategy.takeProfitPercent)) :
+        undefined,
+      maxHoldTime: exitStrategy?.maxHoldMinutes ? exitStrategy.maxHoldMinutes * 60 * 1000 : undefined
+    };
+
+    this.positions.set(positionId, position);
+
+    // 🔧 V3.14.3: Save to database for exit logic and brain learning
+    console.log(`💾 V3.14.3: Persisting position ${position.id} to database for tracking...`);
+
+    if (!this.prisma) {
+      console.error(`❌ CRITICAL ERROR: Prisma client is undefined in PositionManager`);
+      console.log(`⚠️ Position ${position.id} exists in-memory ONLY - EXIT LOGIC WILL NOT RUN!`);
+      return { action: 'opened', position, trade: entryTrade };
+    }
+
     try {
-      const krakenOrderType = params.side === 'long' ? 'buy' : 'sell';
-      const krakenOrderResult = await krakenApiService.placeOrder({
-        pair: params.symbol,
-        type: krakenOrderType,
-        ordertype: 'market',
-        volume: params.quantity.toString()
+      await this.prisma.$transaction(async (tx: any) => {
+        // Step 1: Create trade first (no circular dependency)
+        await tx.managedTrade.create({
+          data: {
+            id: entryTrade.id,
+            positionId: position.id,
+            side: entryTrade.side,
+            symbol: entryTrade.symbol,
+            quantity: entryTrade.quantity,
+            price: entryTrade.price,
+            value: entryTrade.value,
+            strategy: entryTrade.strategy,
+            executedAt: entryTrade.executedAt,
+            pnl: entryTrade.pnl,
+            isEntry: entryTrade.isEntry
+          }
+        });
+
+        // Step 2: Create position
+        await tx.managedPosition.create({
+          data: {
+            id: position.id,
+            strategy: position.strategy,
+            symbol: position.symbol,
+            side: position.side,
+            entryPrice: position.entryPrice,
+            quantity: position.quantity,
+            entryTradeId: entryTrade.id,
+            entryTime: position.entryTime,
+            status: position.status,
+            stopLoss: position.stopLoss,
+            takeProfit: position.takeProfit,
+            maxHoldTime: position.maxHoldTime
+          }
+        });
+
+        // Step 3: Create LivePosition for dashboard
+        const sessionId = process.env.LIVE_TRADING_SESSION_ID || 'session-production-1757538257208';
+        const livePositionId = `live-pos-${position.id}`;
+
+        try {
+          await tx.livePosition.create({
+            data: {
+              id: livePositionId,
+              sessionId: sessionId,
+              symbol: position.symbol,
+              strategy: position.strategy,
+              side: position.side,
+              quantity: position.quantity,
+              entryPrice: position.entryPrice,
+              entryValue: position.quantity * position.entryPrice,
+              entryTime: position.entryTime,
+              entryTradeIds: entryTrade.id,
+              status: 'open',
+              unrealizedPnL: 0.0,
+              totalCommissions: 0.0,
+              totalFees: 0.0,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }
+          });
+          console.log(`✅ DASHBOARD: Created LivePosition ${livePositionId} for ${position.symbol}`);
+
+          // Step 4: Create LiveTrade
+          await tx.liveTrade.create({
+            data: {
+              id: `live-${entryTrade.id}`,
+              sessionId: sessionId,
+              positionId: livePositionId,
+              exchangeOrderId: krakenOrderId,
+              exchangeTradeId: entryTrade.id,
+              symbol: entryTrade.symbol,
+              side: entryTrade.side,
+              type: 'market',
+              quantity: entryTrade.quantity,
+              price: entryTrade.price,
+              value: entryTrade.value,
+              commission: 0.0,
+              fees: 0.0,
+              netValue: entryTrade.value,
+              purpose: entryTrade.isEntry ? 'open' : 'close',
+              isEntry: entryTrade.isEntry,
+              strategy: entryTrade.strategy,
+              signalConfidence: params.metadata?.confidence || 0.5,
+              signalSource: 'tensor-ai-fusion',
+              requestedAt: entryTrade.executedAt,
+              submittedAt: entryTrade.executedAt,
+              executedAt: entryTrade.executedAt,
+              acknowledgedAt: entryTrade.executedAt,
+              orderStatus: 'filled',
+              fillStatus: 'filled',
+              filledQuantity: entryTrade.quantity,
+              remainingQuantity: 0.0,
+              pnl: entryTrade.pnl || 0.0,
+              pnlPercent: 0.0,
+              tradeNotes: 'Automated Tensor AI Fusion trade',
+              updatedAt: entryTrade.executedAt
+            }
+          });
+          console.log(`✅ DASHBOARD: Created LiveTrade for ${position.symbol}`);
+        } catch (livePositionError: any) {
+          console.log(`⚠️ LivePosition/LiveTrade creation failed (non-critical): ${livePositionError.message}`);
+        }
       });
 
-      if (krakenOrderResult.result && krakenOrderResult.result.txid && krakenOrderResult.result.txid.length > 0) {
-        const krakenOrderId = krakenOrderResult.result.txid[0];
-        console.log(`✅ REAL KRAKEN ORDER PLACED: ${krakenOrderId} | ${krakenOrderType.toUpperCase()} ${params.quantity} ${params.symbol}`);
-        console.log(`✅ LIVE EXECUTION: Order submitted to Kraken exchange`);
+      console.log(`✅ DATABASE: Successfully persisted position ${position.id} and trade ${entryTrade.id}`);
 
-        // Create minimal response objects for system compatibility
-        const positionId = `kraken-${krakenOrderId}`;
-        const tradeId = `trade-${krakenOrderId}`;
+      // 🔧 V3.14.3: Verify position was saved
+      const verifyPosition = await this.prisma.managedPosition.findUnique({
+        where: { id: position.id }
+      });
 
-        const entryTrade: PositionTrade = {
-          id: tradeId,
-          positionId,
-          side: params.side === 'long' ? 'buy' : 'sell',
-          symbol: params.symbol,
-          quantity: params.quantity,
-          price: params.price,
-          value: params.quantity * params.price,
-          strategy: params.strategy,
-          executedAt: params.timestamp,
-          isEntry: true
-        };
-
-        const position: Position = {
-          id: positionId,
-          strategy: params.strategy,
-          symbol: params.symbol,
-          side: params.side,
-          entryPrice: params.price,
-          quantity: params.quantity,
-          entryTradeId: tradeId,
-          entryTime: params.timestamp,
-          openTime: params.timestamp,
-          status: 'open',
-          metadata: { krakenOrderId, ...params.metadata }
-        };
-
-        console.log(`📈 REAL KRAKEN TRADE: ${position.side.toUpperCase()} ${params.quantity} ${params.symbol} @ $${params.price}`);
-
-        return { action: 'opened', position, trade: entryTrade };
-
+      if (verifyPosition) {
+        console.log(`✅ VERIFICATION: Position ${position.id} confirmed in database`);
       } else {
-        console.log(`❌ KRAKEN ORDER FAILED: No transaction ID returned`);
-        console.log(`📋 Kraken Response:`, JSON.stringify(krakenOrderResult, null, 2));
-        throw new Error('Kraken order failed - no order placed');
+        console.error(`❌ VERIFICATION FAILED: Position ${position.id} NOT found in database after save!`);
+        throw new Error(`Position persistence verification failed for ${position.id}`);
       }
 
-    } catch (krakenError) {
-      console.log(`❌ KRAKEN ORDER FAILED: ${krakenError instanceof Error ? krakenError.message : 'Unknown error'}`);
-      console.log(`🚫 NO EXECUTION: Order not placed on Kraken`);
-      throw krakenError;
+    } catch (error: any) {
+      console.error(`❌ DATABASE PERSISTENCE FAILED: ${error.message}`);
+      console.error(`Stack trace:`, error.stack);
+      console.error(`⚠️ Position ${position.id} exists in-memory but NOT in database - EXIT LOGIC WILL NOT RUN!`);
+      // V3.14.3: This is now a CRITICAL error - throw to prevent silent failures
+      throw new Error(`Failed to persist position ${position.id} to database: ${error.message}`);
     }
+
+    console.log(`📈 REAL KRAKEN TRADE: ${position.side.toUpperCase()} ${params.quantity} ${params.symbol} @ $${params.price}`);
+    console.log(`✅ REAL POSITION OPENED: ${position.id} | Kraken: ${krakenOrderId} | Database: CONFIRMED`);
+
+    return { action: 'opened', position, trade: entryTrade };
   }
   
   /**
@@ -1083,10 +1219,10 @@ export class PositionManager {
    */
   private async loadPositionsFromDatabase(): Promise<void> {
     try {
-      // 🔧 V3.10.1: Query LivePosition table (where actual trading positions are stored)
-      const dbPositions = await this.prisma.livePosition.findMany({
+      // 🔧 V3.14.3: Load from ManagedPosition (primary source of truth)
+      // LivePosition has foreign key issues and may be empty
+      const dbPositions = await this.prisma.managedPosition.findMany({
         where: { status: 'open' }
-        // Note: LivePosition doesn't have entryTrade/exitTrade relations
       });
 
       // 🔥 V3.11.1 FIX: Clear closed positions from memory before syncing
@@ -1110,17 +1246,17 @@ export class PositionManager {
           side: dbPos.side.toLowerCase() as 'long' | 'short',
           entryPrice: dbPos.entryPrice,
           quantity: dbPos.quantity,
-          entryTradeId: dbPos.entryTradeIds, // LivePosition uses entryTradeIds
+          entryTradeId: dbPos.entryTradeId || undefined, // ManagedPosition uses entryTradeId (singular)
           entryTime: dbPos.entryTime,
           openTime: dbPos.entryTime, // Use entryTime for compatibility
           exitPrice: dbPos.exitPrice || undefined,
-          exitTradeId: dbPos.exitTradeIds || undefined,
+          exitTradeId: dbPos.exitTradeId || undefined, // ManagedPosition uses exitTradeId (singular)
           exitTime: dbPos.exitTime || undefined,
           status: dbPos.status.toLowerCase() as 'open' | 'closed' | 'partial',
           realizedPnL: dbPos.realizedPnL || undefined,
-          unrealizedPnL: dbPos.unrealizedPnL,
-          stopLoss: dbPos.stopLossPrice || undefined,
-          takeProfit: dbPos.takeProfitPrice || undefined,
+          unrealizedPnL: dbPos.unrealizedPnL || undefined,
+          stopLoss: dbPos.stopLoss || undefined,
+          takeProfit: dbPos.takeProfit || undefined,
           metadata: {} // Initialize empty metadata
         };
 

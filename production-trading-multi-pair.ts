@@ -1836,9 +1836,12 @@ class ProductionTradingEngine {
               if (orderResult && orderResult.result?.txid && orderResult.result.txid[0]) {
                 log(`✅ KRAKEN CLOSE ORDER: ${orderResult.result.txid[0]} | ${closeAction.toUpperCase()} ${closeVolume} ${position.symbol} | P&L: $${result.pnl.toFixed(2)}`);
                 log(`📋 Close Order: ${orderResult.result.descr?.order || 'Market close order executed'}`);
-                
-                // Kraken close order ID logged above for reference
-                
+
+                // 🔧 V3.14.3 FIX: Reset balance cache after position close
+                // Force fresh balance fetch on next check (balance changed after close)
+                this.balanceCalculator.resetCache();
+                log(`🔄 Balance cache reset - next check will fetch fresh Kraken balance`);
+
               } else {
                 log(`⚠️ KRAKEN CLOSE RESULT: No transaction ID returned`);
               }
@@ -2437,21 +2440,35 @@ class ProductionTradingEngine {
               
               const { EnhancedPositionSizing } = await import('./src/lib/enhanced-position-sizing');
               const positionSizer = new EnhancedPositionSizing(prisma);
-              
+
+              // 🧠 V3.14.2: Get brain-learned thresholds for position sizing
+              const brainMaxPositionPct = adaptiveProfitBrain.getThreshold('maxPositionPercentage', {
+                confidence: aiAnalysis.confidence,
+                regime: 'NEUTRAL'
+              });
+              const brainMultiplier = adaptiveProfitBrain.getThreshold('positionSizeMultiplier', {
+                confidence: aiAnalysis.confidence
+              });
+
+              // 📊 Extract expected return and opportunity cost from AI analysis
+              const expectedReturn = aiAnalysis.tensorDecision?.expectedReturn ||
+                                   aiAnalysis.enhancedAnalysis?.netExpectedReturn || 0;
+              const opportunityCost = aiAnalysis.tensorDecision?.opportunityCost || 0;
+
               const sizingResult = await positionSizer.calculateOptimalSize({
                 symbol: data.symbol,
                 confidence: aiAnalysis.confidence,
                 currentPrice: data.price,
                 action: data.action,
-                accountBalance: balanceInfo.availableBalance
+                accountBalance: balanceInfo.availableBalance,
+                brainMaxPositionPct,    // 🧠 Brain-learned max % (not hardcoded!)
+                expectedReturn,          // 📊 AI-predicted return
+                opportunityCost          // 💰 Opportunity cost
               });
 
               log(`💰 DYNAMIC BALANCE: Total: $${balanceInfo.totalBalance.toFixed(2)} | Available: $${balanceInfo.availableBalance.toFixed(2)} | Open Positions: ${balanceInfo.openPositionsCount} ($${balanceInfo.openPositionsValue.toFixed(2)})`);
 
-              // 🧠 ADAPTIVE PROFIT BRAIN V2.0: Apply learned position sizing multiplier
-              const brainMultiplier = adaptiveProfitBrain.getThreshold('positionSizeMultiplier', {
-                confidence: aiAnalysis.confidence
-              });
+              // 🧠 Apply brain multiplier to final size
               quantity = sizingResult.finalPositionSize * brainMultiplier;
 
               log(`🚀 ENHANCED SIZING: $${quantity.toFixed(2)} (${sizingResult.confidenceMultiplier.toFixed(1)}x conf × ${sizingResult.pairPerformanceMultiplier.toFixed(1)}x pair × ${sizingResult.winStreakMultiplier.toFixed(1)}x streak × ${brainMultiplier.toFixed(2)}x 🧠brain)`);
@@ -2523,17 +2540,33 @@ class ProductionTradingEngine {
           // CRITICAL FIX: Convert dollar amount to units based on asset price
           const positionSizeInDollars = quantity;
           const actualQuantity = positionSizeInDollars / data.price;
-          
+
           log(`💰 Position Sizing: $${positionSizeInDollars.toFixed(2)} = ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price.toFixed(2)}`);
-          
+
+          // 🛡️ V3.14.2: PRE-FLIGHT BALANCE VALIDATION (prevent "insufficient funds" errors)
+          try {
+            const currentBalanceCheck = await this.balanceCalculator.getAvailableBalance();
+            const orderCost = positionSizeInDollars;
+            const safetyMargin = 0.95; // Use 95% of available to account for fees
+
+            if (orderCost > currentBalanceCheck.availableBalance * safetyMargin) {
+              log(`❌ PRE-FLIGHT FAILED: Order cost $${orderCost.toFixed(2)} > ${(safetyMargin*100).toFixed(0)}% of available $${currentBalanceCheck.availableBalance.toFixed(2)}`);
+              log(`🔄 SKIPPING ORDER: Insufficient funds (would fail with Kraken API error)`);
+              continue; // Skip this trade, move to next symbol
+            }
+            log(`✅ PRE-FLIGHT PASSED: Order cost $${orderCost.toFixed(2)} < ${(safetyMargin*100).toFixed(0)}% of $${currentBalanceCheck.availableBalance.toFixed(2)}`);
+          } catch (balanceError) {
+            log(`⚠️ PRE-FLIGHT CHECK FAILED: ${balanceError.message} - Proceeding cautiously`);
+          }
+
           try {
             // 🔥 Execute trade directly on Kraken API FIRST - only create database position if successful
             let orderResult: any = null;
             let krakenOrderId: string = '';
-            
+
             // 🐛 CRITICAL FIX: Define strategyName before try-catch to ensure it's available in backup webhook path
             const strategyName = `phase-${currentPhase.phase}-ai-${aiAnalysis.aiSystems?.[0] || 'basic'}`;
-            
+
             try {
               // Convert internal side ('long'/'short') to Kraken API format ('buy'/'sell')
               const krakenSide = side === 'long' ? 'buy' : 'sell';
@@ -2599,7 +2632,12 @@ class ProductionTradingEngine {
                 
                 log(`✅ REAL POSITION OPENED: ${result.position.id} | ${side.toUpperCase()} ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price} | Kraken: ${krakenOrderId}`);
                 log(`🔍 POSITION TRACKING: ID=${result.position.id} | Symbol=${data.symbol} | Side=${side.toUpperCase()} | Quantity=${actualQuantity.toFixed(6)} | Entry=$${data.price} | Kraken=${krakenOrderId} | Created=${new Date().toISOString()}`);
-                
+
+                // 🔧 V3.14.3 FIX: Reset balance cache after trade execution
+                // Force fresh balance fetch on next check (balance changed after order)
+                this.balanceCalculator.resetCache();
+                log(`🔄 Balance cache reset - next check will fetch fresh Kraken balance`);
+
               } else {
                 log(`❌ KRAKEN ORDER FAILED: No transaction ID returned - NOT creating database position`);
                 throw new Error('Kraken order failed - no transaction ID returned');

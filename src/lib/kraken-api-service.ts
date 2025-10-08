@@ -149,18 +149,13 @@ class KrakenApiService {
               throw new Error(`EAPI:Rate limit exceeded - cooldown active for ${backoffMinutes}min`);
             }
 
-            // 💡 GRACEFUL HANDLING: "Insufficient funds" for sell orders is a known state, not an error
-            if (data.error.some(err => err.includes('EOrder:Insufficient funds')) &&
-                endpoint === 'AddOrder' &&
-                params?.type === 'sell') {
-              console.log(`✅ Position close attempt: Insufficient funds (position likely already closed)`);
-              return {
-                result: {
-                  descr: { order: 'Position already closed or insufficient balance' },
-                  txid: ['position-already-closed']
-                },
-                error: []
-              };
+            // 🔧 V3.14.3 FIX: REMOVED fake success on "Insufficient funds"
+            // This was masking real order failures and creating fake database records
+            // Now we properly throw the error so the trading system knows the order failed
+            if (data.error.some(err => err.includes('EOrder:Insufficient funds'))) {
+              console.error(`❌ KRAKEN ERROR: Insufficient funds for ${endpoint}`);
+              console.error(`   Order params:`, params);
+              throw new Error(`Kraken API error: ${data.error.join(', ')}`);
             }
 
             // Check if error is retryable

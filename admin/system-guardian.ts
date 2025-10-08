@@ -306,6 +306,11 @@ async function monitoringLoop() {
   while (true) {
     const currentTime = Date.now();
 
+    // 🔧 V3.14.3 FIX: Database sync DISABLED - was wiping positions
+    // Position sync was destructively clearing ALL database positions
+    // Database is now the source of truth - positions persist across restarts
+    // NO automatic sync needed - positions are created when trades execute
+    /*
     // Check if database sync is needed (every 15 minutes)
     if (currentTime - lastSyncTime >= SYNC_INTERVAL) {
       const syncSuccess = await runDatabaseSync();
@@ -320,6 +325,7 @@ async function monitoringLoop() {
       // Always update lastSyncTime to prevent spamming on failures
       lastSyncTime = currentTime;
     }
+    */
 
     // Check if OHLC warehouse sync is needed (every 60 minutes)
     if (currentTime - lastOHLCSyncTime >= OHLC_SYNC_INTERVAL) {
