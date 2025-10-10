@@ -154,11 +154,24 @@ async function createPositionsFromActual(positions: ActualPosition[]) {
 
 async function fetchActualKrakenHoldings(): Promise<ActualPosition[]> {
   try {
-    // Call Kraken proxy server to get actual balance
-    const response = await fetch('http://127.0.0.1:3002/api/kraken/Balance', {
+    // 🔧 V3.14.8: Fixed endpoint - use /api/kraken-proxy with endpoint in body
+    const apiKey = process.env.KRAKEN_API_KEY;
+    const apiSecret = process.env.KRAKEN_API_SECRET;
+
+    if (!apiKey || !apiSecret) {
+      throw new Error('Missing KRAKEN_API_KEY or KRAKEN_API_SECRET environment variables');
+    }
+
+    // Call Kraken proxy server to get actual balance (same format as balance calculator)
+    const response = await fetch('http://127.0.0.1:3002/api/kraken-proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
+      body: JSON.stringify({
+        endpoint: 'Balance',
+        params: {},
+        apiKey: apiKey,
+        apiSecret: apiSecret
+      })
     });
 
     if (!response.ok) {
@@ -166,6 +179,12 @@ async function fetchActualKrakenHoldings(): Promise<ActualPosition[]> {
     }
 
     const data = await response.json();
+
+    // Check for Kraken API errors
+    if (data.error && data.error.length > 0) {
+      throw new Error(`Kraken error: ${data.error.join(', ')}`);
+    }
+
     const balances = data.result || {};
 
     const positions: ActualPosition[] = [];
@@ -181,7 +200,8 @@ async function fetchActualKrakenHoldings(): Promise<ActualPosition[]> {
       'DOT': 'DOTUSD',
       'ADA': 'ADAUSD',
       'MATIC': 'MATICUSD',
-      'LINK': 'LINKUSD'
+      'LINK': 'LINKUSD',
+      'CORN': 'CORNUSD'  // 🔧 V3.14.8: Added CORN for unmanaged position sync
     };
 
     // Get current prices from Kraken ticker
@@ -197,15 +217,18 @@ async function fetchActualKrakenHoldings(): Promise<ActualPosition[]> {
 
       // Fetch current price
       try {
-        const tickerResponse = await fetch(`http://127.0.0.1:3002/api/kraken/Ticker`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pair: symbol })
+        // 🔧 V3.14.8: Use public Ticker endpoint (no auth required)
+        const tickerResponse = await fetch(`http://127.0.0.1:3002/public/Ticker?pair=${symbol}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
         });
 
         if (tickerResponse.ok) {
           const tickerData = await tickerResponse.json();
-          const pairData = tickerData.result?.[Object.keys(tickerData.result)[0]];
+
+          // Ticker result is keyed by pair name (can be different from requested symbol)
+          const pairKey = Object.keys(tickerData.result || {})[0];
+          const pairData = tickerData.result?.[pairKey];
           const currentPrice = parseFloat(pairData?.c?.[0] || '0');
 
           if (currentPrice > 0) {
@@ -215,9 +238,14 @@ async function fetchActualKrakenHoldings(): Promise<ActualPosition[]> {
               estimatedPrice: currentPrice,
               estimatedValue: balance * currentPrice
             });
+            console.log(`   ✅ ${symbol}: ${balance.toFixed(6)} @ $${currentPrice.toFixed(4)} = $${(balance * currentPrice).toFixed(2)}`);
+          } else {
+            console.warn(`   ⚠️  Zero price for ${symbol}, skipping`);
           }
+        } else {
+          console.warn(`   ⚠️  Ticker API failed for ${symbol}: ${tickerResponse.status}`);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.warn(`   ⚠️  Could not fetch price for ${symbol}: ${error.message}`);
       }
 

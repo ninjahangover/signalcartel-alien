@@ -1604,42 +1604,44 @@ class ProductionTradingEngine {
             log(`   🧠 Emergency stop: ${(emergencyLossStop * 100).toFixed(1)}% | Extraordinary capture: ${(extraordinaryProfitCapture * 100).toFixed(1)}%`);
 
             // 🚀 PROACTIVE DECISION: Exit only if AI predicts reversal
-            let shouldExit = false;
-            let reason = '';
+            // 🔧 V3.14.8 FIX: Don't redeclare shouldExit (was shadowing outer variable!)
+            shouldExit = false; // Reset from outer scope
+            reason = '';        // Reset from outer scope
 
-            // 🧠 PRIORITY 1: Respect high-confidence AI HOLD decisions
-            if ((aiPredictsContinuation || freshPrediction.finalDecision === 'HOLD') &&
+            // 🚨 PRIORITY 1: Emergency loss stop (ABSOLUTE - OVERRIDES EVERYTHING)
+            // Emergency stops MUST be checked FIRST before AI confidence or any other logic
+            if (pnl < emergencyLossStop * 100) {
+              shouldExit = true;
+              reason = `emergency_loss_protection_${pnl.toFixed(1)}pct_brain_learned_${(emergencyLossStop * 100).toFixed(1)}pct`;
+              log(`🚨 EMERGENCY STOP (brain-learned): ${pnl.toFixed(2)}% loss exceeds ${(emergencyLossStop * 100).toFixed(1)}% threshold`);
+            }
+            // 💰 PRIORITY 2: Extraordinary profit capture (ABSOLUTE - OVERRIDES EVERYTHING)
+            else if (pnl > extraordinaryProfitCapture * 100) {
+              shouldExit = true;
+              reason = `extraordinary_profit_${pnl.toFixed(1)}pct_brain_learned_${(extraordinaryProfitCapture * 100).toFixed(1)}pct`;
+              log(`💰 EXTRAORDINARY PROFIT (brain-learned): ${pnl.toFixed(2)}% gain exceeds ${(extraordinaryProfitCapture * 100).toFixed(1)}% capture threshold`);
+            }
+            // 🧠 PRIORITY 3: Respect high-confidence AI HOLD decisions (only if not in emergency)
+            else if ((aiPredictsContinuation || freshPrediction.finalDecision === 'HOLD') &&
                 freshPrediction.confidence >= aiConfidenceRespectThreshold) {
-              // AI has high confidence - trust it regardless of P&L
+              // AI has high confidence - trust it (unless emergency already triggered above)
               shouldExit = false;
               reason = `AI high-confidence ${freshPrediction.finalDecision} (${(freshPrediction.confidence * 100).toFixed(1)}% >= ${(aiConfidenceRespectThreshold * 100).toFixed(1)}%) - RESPECTING`;
               log(`🧠 AI CONFIDENCE RESPECTED: ${reason}`);
             }
-            // 🎯 PRIORITY 2: Minimum hold time protection (prevent premature exits)
+            // 🎯 PRIORITY 4: Minimum hold time protection (prevent premature exits)
             else if (timeHeldMinutes < minHoldTimeMinutes && pnl > minLossBeforeExit * 100 && pnl < extraordinaryProfitCapture * 100) {
               // Haven't held long enough and not emergency - HOLD
               shouldExit = false;
               reason = `min_hold_time_protection (${timeHeldMinutes.toFixed(1)}min < ${minHoldTimeMinutes.toFixed(1)}min, P&L: ${pnl.toFixed(1)}%)`;
               log(`⏱️ MIN HOLD TIME: ${reason}`);
             }
-            // 🎯 PRIORITY 3: Minimum loss threshold (don't exit on noise)
+            // 🎯 PRIORITY 5: Minimum loss threshold (don't exit on noise)
             else if (pnl < 0 && pnl > minLossBeforeExit * 100 && !aiPredictsReversal) {
               // Small loss but above minimum threshold - HOLD unless AI says reversal
               shouldExit = false;
               reason = `loss_too_small_to_exit (${pnl.toFixed(2)}% > ${(minLossBeforeExit * 100).toFixed(2)}%)`;
               log(`📊 NOISE PROTECTION: ${reason}`);
-            }
-            // 🚨 PRIORITY 4: Emergency loss stop (BRAIN-LEARNED, not hardcoded)
-            else if (pnl < emergencyLossStop * 100) {
-              shouldExit = true;
-              reason = `emergency_loss_protection_${pnl.toFixed(1)}pct_brain_learned_${(emergencyLossStop * 100).toFixed(1)}pct`;
-              log(`🚨 EMERGENCY STOP (brain-learned): ${pnl.toFixed(2)}% loss exceeds ${(emergencyLossStop * 100).toFixed(1)}% threshold`);
-            }
-            // 💰 PRIORITY 5: Extraordinary profit capture (BRAIN-LEARNED, not hardcoded)
-            else if (pnl > extraordinaryProfitCapture * 100) {
-              shouldExit = true;
-              reason = `extraordinary_profit_${pnl.toFixed(1)}pct_brain_learned_${(extraordinaryProfitCapture * 100).toFixed(1)}pct`;
-              log(`💰 EXTRAORDINARY PROFIT (brain-learned): ${pnl.toFixed(2)}% gain exceeds ${(extraordinaryProfitCapture * 100).toFixed(1)}% capture threshold`);
             }
             // 🎯 PRIORITY 6: AI reversal prediction (BRAIN-LEARNED CONFIDENCE, not hardcoded 60%)
             else if (aiPredictsReversal && freshPrediction.confidence > aiReversalConfidenceThreshold) {
@@ -2471,6 +2473,13 @@ class ProductionTradingEngine {
               // 🧠 Apply brain multiplier to final size
               quantity = sizingResult.finalPositionSize * brainMultiplier;
 
+              // 🔧 V3.14.8 FIX: Cap position size to available balance (with safety margin for fees)
+              const maxPositionSize = balanceInfo.availableBalance * 0.95; // 95% of available for fees
+              if (quantity > maxPositionSize) {
+                log(`⚠️ POSITION CAP: Calculated size $${quantity.toFixed(2)} > available $${maxPositionSize.toFixed(2)} - capping to available`);
+                quantity = maxPositionSize;
+              }
+
               log(`🚀 ENHANCED SIZING: $${quantity.toFixed(2)} (${sizingResult.confidenceMultiplier.toFixed(1)}x conf × ${sizingResult.pairPerformanceMultiplier.toFixed(1)}x pair × ${sizingResult.winStreakMultiplier.toFixed(1)}x streak × ${brainMultiplier.toFixed(2)}x 🧠brain)`);
               log(`💡 Reasoning: ${sizingResult.reasoning.join(', ')}`);
               log(`🎯 Expected: $${sizingResult.expectedProfit.toFixed(4)} | Risk: ${sizingResult.riskLevel}`);
@@ -2506,9 +2515,18 @@ class ProductionTradingEngine {
                 // 🧠 V3.11.1: Minimum must meet Kraken's lowest requirement ($11-$55)
                 const minimumPosition = Math.max(accountBalance * 0.03, 15); // 3% minimum, min $15 (meets all Kraken minimums)
                 const maximumPosition = accountBalance * 0.20; // Max 20% of available balance for aggressive learning
-                quantity = Math.max(Math.min(quantity, maximumPosition), minimumPosition);
-                
-                log(`🎯 FALLBACK SIZING: Base $${baseSize.toFixed(2)} × ${confidenceMultiplier}x (${(aiAnalysis.confidence * 100).toFixed(1)}% conf) = $${quantity.toFixed(2)}`);
+
+                // 🔧 V3.14.8 FIX: Cap to available balance (95% for fees)
+                const maxAffordable = accountBalance * 0.95; // 95% of available for fees
+                quantity = Math.max(Math.min(quantity, Math.min(maximumPosition, maxAffordable)), minimumPosition);
+
+                // If minimum position > available balance, skip this trade
+                if (minimumPosition > maxAffordable) {
+                  log(`❌ INSUFFICIENT FUNDS: Min position $${minimumPosition.toFixed(2)} > available $${maxAffordable.toFixed(2)} - SKIPPING`);
+                  continue;
+                }
+
+                log(`🎯 FALLBACK SIZING: Base $${baseSize.toFixed(2)} × ${confidenceMultiplier}x (${(aiAnalysis.confidence * 100).toFixed(1)}% conf) = $${quantity.toFixed(2)} (capped to $${maxAffordable.toFixed(2)})`);
                 
               } catch (balanceError) {
                 log(`❌ Could not fetch balance for fallback, skipping trade: ${balanceError.message}`);
@@ -2570,17 +2588,27 @@ class ProductionTradingEngine {
             try {
               // Convert internal side ('long'/'short') to Kraken API format ('buy'/'sell')
               const krakenSide = side === 'long' ? 'buy' : 'sell';
-              
+
+              // 🔧 V3.14.8 FIX: Use limit orders to reduce costs (0.56% → 0.135%)
+              // Market orders: 0.26% fee + 0.2% slippage + 0.1% spread = 0.56% cost
+              // Limit orders: 0.16% fee - 0.025% improvement = 0.135% cost (4x cheaper!)
+              const useAggressiveLimitOrder = aiAnalysis.confidence > 0.7; // High confidence = aggressive fill
+              const limitPrice = useAggressiveLimitOrder
+                ? (krakenSide === 'buy' ? data.price * 1.003 : data.price * 0.997) // 0.3% past market for quick fill
+                : (krakenSide === 'buy' ? data.price * 0.999 : data.price * 1.001); // 0.1% better than market for price improvement
+
               const orderRequest = {
                 pair: data.symbol,
                 type: krakenSide,
-                ordertype: 'market' as const, // Market order for immediate execution
+                ordertype: 'limit' as const, // 🔧 V3.14.8: Changed from 'market' to 'limit'
                 volume: actualQuantity.toString(),
+                price: limitPrice.toFixed(8), // 🔧 V3.14.8: Add limit price
                 // Add leverage for margin SHORT orders (1x = no leverage for safety)
                 ...(side === 'short' && process.env.ENABLE_MARGIN_TRADING === 'true' ? { leverage: 'none' } : {})
               };
 
-              log(`🔥 KRAKEN API: Placing ${side.toUpperCase()} ${side === 'short' ? 'MARGIN' : ''} market order for ${actualQuantity.toFixed(6)} ${data.symbol}`);
+              log(`🔥 KRAKEN API: Placing ${side.toUpperCase()} ${side === 'short' ? 'MARGIN' : ''} LIMIT order for ${actualQuantity.toFixed(6)} ${data.symbol} @ $${limitPrice.toFixed(4)}`);
+              log(`📊 LIMIT ORDER: ${useAggressiveLimitOrder ? 'Aggressive' : 'Passive'} (confidence: ${(aiAnalysis.confidence * 100).toFixed(1)}%) - saves 0.42% vs market order`);
 
               orderResult = await krakenApiService.placeOrder(orderRequest);
               

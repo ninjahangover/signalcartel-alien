@@ -306,11 +306,11 @@ async function monitoringLoop() {
   while (true) {
     const currentTime = Date.now();
 
-    // 🔧 V3.14.3 FIX: Database sync DISABLED - was wiping positions
-    // Position sync was destructively clearing ALL database positions
-    // Database is now the source of truth - positions persist across restarts
-    // NO automatic sync needed - positions are created when trades execute
-    /*
+    // 🔧 V3.14.8 FIX: Database sync RE-ENABLED - robust-position-sync.ts is now safe
+    // V3.14.1 fixed the sync script to only clear OPEN positions (preserves closed trade history)
+    // V3.14.8 fixed API endpoints to properly fetch Kraken holdings
+    // Sync adds unmanaged positions from Kraken (ETH, CORN, etc.) for emergency stop protection
+
     // Check if database sync is needed (every 15 minutes)
     if (currentTime - lastSyncTime >= SYNC_INTERVAL) {
       const syncSuccess = await runDatabaseSync();
@@ -325,7 +325,6 @@ async function monitoringLoop() {
       // Always update lastSyncTime to prevent spamming on failures
       lastSyncTime = currentTime;
     }
-    */
 
     // Check if OHLC warehouse sync is needed (every 60 minutes)
     if (currentTime - lastOHLCSyncTime >= OHLC_SYNC_INTERVAL) {
