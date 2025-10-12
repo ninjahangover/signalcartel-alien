@@ -105,12 +105,14 @@ export class UnifiedTensorCoordinator {
   private decisionHistory: UnifiedDecision[] = [];
   private bayesianEngine: BayesianProbabilityEngine;
 
-  // Dynamic weighting system - learns from performance
+  // 🔧 V3.14.7: Dynamic weighting system - INCREASED ORDER BOOK WEIGHT
+  // User feedback: "we have order book, we have markov chains, LLN... but none are being used"
+  // Fix: Raised order book from 10% → 25% to properly validate volume/liquidity
   private systemWeights = {
-    mathematicalIntuition: 0.35, // Highest weight - most sophisticated
-    bayesianProbability: 0.30,   // High weight - regime detection
-    profitPredator: 0.25,        // Medium weight - opportunity discovery
-    orderBook: 0.10              // Lower weight - real-time confirmation
+    mathematicalIntuition: 0.30, // High weight - mathematical analysis
+    bayesianProbability: 0.25,   // High weight - regime detection
+    orderBook: 0.25,             // V3.14.7: RAISED from 10% - technical chart validation
+    profitPredator: 0.20         // Medium weight - opportunity discovery
   };
 
   static getInstance(): UnifiedTensorCoordinator {
@@ -657,8 +659,8 @@ export class UnifiedTensorCoordinator {
     // 7. Calculate risk parameters using statistical methods
     const riskAssessment = this.calculateRiskAssessment(signals, marketData);
 
-    // 8. Determine execution parameters
-    const execution = this.calculateExecutionParameters(finalDecision, urgency, unifiedConfidence);
+    // 8. Determine execution parameters (with market data for limit price calculation)
+    const execution = this.calculateExecutionParameters(finalDecision, urgency, unifiedConfidence, marketData);
 
     return {
       symbol,
@@ -804,12 +806,24 @@ export class UnifiedTensorCoordinator {
       console.log(`🧠 BRAIN ENTRY THRESHOLD: ${(entryThreshold * 100).toFixed(1)}% (consensus: ${(mathematicalConsensus * 100).toFixed(1)}%)`);
     }
 
-    // Use mathematical consensus when agreement is moderate
-    // Brain learning allows much more aggressive thresholds (5-15% vs hardcoded 60%)
-    if (mathematicalConsensus > entryThreshold) return 'BUY';
-    if (mathematicalConsensus < (1 - entryThreshold)) return 'SELL';
+    // 🛡️ V3.14.6 FIX: QUALITY-ADJUSTED CONSENSUS THRESHOLD (NO hardcoding!)
+    // Brain threshold is the MINIMUM, but we require 1.2x that for entry (quality buffer)
+    // Example: Brain says 25% → Need 30% consensus (25 × 1.2)
+    // This ensures we only enter when consensus is ABOVE the bare minimum
+    const qualityAdjustedThreshold = entryThreshold * 1.2;
 
-    // Default to conservative approach when uncertain
+    // Use quality-adjusted threshold for decision (brain-learned but buffered)
+    if (mathematicalConsensus > qualityAdjustedThreshold) {
+      console.log(`✅ QUALITY CONSENSUS: ${(mathematicalConsensus * 100).toFixed(1)}% > ${(qualityAdjustedThreshold * 100).toFixed(1)}% (brain ${(entryThreshold * 100).toFixed(1)}% × 1.2) → BUY`);
+      return 'BUY';
+    }
+    if (mathematicalConsensus < (1 - qualityAdjustedThreshold)) {
+      console.log(`✅ QUALITY CONSENSUS: ${(mathematicalConsensus * 100).toFixed(1)}% < ${((1 - qualityAdjustedThreshold) * 100).toFixed(1)}% (brain threshold × 1.2) → SELL`);
+      return 'SELL';
+    }
+
+    // Consensus too weak - WAIT for better setup
+    console.log(`⏸️ WEAK CONSENSUS: ${(mathematicalConsensus * 100).toFixed(1)}% between quality thresholds (need ${(qualityAdjustedThreshold * 100).toFixed(1)}%+) - WAIT`);
     return 'WAIT';
   }
 
@@ -829,15 +843,19 @@ export class UnifiedTensorCoordinator {
 
     const baseConfidence = totalWeight > 0 ? weightedConfidence / totalWeight : 0.5;
 
-    // Boost confidence when systems agree
-    const agreementBonus = systemAgreement * 0.2;
+    // 🔧 V3.14.5 FIX: Weight agreement bonus by mathematical consensus quality
+    // PROBLEM: 100% agreement on low-quality predictions (13.7% consensus) was inflating confidence
+    // SOLUTION: Scale agreement bonus by mathematical consensus strength
+    const mathematicalConsensus = this.calculateMathematicalConsensus(signals);
+    const qualityWeightedAgreement = systemAgreement * mathematicalConsensus; // Both must be high
+    const agreementBonus = qualityWeightedAgreement * 0.2; // Max 20% bonus only when both high
 
     // Apply information theory: more signals = higher confidence (up to a point)
     const signalBonus = Math.min(0.1, signals.length * 0.02);
 
     const finalConfidence = Math.min(1.0, baseConfidence + agreementBonus + signalBonus);
 
-    console.log(`🎯 UNIFIED CONFIDENCE: ${(finalConfidence * 100).toFixed(1)}% (base: ${(baseConfidence * 100).toFixed(1)}%, agreement bonus: ${(agreementBonus * 100).toFixed(1)}%)`);
+    console.log(`🎯 UNIFIED CONFIDENCE: ${(finalConfidence * 100).toFixed(1)}% (base: ${(baseConfidence * 100).toFixed(1)}%, agreement: ${(systemAgreement * 100).toFixed(1)}%, consensus: ${(mathematicalConsensus * 100).toFixed(1)}%, weighted bonus: ${(agreementBonus * 100).toFixed(1)}%)`);
 
     return finalConfidence;
   }
@@ -928,14 +946,19 @@ export class UnifiedTensorCoordinator {
   private calculateExecutionParameters(
     decision: string,
     urgency: number,
-    confidence: number
+    confidence: number,
+    marketData?: any
   ): any {
+    // 🔧 V3.14.7 FIX: ALWAYS use limit orders (4x cheaper than market)
+    // Market orders: 0.26% fee + 0.2% slippage = 0.56% cost
+    // Limit orders: 0.16% fee - 0.025% improvement = 0.135% cost
+    // Result: 4x cost reduction = significantly better EV
     let orderType: 'market' | 'limit' | 'stop_limit' = 'limit';
     let priority: 'high' | 'medium' | 'low' = 'medium';
 
-    // Use market orders for high urgency and high confidence
+    // Even high urgency uses limit orders (set aggressive price to ensure fill)
     if (urgency > 0.8 && confidence > 0.7) {
-      orderType = 'market';
+      orderType = 'limit'; // Changed from 'market' - use aggressive limit instead
       priority = 'high';
     }
 
@@ -945,8 +968,29 @@ export class UnifiedTensorCoordinator {
       priority = 'low';
     }
 
+    // 🔧 V3.14.7 FIX: Calculate limit price based on urgency
+    // High urgency = aggressive price (0.3% past market to ensure fill)
+    // Normal urgency = passive price (0.1% better than market to get price improvement)
+    let limitPrice: number | undefined;
+    const currentPrice = marketData?.price || marketData?.close;
+
+    if (currentPrice && orderType === 'limit') {
+      if (urgency > 0.8) {
+        // High urgency: Aggressive limit (cross spread slightly to ensure immediate fill)
+        limitPrice = decision === 'BUY'
+          ? currentPrice * 1.003  // 0.3% above ask
+          : currentPrice * 0.997; // 0.3% below bid
+      } else {
+        // Normal urgency: Passive limit (sit on book for price improvement)
+        limitPrice = decision === 'BUY'
+          ? currentPrice * 0.999  // 0.1% below ask
+          : currentPrice * 1.001; // 0.1% above bid
+      }
+    }
+
     return {
       orderType,
+      limitPrice,  // 🔧 V3.14.7: NOW SET!
       timeInForce: 'GTC' as const,
       priority
     };
@@ -1027,7 +1071,7 @@ export class UnifiedTensorCoordinator {
         maxHoldTime: 0
       },
       execution: {
-        orderType: 'market',
+        orderType: 'limit', // V3.14.7: Use limit orders everywhere (4x cheaper)
         timeInForce: 'GTC',
         priority: 'low'
       }

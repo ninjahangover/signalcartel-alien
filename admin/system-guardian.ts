@@ -295,7 +295,10 @@ async function runOHLCWarehouseSync(): Promise<boolean> {
 async function monitoringLoop() {
   const processStatus = new Map<string, boolean>();
   let lastSyncTime = 0;
-  let lastOHLCSyncTime = 0;
+  // 🔧 V3.14.14 FIX: Initialize to current time to prevent OHLC from running on first startup
+  // Problem: lastOHLCSyncTime = 0 caused OHLC to run immediately (currentTime - 0 > 1hour)
+  // This hung the guardian during startup, blocking all monitoring
+  let lastOHLCSyncTime = Date.now(); // Skip OHLC on first iteration
 
   console.log('🛡️ SYSTEM GUARDIAN STARTED - ntfy alerts active');
   console.log(`📱 Alerts will be sent to: https://ntfy.sh/${NTFY_TOPIC}`);

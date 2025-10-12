@@ -123,17 +123,20 @@ export class TradeLifecycleManager {
       // Store in active trades
       this.activeTrades.set(tradeId, tradeState);
 
-      // Execute trade through Kraken API
-      const orderType = unifiedDecision?.execution?.orderType || 'market';
+      // 🔧 V3.14.7 FIX: Use limit orders by default to avoid slippage (0.56% → 0.135% cost)
+      // Market orders: 0.26% fee + 0.2% slippage = 0.56% entry cost (impossible to win!)
+      // Limit orders: 0.16% fee - 0.025% improvement = 0.135% entry cost (4x cheaper!)
+      const orderType = unifiedDecision?.execution?.orderType || 'limit'; // Changed from 'market'
       const limitPrice = unifiedDecision?.execution?.limitPrice;
 
+      // 🔧 V3.14.5 FIX: Map parameters to Kraken API format
       const orderResult = await krakenApiService.placeOrder({
-        symbol,
-        side: side.toLowerCase(),
-        quantity,
-        orderType,
-        price: limitPrice,
-        timeInForce: unifiedDecision?.execution?.timeInForce || 'GTC'
+        pair: symbol,                    // ✅ "pair" not "symbol"
+        type: side.toLowerCase() as 'buy' | 'sell',  // ✅ "type" not "side"
+        ordertype: orderType as 'market' | 'limit',  // ✅ "ordertype" not "orderType"
+        volume: quantity.toString(),     // ✅ "volume" as string, not "quantity"
+        price: limitPrice ? limitPrice.toString() : undefined
+        // Kraken doesn't use timeInForce parameter
       });
 
       if (orderResult.success && orderResult.orderId) {
@@ -217,13 +220,13 @@ export class TradeLifecycleManager {
       const closeQuantity = trade.filledQuantity;
 
       // Execute closing order
+      // 🔧 V3.14.5 FIX: Map parameters to Kraken API format
       const closeResult = await krakenApiService.placeOrder({
-        symbol,
-        side: closingSide,
-        quantity: closeQuantity,
-        orderType,
-        price: limitPrice,
-        timeInForce: 'GTC'
+        pair: symbol,                    // ✅ "pair" not "symbol"
+        type: closingSide as 'buy' | 'sell',  // ✅ "type" not "side"
+        ordertype: orderType,            // ✅ "ordertype" not "orderType"
+        volume: closeQuantity.toString(), // ✅ "volume" as string
+        price: limitPrice ? limitPrice.toString() : undefined
       });
 
       if (closeResult.success) {
@@ -501,13 +504,13 @@ export class TradeLifecycleManager {
 
       // Set up stop loss if specified
       if (trade.stopLossPrice) {
+        // 🔧 V3.14.5 FIX: Map parameters to Kraken API format
         const stopResult = await krakenApiService.placeOrder({
-          symbol,
-          side: trade.openingDecision?.finalDecision === 'BUY' ? 'sell' : 'buy',
-          quantity: trade.filledQuantity,
-          orderType: 'stop_loss',
-          stopPrice: trade.stopLossPrice,
-          timeInForce: 'GTC'
+          pair: symbol,
+          type: trade.openingDecision?.finalDecision === 'BUY' ? 'sell' : 'buy',
+          ordertype: 'stop-loss' as any,  // Kraken uses "stop-loss" ordertype
+          volume: trade.filledQuantity.toString(),
+          price: trade.stopLossPrice.toString()
         });
 
         if (stopResult.success) {
@@ -518,13 +521,13 @@ export class TradeLifecycleManager {
 
       // Set up take profit if specified
       if (trade.takeProfitPrice) {
+        // 🔧 V3.14.5 FIX: Map parameters to Kraken API format
         const profitResult = await krakenApiService.placeOrder({
-          symbol,
-          side: trade.openingDecision?.finalDecision === 'BUY' ? 'sell' : 'buy',
-          quantity: trade.filledQuantity,
-          orderType: 'limit',
-          price: trade.takeProfitPrice,
-          timeInForce: 'GTC'
+          pair: symbol,
+          type: trade.openingDecision?.finalDecision === 'BUY' ? 'sell' : 'buy',
+          ordertype: 'limit',
+          volume: trade.filledQuantity.toString(),
+          price: trade.takeProfitPrice.toString()
         });
 
         if (profitResult.success) {

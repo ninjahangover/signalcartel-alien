@@ -141,27 +141,39 @@ export class ProductionTensorIntegration {
       try {
         // Use actual Mathematical Intuition analysis from 8-domain parallel processing
         const intuitive = bundle.mathematicalIntuition.intuitive || bundle.mathematicalIntuition;
-        const confidence = intuitive.overallFeeling || intuitive.originalIntuition || 0;
+        // 🔧 V3.14.16 FIX: Use correct confidence field (was looking for non-existent overallFeeling)
+        const confidence = intuitive.confidence || intuitive.overallFeeling || intuitive.originalIntuition || 0;
         
         // Extract actual direction from Mathematical Intuition's recommendation
+        // 🔧 V3.14.16 FIX: V₂ returns 'direction' field directly (1, -1, or 0)
         let direction = 0;
-        if (intuitive.recommendation === 'BUY') direction = 1;
-        else if (intuitive.recommendation === 'SELL') direction = -1;
-        else direction = this.extractMathIntuitionDirection(intuitive);
+        if (intuitive.direction !== undefined) {
+          direction = intuitive.direction; // Use direct direction from V₂
+        } else if (intuitive.recommendation === 'BUY') {
+          direction = 1;
+        } else if (intuitive.recommendation === 'SELL') {
+          direction = -1;
+        } else {
+          direction = this.extractMathIntuitionDirection(intuitive);
+        }
         
         // PREDICTIVE: Use Mathematical Intuition's actual analysis results
         const flowFieldStrength = Math.abs(intuitive.flowFieldStrength || intuitive.flowField || 0);
         const patternResonance = Math.abs(intuitive.patternResonance || 0);
         const timingIntuition = Math.abs(intuitive.timingIntuition || 0);
         const energyAlignment = Math.abs(intuitive.energyAlignment || 0);
-        
+        // 🔧 V3.14.16 FIX: Use expectedReturn as primary magnitude source
+        const expectedReturn = Math.abs(intuitive.expectedReturn || 0);
+
         // Calculate magnitude from actual AI analysis (not hardcoded)
         const magnitude = Math.max(
+          expectedReturn, // Primary: Expected price movement
           flowFieldStrength,
-          patternResonance, 
+          patternResonance,
           timingIntuition,
           energyAlignment,
-          Math.abs(bundle.mathematicalIntuition.predictedMove || 0)
+          Math.abs(bundle.mathematicalIntuition.predictedMove || 0),
+          confidence // Use confidence as magnitude floor
         ) || 0.01;
         
         // Validate all values

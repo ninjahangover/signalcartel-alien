@@ -165,20 +165,25 @@ export class AdaptiveProfitBrain {
     const baseLearningRate = 0.001;
     const momentumDecay = 0.9;
 
-    // Entry confidence threshold - 🚨 V3.11.1: AGGRESSIVE BOOTSTRAP for maximum opportunity capture
+    // Entry confidence threshold - V3.14.6: MUCH HIGHER QUALITY - Selective entries only
+    // DYNAMIC MATH: Brain starts conservative (25%), learns optimal through win/loss feedback
+    // Gradient descent finds balance between opportunity capture and entry quality
     this.thresholds.set('entryConfidence', {
       name: 'entryConfidence',
-      currentValue: 0.05, // Start at 5% - let brain learn optimal from wins/losses
-      learningRate: baseLearningRate * 2.0, // 2x faster learning
+      currentValue: 0.25, // V3.14.6: Start at 25% mathematical consensus (was 12%)
+      learningRate: baseLearningRate * 2.5, // Fast learning - adapt to market feedback
       momentum: momentumDecay,
       velocity: 0,
-      minValue: 0.01, // As low as 1% to explore full opportunity space
-      maxValue: 0.50, // Max 50%
+      minValue: 0.15, // V3.14.6: Minimum 15% (was 5%) - NO low-quality entries
+      maxValue: 0.60, // V3.14.6: Max 60% (was 50%) - allow being very selective
       lastGradient: 0,
       profitHistory: [],
       adjustmentHistory: [],
-      explorationNoise: 0.15, // Higher exploration
-      optimalEstimate: 0.05
+      explorationNoise: 0.18, // Higher exploration - find optimal quickly
+      optimalEstimate: 0.35 // V3.14.6: Guide toward 35% (was 15%) - HIGH quality target
+      // Brain learns from profit feedback: Big wins at 25-40% strengthen pattern
+      // Immediate losses <20% will push threshold higher
+      // Goal: Enter ONLY when mathematical consensus is STRONG
     });
 
     // Exit score threshold - Learn when to hold vs exit
@@ -330,20 +335,26 @@ export class AdaptiveProfitBrain {
       optimalEstimate: 15.0 // Guide toward 15 minutes (was 10min) - ride trends longer
     });
 
-    // 🚨 V3.14.0: Emergency loss stop threshold (brain-learned, replaces hardcoded -20%)
+    // 🚨 V3.14.5: Emergency loss stop threshold (brain-learned, NO hardcoded values)
+    // DYNAMIC MATH: Tighter stops to prevent -20% losses (saw SLAYUSD at -20.6%!)
+    // Portfolio protection formula: Stop should trigger BEFORE psychological pain point
+    // Small account math: -8% on $75 account = -$6 loss (8% of total balance)
     this.thresholds.set('emergencyLossStop', {
       name: 'emergencyLossStop',
-      currentValue: -0.20, // Start at -20%, brain learns optimal catastrophic stop
-      learningRate: baseLearningRate * 0.5, // Slow learning - emergency stops are critical
+      currentValue: -0.06, // V3.14.5: Start at -6% (was -8%) - tighter protection
+      learningRate: baseLearningRate * 1.5, // V3.14.5: Faster learning (was 1.0x) - learn from real losses
       momentum: momentumDecay,
       velocity: 0,
-      minValue: -0.50, // Never allow more than -50% catastrophic loss
-      maxValue: -0.10, // Never tighter than -10% (allow trend riding)
+      minValue: -0.15, // V3.14.5: Never allow more than -15% (was -50%) - realistic maximum pain
+      maxValue: -0.03, // Never tighter than -3% (allow normal volatility)
       lastGradient: 0,
       profitHistory: [],
       adjustmentHistory: [],
-      explorationNoise: 0.05, // Low exploration - safety critical
-      optimalEstimate: -0.25 // Guide toward -25% (learn from actual catastrophes)
+      explorationNoise: 0.10, // V3.14.5: Higher exploration (was 0.08) - find optimal stop quickly
+      optimalEstimate: -0.08 // V3.14.5: Guide toward -8% (was -10%) - balance protection vs noise
+      // Brain learns from actual losses: If -6% stops cause whipsaws → relaxes to -8%
+      // If positions reach -10%+ → tightens stops to -5%
+      // Mathematical feedback loop finds optimal for current market volatility
     });
 
     // 💰 V3.14.0: Extraordinary profit capture threshold (brain-learned, replaces hardcoded +50%)

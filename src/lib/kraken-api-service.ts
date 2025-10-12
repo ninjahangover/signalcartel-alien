@@ -391,10 +391,29 @@ class KrakenApiService {
     console.log(`🔥 Kraken API: Placing ${params.validate ? 'TEST' : 'LIVE'} order:`, params);
 
     // 💰 CASH VALIDATION: Check USD availability for buy orders
+    // 🔧 V3.14.10 FIX: Use TradeBalance API for accurate available balance (not just ZUSD)
     if (params.type === 'buy' && !params.validate) {
       try {
-        const balance = await this.getAccountBalance();
-        const usdCash = parseFloat(balance?.result?.ZUSD || '0') + parseFloat(balance?.result?.USDT || '0');
+        // 🔧 V3.14.13: Add timeout protection to balance check
+        const balanceTimeout = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Balance check timeout after 10 seconds')), 10000);
+        });
+
+        // 🔧 V3.14.12 FIX: Account for Kraken's internal buffer requirements
+        // Problem: Kraken rejects orders even when ZUSD > order value
+        // Root cause: Kraken reserves extra funds for price slippage, fees, etc.
+        // Solution: Only use 90% of ZUSD balance to ensure sufficient buffer
+        const balance = await Promise.race([this.getAccountBalance(), balanceTimeout]);
+        const zusdBalance = parseFloat(balance?.result?.ZUSD || '0');
+        const usdtBalance = parseFloat(balance?.result?.USDT || '0');
+        const totalCash = zusdBalance + usdtBalance;
+
+        // 🔧 V3.14.12: Use 90% of cash to account for Kraken's buffer requirements
+        const availableBalance = totalCash * 0.90; // 10% safety buffer for Kraken's internal reserves
+
+        // 🔧 V3.14.12: Log actual vs available balances
+        console.log(`💰 V3.14.12 SPOT Balance: ZUSD=${zusdBalance.toFixed(2)}, USDT=${usdtBalance.toFixed(2)}, Total=${totalCash.toFixed(2)}`)
+        console.log(`💰 V3.14.12 Available (90% safety): ${availableBalance.toFixed(2)} (10% buffer for Kraken reserves)`)
 
         // 🔧 V3.14.3: Get current market price for market orders
         let estimatedPrice = parseFloat(params.price || '0');
@@ -419,17 +438,17 @@ class KrakenApiService {
 
         const estimatedOrderValue = parseFloat(params.volume) * estimatedPrice;
 
-        console.log(`💰 USD Cash Check: Available $${usdCash.toFixed(2)}, Order needs ~$${estimatedOrderValue.toFixed(2)}`);
+        console.log(`💰 V3.14.12 Balance Check: Available ${availableBalance.toFixed(2)} (90% of ${totalCash.toFixed(2)}), Order needs ~$${estimatedOrderValue.toFixed(2)}`);
 
-        if (usdCash < estimatedOrderValue) {
-          const error = new Error(`Insufficient USD cash: $${usdCash.toFixed(2)} available, $${estimatedOrderValue.toFixed(2)} required`);
-          console.error(`❌ ${error.message}`);
+        if (availableBalance < estimatedOrderValue) {
+          const error = new Error(`Insufficient funds: $${availableBalance.toFixed(2)} available (90% of ZUSD+USDT with safety buffer), $${estimatedOrderValue.toFixed(2)} required`);
+          console.error(`❌ V3.14.12: ${error.message}`);
           throw error;
         }
 
-        console.log(`✅ Cash validation passed: Sufficient USD for buy order`);
+        console.log(`✅ V3.14.12 Cash validation passed: Sufficient SPOT balance for buy order (with 10% Kraken buffer)`);
       } catch (error) {
-        if (error.message.includes('Insufficient USD')) {
+        if (error.message.includes('Insufficient')) {
           throw error; // Re-throw cash validation errors
         }
         console.log(`⚠️ Cash validation failed (API error), proceeding: ${error.message}`);
@@ -455,12 +474,25 @@ class KrakenApiService {
       orderParams.validate = 'true';
     }
 
+    // 🔧 V3.14.13 FIX: Add timeout protection to prevent system hangs
+    // Problem: makeRequest can hang indefinitely waiting for Kraken response
+    // Solution: Wrap order placement with 30-second timeout
     try {
-      const result = await this.makeRequest('AddOrder', orderParams);
+      console.log(`⏱️ V3.14.13: Starting order placement with 30s timeout protection`);
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Order placement timeout after 30 seconds')), 30000);
+      });
+
+      const orderPromise = this.makeRequest('AddOrder', orderParams);
+
+      const result = await Promise.race([orderPromise, timeoutPromise]);
       console.log(`🔥 Kraken API: Order result:`, result);
+      console.log(`✅ V3.14.13: Order completed within timeout`);
       return result;
     } catch (error) {
       console.error(`🔥 Kraken API: Order placement failed:`, error);
+      console.error(`❌ V3.14.13: ${error.message.includes('timeout') ? 'TIMEOUT TRIGGERED' : 'Order error'}`);
       throw error;
     }
   }

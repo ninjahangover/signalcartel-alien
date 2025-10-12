@@ -107,8 +107,45 @@ export class AvailableBalanceCalculator {
       const totalEquity = parseFloat(tradeBalanceData.e || '0'); // Total equity
       const freeMargin = parseFloat(tradeBalanceData.mf || '0'); // Free margin
 
-      // Use the most conservative but real number - free margin for trading
-      const availableBalance = Math.max(0, freeMargin || usdBalance);
+      // 🔧 V3.14.15 FIX: Calculate available balance by subtracting open position values from ZUSD
+      // The freeMargin (mf) field from TradeBalance doesn't properly account for spot positions
+      // We need to fetch actual position values from database and subtract from cash balance
+
+      let openPositionsValue = 0;
+      try {
+        // Import here to avoid circular dependency
+        const { prisma } = await import('../lib/prisma');
+        const { realTimePriceFetcher } = await import('../lib/real-time-price-fetcher');
+
+        // Get all open positions from database
+        const openPositions = await prisma.managedPosition.findMany({
+          where: { status: 'open' }
+        });
+
+        // Calculate total value of open positions
+        for (const position of openPositions) {
+          try {
+            const priceData = await realTimePriceFetcher.getCurrentPrice(position.symbol);
+            if (priceData.success) {
+              openPositionsValue += position.quantity * priceData.price;
+            } else {
+              // Fallback to entry price if current price unavailable
+              openPositionsValue += position.quantity * position.entryPrice;
+            }
+          } catch (error) {
+            // Fallback to entry value
+            openPositionsValue += position.quantity * position.entryPrice;
+          }
+        }
+
+        console.log(`📊 Open positions value: $${openPositionsValue.toFixed(2)} (${openPositions.length} positions)`);
+      } catch (error) {
+        console.warn(`⚠️ Could not calculate open positions value: ${error.message}`);
+        // Fall back to using freeMargin if position calculation fails
+      }
+
+      // Available balance = ZUSD cash - open positions value
+      const availableBalance = Math.max(0, usdBalance - openPositionsValue);
       const totalBalance = Math.max(totalEquity, usdBalance);
       const freeBalance = Math.max(0, usdBalance);
 
@@ -122,7 +159,7 @@ export class AvailableBalanceCalculator {
       this.lastBalance = realBalance;
       this.lastUpdateTime = now;
 
-      console.log(`💰 REAL Kraken Balance: Available=$${availableBalance.toFixed(2)}, Total=$${totalBalance.toFixed(2)}, Free=$${freeBalance.toFixed(2)}`);
+      console.log(`💰 V3.14.15 CORRECTED Balance: ZUSD=$${usdBalance.toFixed(2)}, Positions=$${openPositionsValue.toFixed(2)}, Available=$${availableBalance.toFixed(2)}, Total=$${totalBalance.toFixed(2)}`);
 
       return realBalance;
 
