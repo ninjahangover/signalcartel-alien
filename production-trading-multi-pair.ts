@@ -2326,7 +2326,7 @@ class ProductionTradingEngine {
           const expectedValue = tensorConfidence * (tensorExpectedReturn * 100); // EV = confidence × return%
 
           // Get brain-learned entry threshold (adaptive, not hardcoded)
-          const brainThreshold = this.adaptiveBrain.getThreshold('entryConfidence');
+          const brainThreshold = adaptiveProfitBrain.getThreshold('entryConfidence');
 
           // 🎯 THREE-PATH QUALITY CHECK (any path = TRADE)
           // Path 1: High confidence (50%+) - Trust AI strongly
