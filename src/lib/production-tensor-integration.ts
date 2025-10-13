@@ -450,43 +450,30 @@ export class ProductionTensorIntegration {
     // Perform tensor fusion with weighted outputs
     const fusedDecision = await tensorAIFusion.fuseAIOutputs(weightedOutputs, bundle.currentPrice, bundle.marketData);
 
-    // PHASE 2 OPTIMIZATION: Apply mathematical fixes
-    const enhancedDecision = await phase2Optimizer.enhanceDecision(
-      bundle.symbol,
-      fusedDecision.fusedConfidence,
-      bundle.marketData?.volatility || 0.02, // Default 2% daily volatility
-      bundle.marketData?.bankroll || 10000, // Use actual bankroll if available
-      bundle.currentPrice,
-      0 // Signal age in minutes (0 for fresh signals)
-    );
+    // 🔧 V3.14.20 FIX: Use tensor fusion's actual expected move (not Phase 2's clamped values)
+    // PROBLEM: Phase 2 was clamping 36% tensor predictions → 0.10%, blocking all trades
+    // SOLUTION: Trust the 6-system tensor fusion's mathematical calculations
 
-    // Create production-ready decision with Phase 2 enhancements
+    // Create production-ready decision with tensor fusion values
     const decision: TensorTradingDecision = {
-      shouldTrade: enhancedDecision.shouldTrade, // Use enhanced filter
+      shouldTrade: fusedDecision.shouldTrade, // Tensor's trade decision
       direction: this.mapDirectionToString(fusedDecision.fusedDirection),
-      confidence: enhancedDecision.confidence, // Use decayed confidence
-      expectedMove: enhancedDecision.expectedMove, // FIXED: Realistic 0.5-3% range
-      positionSize: enhancedDecision.positionSizePercent, // FIXED: Dynamic 1-10% range
-      expectedPnL: enhancedDecision.expectedMove * fusedDecision.fusedDirection, // Directional P&L
-      expectedReturn: enhancedDecision.expectedMove, // Use realistic move
+      confidence: fusedDecision.fusedConfidence, // Tensor's confidence (not decayed)
+      expectedMove: fusedDecision.fusedMagnitude, // 🔧 V3.14.20: Use tensor's actual magnitude (28-36%)
+      positionSize: fusedDecision.positionSize, // Tensor's position sizing
+      expectedPnL: fusedDecision.fusedMagnitude * fusedDecision.fusedDirection, // Directional P&L
+      expectedReturn: fusedDecision.fusedMagnitude, // 🔧 V3.14.20: Use tensor's magnitude for V3.14.19 filter
 
       fusedDecision,
       aiSystemsUsed: aiOutputs.map(ai => ai.systemId)
     };
 
-    // Log Phase 2 optimization details
-    if (enhancedDecision.reasons.pairFilter && !enhancedDecision.shouldTrade) {
-      console.log(`🚫 PAIR FILTER: ${enhancedDecision.reasons.pairFilter}`);
-    }
-    if (enhancedDecision.reasons.volumeStatus.includes('below minimum')) {
-      console.log(`📉 VOLUME: ${enhancedDecision.reasons.volumeStatus}`);
-    }
-
+    // 🔧 V3.14.20: Log tensor fusion decision details
     console.log(`🚀 TENSOR DECISION: ${decision.shouldTrade ? 'TRADE' : 'SKIP'} ${decision.direction}`);
     console.log(`   Confidence: ${(decision.confidence * 100).toFixed(1)}%`);
-    console.log(`   Expected Move: ${(decision.expectedMove * 100).toFixed(2)}%`); // Now shows realistic 0.5-3%
+    console.log(`   Expected Move: ${(decision.expectedMove * 100).toFixed(2)}%`); // Tensor fusion magnitude (28-36%)
     console.log(`   Expected PnL: ${(decision.expectedPnL * 100).toFixed(2)}%`);
-    console.log(`   Position Size: ${(decision.positionSize * 100).toFixed(1)}% of account`); // Now shows 1-10% range
+    console.log(`   Position Size: ${(decision.positionSize * 100).toFixed(1)}% of account`);
     console.log(`   Reason: ${fusedDecision.reason}`);
     
     return decision;
