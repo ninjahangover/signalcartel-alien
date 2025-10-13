@@ -2144,7 +2144,7 @@ class ProductionTradingEngine {
       }> = [];
 
       // STEP 1: Analyze all symbols and collect opportunities
-      log(`🔍 V3.14.18: Analyzing ${marketData.length} symbols for HIGH-CONVICTION opportunities...`);
+      log(`🔍 V3.14.19: Analyzing ${marketData.length} symbols with MULTI-FACTOR scoring (3 quality paths)...`);
 
       for (const data of marketData) {
         // Skip if we've hit position limits during this cycle
@@ -2319,32 +2319,53 @@ class ProductionTradingEngine {
             }
           }
           
-          // 🚀 V3.14.18: HIGH-CONVICTION FILTER (before execution)
-          // Only proceed if this is a QUALITY opportunity worth trading
+          // 🚀 V3.14.19: MULTI-FACTOR SCORING SYSTEM (Intelligent Quality Filter)
+          // Combines: confidence thresholds, return potential, brain learning, and expected value
           const tensorConfidence = aiAnalysis.tensorDecision?.confidence || 0;
           const tensorExpectedReturn = aiAnalysis.tensorDecision?.expectedReturn || 0;
           const expectedValue = tensorConfidence * (tensorExpectedReturn * 100); // EV = confidence × return%
 
-          const MIN_CONFIDENCE = 0.50;  // 50% minimum (was effectively 0%)
-          const MIN_EXPECTED_RETURN = 0.015;  // 1.5% minimum (was 0.04%!)
-          const MIN_EXPECTED_VALUE = 0.50;  // 0.50% EV minimum (50% × 1% or 60% × 0.83%)
+          // Get brain-learned entry threshold (adaptive, not hardcoded)
+          const brainThreshold = this.adaptiveBrain.getThreshold('entryConfidence');
 
-          if (tensorConfidence < MIN_CONFIDENCE) {
-            log(`🚫 V3.14.18 FILTER: ${data.symbol} - Low confidence ${(tensorConfidence*100).toFixed(1)}% < ${MIN_CONFIDENCE*100}% (SKIP)`);
+          // 🎯 THREE-PATH QUALITY CHECK (any path = TRADE)
+          // Path 1: High confidence (50%+) - Trust AI strongly
+          const highConfidencePass = tensorConfidence >= 0.50;
+
+          // Path 2: Good opportunity (40%+ confidence AND 3%+ return) - Quality setup
+          const goodOpportunityPass = tensorConfidence >= 0.40 && tensorExpectedReturn >= 0.03;
+
+          // Path 3: Brain-approved (above learned threshold AND 2%+ return) - Learning system says go
+          const brainApprovedPass = tensorConfidence >= brainThreshold && tensorExpectedReturn >= 0.02;
+
+          // Also check commission bleeding protection (1.5% minimum return)
+          const MIN_RETURN_PROTECTION = 0.015;  // 1.5% minimum to avoid tiny profit bleeding
+          const returnProtectionPass = tensorExpectedReturn >= MIN_RETURN_PROTECTION;
+
+          // 🚫 REJECT if ALL paths fail OR commission bleeding risk
+          if ((!highConfidencePass && !goodOpportunityPass && !brainApprovedPass) || !returnProtectionPass) {
+            let rejectReason = '';
+            if (!returnProtectionPass) {
+              rejectReason = `commission bleeding risk (${(tensorExpectedReturn*100).toFixed(2)}% < 1.5%)`;
+            } else if (tensorConfidence < 0.40) {
+              rejectReason = `low confidence ${(tensorConfidence*100).toFixed(1)}% < 40%`;
+            } else if (tensorExpectedReturn < 0.02) {
+              rejectReason = `low return ${(tensorExpectedReturn*100).toFixed(2)}% < 2%`;
+            } else {
+              rejectReason = `no quality path met (confidence: ${(tensorConfidence*100).toFixed(1)}%, return: ${(tensorExpectedReturn*100).toFixed(2)}%, brain: ${(brainThreshold*100).toFixed(1)}%)`;
+            }
+            log(`🚫 V3.14.19 FILTER: ${data.symbol} - ${rejectReason} (SKIP)`);
             continue;
           }
 
-          if (tensorExpectedReturn < MIN_EXPECTED_RETURN) {
-            log(`🚫 V3.14.18 FILTER: ${data.symbol} - Low return ${(tensorExpectedReturn*100).toFixed(2)}% < ${MIN_EXPECTED_RETURN*100}% (commission bleeding, SKIP)`);
-            continue;
-          }
+          // ✅ ACCEPT - Log which path(s) qualified this trade
+          const qualifyingPaths = [
+            highConfidencePass ? 'HIGH-CONF' : null,
+            goodOpportunityPass ? 'GOOD-OPP' : null,
+            brainApprovedPass ? 'BRAIN-OK' : null
+          ].filter(p => p !== null).join('+');
 
-          if (expectedValue < MIN_EXPECTED_VALUE) {
-            log(`🚫 V3.14.18 FILTER: ${data.symbol} - Low EV ${expectedValue.toFixed(2)}% < ${MIN_EXPECTED_VALUE}% (SKIP)`);
-            continue;
-          }
-
-          log(`✅ V3.14.18 QUALITY: ${data.symbol} - Confidence ${(tensorConfidence*100).toFixed(1)}%, Return ${(tensorExpectedReturn*100).toFixed(2)}%, EV ${expectedValue.toFixed(2)}% (PASS)`);
+          log(`✅ V3.14.19 QUALITY: ${data.symbol} - Confidence ${(tensorConfidence*100).toFixed(1)}%, Return ${(tensorExpectedReturn*100).toFixed(2)}%, EV ${expectedValue.toFixed(2)}% [${qualifyingPaths}]`);
 
           // 🚀 V3.14.18: TECHNICAL CHARTING VALIDATION
           // Validate AI decision against real-time market structure
