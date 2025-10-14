@@ -389,6 +389,103 @@ export class AdaptiveProfitBrain {
       optimalEstimate: 0.75 // Guide toward 75% reversal confidence
     });
 
+    // 🎯 V3.14.21: PROACTIVE PROFIT CAPTURE - Peak decay tolerance
+    // How much profit drawdown from peak before triggering capture
+    // Brain learns: "If profit drops 20% from peak, should I exit or hold?"
+    this.thresholds.set('profitPeakDecayTolerance', {
+      name: 'profitPeakDecayTolerance',
+      currentValue: 0.25, // Start at 25% - allow moderate drawdown from peak
+      learningRate: baseLearningRate * 2.0, // Fast learning - critical for profit capture
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.10, // Never allow more than 10% peak decay without considering exit
+      maxValue: 0.50, // Never wait for more than 50% drawdown from peak
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.15, // Higher exploration - find optimal quickly
+      optimalEstimate: 0.20 // Guide toward 20% peak decay tolerance
+      // Brain learning: If we capture at 25% decay and market continues up → loosen to 30%
+      //                If we hold through 25% decay and lose more → tighten to 20%
+    });
+
+    // 🎯 V3.14.21: PROACTIVE PROFIT CAPTURE - Velocity decay threshold
+    // When profit velocity (rate of P&L increase) slows down significantly
+    // Brain learns: "If profit was growing +0.5%/min, now +0.1%/min, capture?"
+    this.thresholds.set('profitVelocityDecayThreshold', {
+      name: 'profitVelocityDecayThreshold',
+      currentValue: 0.60, // Start at 60% velocity reduction triggers analysis
+      learningRate: baseLearningRate * 1.8,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.30, // At least 30% velocity reduction needed
+      maxValue: 0.90, // Max 90% reduction (profit nearly stalled)
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.12,
+      optimalEstimate: 0.50 // Guide toward 50% velocity decay
+      // Brain learning: Velocity dropped 60%, we exited, market reversed down → good!
+      //                Velocity dropped 60%, we exited, market continued up → loosen to 70%
+    });
+
+    // 🎯 V3.14.21: PROACTIVE PROFIT CAPTURE - Minimum profit for proactive capture
+    // Don't trigger proactive capture for tiny profits (avoid commission bleeding)
+    this.thresholds.set('minProfitForProactiveCapture', {
+      name: 'minProfitForProactiveCapture',
+      currentValue: 0.025, // Start at 2.5% minimum profit
+      learningRate: baseLearningRate * 1.5,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 0.015, // Never capture below 1.5% (commission + slippage = ~1%)
+      maxValue: 0.08, // Never require more than 8% to consider capture
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.10,
+      optimalEstimate: 0.03 // Guide toward 3% minimum
+      // Brain learning: If we capture many 2.5% profits and they work → lower to 2%
+      //                If 2.5% captures often lead to regret (market went to 10%) → raise to 4%
+    });
+
+    // 🎯 V3.14.21: PROACTIVE PROFIT CAPTURE - Time-based diminishing returns threshold
+    // When position held long time but profit growth stalled (capital rotation signal)
+    this.thresholds.set('diminishingReturnsMinutes', {
+      name: 'diminishingReturnsMinutes',
+      currentValue: 30.0, // Start at 30 minutes - if held this long with stalled profit, consider rotation
+      learningRate: baseLearningRate * 1.2,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 15.0, // Minimum 15 minutes before considering stalled
+      maxValue: 120.0, // Maximum 2 hours before forced rotation consideration
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.12,
+      optimalEstimate: 45.0 // Guide toward 45 minutes
+      // Brain learning: If we rotate after 30min stall and next trade wins big → lower to 25min
+      //                If we rotate too early and original position moons → raise to 40min
+    });
+
+    // 🎯 V3.14.21: PROACTIVE PROFIT CAPTURE - Better opportunity threshold
+    // How many better opportunities needed to trigger capital rotation
+    this.thresholds.set('capitalRotationOpportunityCount', {
+      name: 'capitalRotationOpportunityCount',
+      currentValue: 3.0, // Start: need 3+ better opportunities to rotate
+      learningRate: baseLearningRate * 1.0,
+      momentum: momentumDecay,
+      velocity: 0,
+      minValue: 1.0, // At least 1 better opportunity needed
+      maxValue: 10.0, // Never require more than 10 opportunities
+      lastGradient: 0,
+      profitHistory: [],
+      adjustmentHistory: [],
+      explorationNoise: 0.10,
+      optimalEstimate: 3.0 // Guide toward 3 opportunities
+      // Brain learning: Rotate with 3 opportunities waiting, new trades win → lower to 2
+      //                Rotate with 3 opportunities, new trades fail → raise to 4
+    });
+
     console.log('📊 Initialized self-learning thresholds:');
     for (const [name, param] of this.thresholds) {
       const displayValue = name === 'minLossBeforeExit'
