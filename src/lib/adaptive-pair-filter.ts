@@ -34,10 +34,12 @@ export class AdaptivePairFilter {
     // This prevents trading pairs with proven poor performance (like DOTUSD at 9.3%)
     const MINIMUM_ACCURACY_THRESHOLD = 30; // Hard floor - never trade below this
 
-    // Mathematical formula for dynamic win rate threshold based on market conditions
-    // Higher volatility = lower required win rate, Higher AI confidence = higher standards
-    const dynamicWinRate = Math.max(MINIMUM_ACCURACY_THRESHOLD, Math.min(80,
-      50 + (systemConfidence * 30) - (marketVolatility * 20)
+    // 🔧 V3.14.23 FIX: Realistic win rate thresholds based on trading reality
+    // PROBLEM: Old formula calculated 72% minimum (50 + 0.74*30 = 72%) - blocked everything
+    // REALITY: Profitable systems often have 45-55% win rates with good risk/reward
+    // SOLUTION: Start at 35% base + small confidence boost = 35-50% range
+    const dynamicWinRate = Math.max(MINIMUM_ACCURACY_THRESHOLD, Math.min(65,
+      35 + (systemConfidence * 15) - (marketVolatility * 10)
     ));
     
     // Dynamic P&L threshold based on current market volatility and risk tolerance
