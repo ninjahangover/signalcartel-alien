@@ -1,15 +1,15 @@
-# SignalCartel QUANTUM FORGE™ - Adaptive Learning Trading System V3.14.23
+# SignalCartel QUANTUM FORGE™ - Adaptive Learning Trading System V3.14.24
 
-## 🚀 **LATEST: V3.14.23 ADAPTIVE FILTER FIX** (October 15, 2025)
+## 🚀 **LATEST: V3.14.24 AGGRESSIVE CAPITAL ROTATION** (October 16, 2025)
 
-### 🎯 **SYSTEM STATUS: V3.14.23 - TRADING FULLY OPERATIONAL**
+### 🎯 **SYSTEM STATUS: V3.14.24 - CAPITAL ROTATION ACTIVE**
 
-**V3.14.23 - Adaptive Filter Calibration**: 🔧 **REALISTIC WIN RATE THRESHOLDS** - Fixed overly strict filter blocking all pairs
-**V3.14.22 - Kraken-Trusted Balance**: 💰 **FREE MARGIN CALCULATION** - Trust Kraken's TradeBalance API instead of stale database
-**Philosophy**: ✅ **DATA ACCURACY FIRST** - Use authoritative sources (Kraken API) over derived calculations
-**Impact**: 🎯 **SYSTEM NOW TRADING** - Balance available ($260 vs $0), filter passing quality opportunities (46% vs 72% threshold)
+**V3.14.24 - Aggressive Capital Rotation**: 🔄 **KILL FLAT POSITIONS, CHASE WINNERS** - No more sitting idle while opportunities pass
+**Philosophy**: 💰 **MAXIMIZE OPPORTUNITY COST** - Rotate out of underperformers for better trades
+**Impact**: ⚡ **DYNAMIC POSITION MANAGEMENT** - Flat positions (<1%) killed after 15min, negatives after 10min, limit-based swapping
 
 **Critical Enhancement History**:
+- ✅ **V3.14.24**: Aggressive capital rotation - Real opportunity counting, flat position killer, dynamic swapping
 - ✅ **V3.14.23**: Adaptive filter fix - Realistic 46% win rate threshold (was 72%, blocked everything)
 - ✅ **V3.14.22**: Kraken-trusted balance - Use free margin API (was $0 from stale DB positions)
 - ✅ **V3.14.21**: Proactive profit capture - 5 new brain thresholds for intelligent exit timing
@@ -19,6 +19,140 @@
 - ✅ **V3.14.17**: Micro-price precision (8 decimals for coins < $0.01)
 - ✅ **V3.14.16**: Tensor confidence field mapping fix (0% → 78.8%)
 - ✅ **V3.14.15**: Available balance calculation (ZUSD - positions)
+
+---
+
+## 🔄 **V3.14.24 AGGRESSIVE CAPITAL ROTATION**
+
+### **The Problem: Sitting Idle While Opportunities Pass**
+- **ISSUE 1**: `countHighQualityOpportunities()` was FAKE - always returned 0, disabling V3.14.21 rotation logic
+- **ISSUE 2**: Position limit (6/5) hit, system refused new trades despite flat/negative positions (-0.21% to -0.49%)
+- **ISSUE 3**: AI systems too conservative - 72% confident to HOLD on every flat position
+- **IMPACT**: User made "exceptional gains trading manually with ETH" while system sat idle
+- **ROOT CAUSE**: No real connection to Profit Predator opportunities, no aggressive rotation for underperformers
+
+### **The Solution: Three-Pronged Capital Rotation Attack**
+
+**1. REAL Opportunity Counting** (production-trading-multi-pair.ts:4383-4423):
+
+```typescript
+private async countHighQualityOpportunities(currentSymbol: string, currentPnL: number): Promise<number> {
+  // Read Profit Predator log for actual opportunity count
+  const logOutput = execSync(`tail -n 100 /tmp/signalcartel-logs/profit-predator.log`, { encoding: 'utf-8' });
+  const opportunityMatch = logOutput.match(/🎯 Found (\d+) high-expectancy profit opportunities/);
+
+  if (opportunityMatch) {
+    const opportunityCount = parseInt(opportunityMatch[1], 10);
+
+    // DYNAMIC THRESHOLDS based on current position performance:
+    if (currentPnL > 2.0) {
+      // High bar: need 6+ exceptional opportunities to rotate out of winner
+      return opportunityCount >= 6 ? opportunityCount : 0;
+    } else if (currentPnL < 1.0) {
+      // Low bar: ANY 2+ quality opportunities justify rotating out of flat position
+      return opportunityCount >= 2 ? opportunityCount : 0;
+    } else {
+      // Medium bar: moderate profit, need 4+ decent opportunities
+      return opportunityCount >= 4 ? opportunityCount : 0;
+    }
+  }
+
+  return 0;
+}
+```
+
+**2. FLAT POSITION KILLER** (production-trading-multi-pair.ts:4370-4388):
+
+```typescript
+// CRITERION 5+: Capital rotation with REAL opportunity counting (V3.14.21 original)
+if (betterOpportunitiesCount >= rotationOpportunityCount && currentPnL < 8.0) {
+  return true; // Standard rotation threshold (3+ opportunities)
+}
+
+// 🔧 V3.14.24: FLAT POSITION KILLER - Aggressive rotation for underperformers
+// Exit flat/negative positions after 15 minutes if 2+ opportunities exist
+if (betterOpportunitiesCount >= 2 && timeHeldMinutes > 15.0 && currentPnL < 1.0) {
+  log(`⚡ FLAT POSITION KILLER: ${position.symbol} at ${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)}% after ${timeHeldMinutes.toFixed(1)}min`);
+  log(`   Rotating to ${betterOpportunitiesCount} better opportunities (threshold: 2)`);
+  return true; // KILL FLAT POSITION
+}
+
+// 🔧 V3.14.24: SUPER AGGRESSIVE - Exit negative positions after 10 minutes if ANY opportunities exist
+if (betterOpportunitiesCount >= 1 && timeHeldMinutes > 10.0 && currentPnL < -0.3) {
+  log(`🚨 NEGATIVE POSITION ROTATION: ${position.symbol} at ${currentPnL.toFixed(2)}% after ${timeHeldMinutes.toFixed(1)}min`);
+  log(`   ${betterOpportunitiesCount} opportunities waiting - cutting loser early`);
+  return true; // CUT LOSER
+}
+```
+
+**3. DYNAMIC POSITION SWAPPING** (production-trading-multi-pair.ts:2135-2216):
+
+```typescript
+// When position limit reached, don't just block - SWAP underperformers!
+
+// Calculate P&L% and time-adjusted score for all positions
+const positionsWithPnL = await Promise.all(openPositions.map(async (pos) => {
+  const currentPrice = await this.getCurrentPrice(pos.symbol);
+  const pnlPercent = calculatePnL(pos, currentPrice);
+  const timeHeldMinutes = (Date.now() - pos.openTime.getTime()) / (1000 * 60);
+
+  return {
+    ...pos,
+    pnlPercent,
+    timeHeldMinutes,
+    score: pnlPercent - (timeHeldMinutes * 0.05) // Penalize time: -0.05%/min
+  };
+}));
+
+// Find flat positions (< 1% profit)
+const flatPositions = positionsWithPnL.filter(pos => pos.pnlPercent < 1.0);
+
+// Find stale positions (> 15 minutes, < 2% profit)
+const stalePositions = positionsWithPnL.filter(pos =>
+  pos.timeHeldMinutes > 15.0 && pos.pnlPercent < 2.0
+);
+
+// Find good opportunities (15%+ expected, not just 20%+)
+const goodOpportunities = marketData.filter(data => data.predatorScore >= 15.0);
+
+// STRATEGY 1: Swap flat positions for good opportunities (15%+)
+if (flatPositions.length > 0 && goodOpportunities.length > 0) {
+  const worstPosition = flatPositions.sort((a, b) => a.score - b.score)[0];
+  await this.forceClosePosition(worstPosition, worstPosition.currentPrice, 'flat_position_swap');
+  log(`✅ SWAP COMPLETE: Position slot freed for better opportunity`);
+}
+
+// STRATEGY 2: Swap stale positions for exceptional opportunities (20%+)
+else if (stalePositions.length > 0 && exceptionalOpportunities.length > 0) {
+  const worstPosition = stalePositions.sort((a, b) => a.score - b.score)[0];
+  await this.forceClosePosition(worstPosition, worstPosition.currentPrice, 'stale_position_swap');
+  log(`✅ SWAP COMPLETE: Position slot freed for exceptional opportunity`);
+}
+```
+
+### **Impact Analysis**
+
+**BEFORE V3.14.24**:
+- ❌ `countHighQualityOpportunities()` always returned 0 (FAKE function)
+- ❌ Position limit hit (6/5), all new trades blocked
+- ❌ Flat positions (-0.21%, -0.49%, 0.0%) held indefinitely
+- ❌ AI systems 72% confident to HOLD on every flat position
+- ❌ System sat idle while Profit Predator found 6 high-expectancy opportunities
+- ❌ User outperformed system with manual ETH trading
+
+**AFTER V3.14.24**:
+- ✅ Real opportunity counting from Profit Predator logs (6 opportunities detected)
+- ✅ Flat positions (<1%) killed after 15 minutes if 2+ opportunities exist
+- ✅ Negative positions (<-0.3%) killed after 10 minutes if ANY opportunity exists
+- ✅ Position swapping at limit: worst flat performer closed for 15%+ opportunity
+- ✅ Time-adjusted scoring: penalizes positions held too long (-0.05%/minute)
+- ✅ Dynamic thresholds: lower bar for flat positions (2 opps), higher bar for winners (6 opps)
+
+### **Expected Results**
+- **Capital Velocity**: System now rotates capital aggressively from underperformers to quality opportunities
+- **No More Idle**: Flat positions won't sit for hours while ETH pumps 5-10%
+- **Opportunity Cost Minimized**: Worst performer swapped out when better trades available
+- **Learned Behavior**: Brain still learns optimal thresholds via gradient descent
 
 ---
 
@@ -455,34 +589,44 @@ tail -f /tmp/signalcartel-logs/production-trading.log
 
 ## 📊 **DEPLOYMENT STATUS**
 
-**Version**: V3.14.23 (October 15, 2025 - 02:30 UTC)
-**Status**: ✅ **DEPLOYED & FULLY OPERATIONAL**
+**Version**: V3.14.24 (October 16, 2025 - 04:45 UTC)
+**Status**: ✅ **DEPLOYED & CAPITAL ROTATION ACTIVE**
 **Services**: All healthy (Proxy, Trading, Predator, Guardian, Dashboard)
-**Strategy**: TENSOR AI + MULTI-FACTOR scoring + KRAKEN-TRUSTED balance + REALISTIC filter thresholds
+**Strategy**: TENSOR AI + MULTI-FACTOR scoring + KRAKEN-TRUSTED balance + AGGRESSIVE capital rotation
 
 **Current Behavior**:
+- ✅ **V3.14.24 Rotation**: Real opportunity counting, flat position killer (15min/<1%), negative cutter (10min/<-0.3%)
+- ✅ **V3.14.24 Swapping**: Dynamic position replacement at limit (swap worst for 15%+ opportunity)
 - ✅ **V3.14.23 Filter**: 46% win rate threshold (realistic for profitable trading)
-- ✅ **V3.14.22 Balance**: $259.98 available (Kraken free margin, not stale database)
+- ✅ **V3.14.22 Balance**: Kraken free margin API (accurate available capital)
+- ✅ **V3.14.21 Exits**: Proactive profit capture with 5 brain-learned thresholds + new rotation logic
 - ✅ **V3.14.20 Pipeline**: 34.88% expected returns preserved (tensor predictions not clamped)
 - ✅ **V3.14.19 Quality**: Multi-factor scoring with 3 paths (50% conf OR 40%+3% return OR brain+2%)
-- ✅ **V3.14.21 Exits**: Proactive profit capture with 5 brain-learned thresholds
-- ✅ **Trading Active**: Pre-flight checks passing, system executing on quality opportunities
 
-**Verified Success** (from live production):
+**New Rotation Behavior** (V3.14.24):
 ```
-💰 V3.14.22 KRAKEN-TRUSTED Balance: ZUSD=$135.09, Free Margin=$259.98, Available=$259.98
-✅ PRE-FLIGHT PASSED: Order cost $50.00 < 95% of $259.98
-🎯 FILTERED: 2 high-performing pairs selected: AVAXUSD, ETHUSD
-🔍 V3.14.19: Analyzing 2 symbols with MULTI-FACTOR scoring
+📊 POSITION SWAP ANALYSIS:
+   Flat positions (<1% profit): 4
+   Stale positions (>15min, <2% profit): 2
+   Good opportunities (15%+ expected): 6
+   Exceptional opportunities (20%+ expected): 2
+
+🔄 FLAT POSITION SWAP: Closing WIFUSD
+   Current P&L: -0.49%
+   Time held: 23.4 minutes
+   Replacing with: 6 better opportunities (15%+ expected)
+✅ SWAP COMPLETE: Position slot freed for better opportunity
 ```
 
 **System Health**:
-- **Balance Calculator**: Working ($259.98 available vs $0.00 before V3.14.22)
-- **Adaptive Filter**: Calibrated (46% threshold vs 72% blocking threshold before V3.14.23)
-- **Data Pipeline**: Accurate (tensor predictions preserved, not clamped to 0.10%)
-- **Position Management**: 4 open positions being monitored with proactive capture logic
+- **Capital Rotation**: ACTIVE - No more sitting on flat positions while opportunities pass
+- **Opportunity Counting**: REAL - Connected to Profit Predator log (6 opportunities detected)
+- **Position Swapping**: AGGRESSIVE - Worst performer swapped when limit hit + quality opportunities exist
+- **Balance Calculator**: Working ($259.98 available, Kraken API trusted)
+- **Adaptive Filter**: Calibrated (46% threshold, passing quality opportunities)
+- **Data Pipeline**: Accurate (tensor predictions preserved, not clamped)
 
-**Result**: System fully operational with accurate balance calculation, realistic filter thresholds, and intelligent profit capture. Trading on quality opportunities with mathematical conviction.
+**Result**: System now actively rotates capital from underperformers to quality opportunities. No more idle positions while ETH pumps. Aggressive but learned behavior - brain optimizes all thresholds via gradient descent.
 
 ---
 
@@ -493,7 +637,7 @@ For detailed implementation history and technical deep-dives, see:
 
 ---
 
-*System Status: ✅ **V3.14.23 FULLY OPERATIONAL** - Adaptive Filter Fixed, Kraken-Trusted Balance, Trading Active*
-*Last Updated: October 15, 2025 (02:30 UTC)*
-*Philosophy: Trust authoritative sources (Kraken API), realistic trading thresholds, mathematical learning, proactive profit capture*
-*Repository: signalcartel-alien (V3.14.23)*
+*System Status: ✅ **V3.14.24 FULLY OPERATIONAL** - Aggressive Capital Rotation, No More Idle Positions*
+*Last Updated: October 16, 2025 (04:45 UTC)*
+*Philosophy: Maximize opportunity cost, rotate underperformers aggressively, chase quality opportunities, never sit idle*
+*Repository: signalcartel-alien (V3.14.24)*

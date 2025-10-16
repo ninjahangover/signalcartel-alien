@@ -2132,33 +2132,87 @@ class ProductionTradingEngine {
       if (openPositions.length >= dynamicMaxPositions) {
         log(`🛑 Position limit reached: ${openPositions.length}/${dynamicMaxPositions} positions open (${baseMaxPositions} base + ${dynamicMaxPositions - baseMaxPositions} high-quality)`);
 
-        // 🔄 OPPORTUNITY REPLACEMENT: Check if we can replace underperforming positions with better discoveries
-        const underperformingPositions = openPositions.filter(pos => {
-          const currentPnL = pos.unrealizedPnL || 0;
-          return currentPnL < -50; // Positions losing more than $50
-        });
+        // 🔧 V3.14.24: AGGRESSIVE POSITION SWAPPING
+        // Don't just look for losers > $50, look for ANY underperformer (flat/negative positions)
 
+        // Calculate P&L% for all positions for intelligent comparison
+        const positionsWithPnL = await Promise.all(openPositions.map(async (pos) => {
+          try {
+            const currentPrice = await this.getCurrentPrice(pos.symbol);
+            const pnlPercent = pos.side === 'long'
+              ? ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
+              : ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100;
+
+            const timeHeldMinutes = pos.openTime ? (Date.now() - pos.openTime.getTime()) / (1000 * 60) : 0;
+
+            return {
+              ...pos,
+              currentPrice,
+              pnlPercent,
+              timeHeldMinutes,
+              score: pnlPercent - (timeHeldMinutes * 0.05) // Penalize time held: -0.05%/minute
+            };
+          } catch (error) {
+            return { ...pos, currentPrice: pos.entryPrice, pnlPercent: 0, timeHeldMinutes: 0, score: 0 };
+          }
+        }));
+
+        // Find flat/negative positions (< 1% profit)
+        const flatPositions = positionsWithPnL.filter(pos => pos.pnlPercent < 1.0);
+
+        // Find positions held too long with minimal profit (> 15 minutes, < 2% profit)
+        const stalePositions = positionsWithPnL.filter(pos =>
+          pos.timeHeldMinutes > 15.0 && pos.pnlPercent < 2.0
+        );
+
+        // Find good opportunities (not just exceptional 20%+)
+        const goodOpportunities = marketData.filter(data => (data as any).predatorScore >= 15.0); // 15%+ expected
         const exceptionalOpportunities = marketData.filter(data => (data as any).predatorScore >= 20.0); // 20%+ expected
 
-        if (underperformingPositions.length > 0 && exceptionalOpportunities.length > 0) {
-          log(`🔄 OPPORTUNITY REPLACEMENT: ${underperformingPositions.length} underperforming positions, ${exceptionalOpportunities.length} exceptional opportunities (20%+)`);
-          log(`   💡 Strategy: Close worst performers to make room for 20%+ expected returns`);
+        log(`📊 POSITION SWAP ANALYSIS:`);
+        log(`   Flat positions (<1% profit): ${flatPositions.length}`);
+        log(`   Stale positions (>15min, <2% profit): ${stalePositions.length}`);
+        log(`   Good opportunities (15%+ expected): ${goodOpportunities.length}`);
+        log(`   Exceptional opportunities (20%+ expected): ${exceptionalOpportunities.length}`);
 
-          // Close worst performing position to make room
-          const worstPosition = underperformingPositions.sort((a, b) => (a.unrealizedPnL || 0) - (b.unrealizedPnL || 0))[0];
+        // STRATEGY 1: Swap flat positions for good opportunities (15%+)
+        if (flatPositions.length > 0 && goodOpportunities.length > 0) {
+          const worstPosition = flatPositions.sort((a, b) => a.score - b.score)[0];
+
+          log(`🔄 FLAT POSITION SWAP: Closing ${worstPosition.symbol}`);
+          log(`   Current P&L: ${worstPosition.pnlPercent >= 0 ? '+' : ''}${worstPosition.pnlPercent.toFixed(2)}%`);
+          log(`   Time held: ${worstPosition.timeHeldMinutes.toFixed(1)} minutes`);
+          log(`   Replacing with: ${goodOpportunities.length} better opportunities (15%+ expected)`);
+
           try {
-            const price = await this.getCurrentPrice(worstPosition.symbol);
-            if (price) {
-              log(`🔄 REPLACING: Closing ${worstPosition.symbol} (P&L: $${(worstPosition.unrealizedPnL || 0).toFixed(2)}) for better opportunity`);
-              await this.forceClosePosition(worstPosition, price, 'opportunity_replacement');
-              // Allow one new position by reducing effective position count
-              log(`✅ REPLACEMENT: Position slot freed for exceptional opportunity`);
+            if (worstPosition.currentPrice) {
+              await this.forceClosePosition(worstPosition, worstPosition.currentPrice, 'flat_position_swap');
+              log(`✅ SWAP COMPLETE: Position slot freed for better opportunity`);
             }
           } catch (error) {
-            log(`❌ REPLACEMENT FAILED: ${error.message}`);
+            log(`❌ SWAP FAILED: ${error.message}`);
+          }
+        }
+        // STRATEGY 2: Swap stale positions for exceptional opportunities (20%+)
+        else if (stalePositions.length > 0 && exceptionalOpportunities.length > 0) {
+          const worstPosition = stalePositions.sort((a, b) => a.score - b.score)[0];
+
+          log(`🔄 STALE POSITION SWAP: Closing ${worstPosition.symbol}`);
+          log(`   Current P&L: ${worstPosition.pnlPercent >= 0 ? '+' : ''}${worstPosition.pnlPercent.toFixed(2)}%`);
+          log(`   Time held: ${worstPosition.timeHeldMinutes.toFixed(1)} minutes (STALE)`);
+          log(`   Replacing with: ${exceptionalOpportunities.length} exceptional opportunities (20%+ expected)`);
+
+          try {
+            if (worstPosition.currentPrice) {
+              await this.forceClosePosition(worstPosition, worstPosition.currentPrice, 'stale_position_swap');
+              log(`✅ SWAP COMPLETE: Position slot freed for exceptional opportunity`);
+            }
+          } catch (error) {
+            log(`❌ SWAP FAILED: ${error.message}`);
           }
         } else {
-          log('🔍 Skipping new position creation, continuing with exit evaluation...');
+          log('🔍 No swap candidates found - all positions performing well or no better opportunities');
+          log('   Skipping new position creation, continuing with exit evaluation...');
         }
       } else {
         log(`✅ POSITION CAPACITY: ${openPositions.length}/${dynamicMaxPositions} positions (${dynamicMaxPositions - baseMaxPositions} bonus slots for quality opportunities)`);
@@ -4367,6 +4421,68 @@ class ProductionTradingEngine {
         return true; // ROTATE CAPITAL
       }
 
+      // 🔧 V3.14.24: COMMISSION-AWARE FLAT POSITION KILLER
+      // Only rotate if Expected Value of new opportunity exceeds rotation cost
+      if (betterOpportunitiesCount >= 2 && timeHeldMinutes > 15.0 && currentPnL < 1.0) {
+        // Calculate rotation cost:
+        // 1. Exit commission: 0.26% (limit order taker)
+        // 2. Entry commission: 0.26% (limit order taker)
+        // 3. Opportunity cost: currentPnL (what we're losing by exiting now)
+        const COMMISSION_COST = 0.26; // 0.26% per trade (Kraken limit order)
+        const rotationCost = (COMMISSION_COST * 2) + Math.abs(Math.min(currentPnL, 0)); // Exit + Entry + current loss
+
+        // Get best opportunity's expected return from Profit Predator
+        const bestOpportunityReturn = await this.getBestOpportunityExpectedReturn();
+
+        // Calculate Expected Value: (Return% × WinRate%) - RotationCost%
+        // Assume 45% win rate (realistic from V3.14.23 analysis)
+        const assumedWinRate = 0.45;
+        const expectedValue = (bestOpportunityReturn * assumedWinRate) - rotationCost;
+
+        log(`💰 ROTATION COST ANALYSIS: ${position.symbol}`);
+        log(`   Current P&L: ${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)}%`);
+        log(`   Exit commission: ${COMMISSION_COST.toFixed(2)}%`);
+        log(`   Entry commission: ${COMMISSION_COST.toFixed(2)}%`);
+        log(`   Total rotation cost: ${rotationCost.toFixed(2)}%`);
+        log(`   Best opportunity: ${bestOpportunityReturn.toFixed(2)}% expected return`);
+        log(`   Expected Value: ${expectedValue.toFixed(2)}% (${(bestOpportunityReturn * assumedWinRate).toFixed(2)}% EV - ${rotationCost.toFixed(2)}% cost)`);
+
+        // Only rotate if Expected Value > 2.0% (meaningful profit after costs)
+        if (expectedValue > 2.0) {
+          log(`⚡ FLAT POSITION KILLER: ${position.symbol} - Rotation EV ${expectedValue.toFixed(2)}% > 2.0% threshold`);
+          log(`   Rotating after ${timeHeldMinutes.toFixed(1)}min to ${betterOpportunitiesCount} better opportunities`);
+          position.metadata.proactiveCaptureReason = `ev_rotation_${expectedValue.toFixed(1)}pct`;
+          return true; // KILL FLAT POSITION
+        } else {
+          log(`⏸️  ROTATION BLOCKED: EV ${expectedValue.toFixed(2)}% < 2.0% threshold (commission bleeding risk)`);
+          return false; // Hold - rotation not worth commission cost
+        }
+      }
+
+      // 🔧 V3.14.24: COMMISSION-AWARE NEGATIVE POSITION ROTATION
+      // Cut losers early ONLY if stopping the bleeding makes mathematical sense
+      if (betterOpportunitiesCount >= 1 && timeHeldMinutes > 10.0 && currentPnL < -0.5) {
+        const COMMISSION_COST = 0.26;
+        const rotationCost = (COMMISSION_COST * 2) + Math.abs(currentPnL); // Include current loss
+        const bestOpportunityReturn = await this.getBestOpportunityExpectedReturn();
+        const assumedWinRate = 0.45;
+        const expectedValue = (bestOpportunityReturn * assumedWinRate) - rotationCost;
+
+        log(`🚨 NEGATIVE POSITION ANALYSIS: ${position.symbol} at ${currentPnL.toFixed(2)}%`);
+        log(`   Rotation cost: ${rotationCost.toFixed(2)}% (commissions + current loss)`);
+        log(`   Expected Value: ${expectedValue.toFixed(2)}%`);
+
+        // Only cut loser if EV > 1.5% (lower bar for negative positions to stop bleeding)
+        if (expectedValue > 1.5) {
+          log(`🚨 NEGATIVE POSITION ROTATION: Cutting loser - EV ${expectedValue.toFixed(2)}% > 1.5%`);
+          position.metadata.proactiveCaptureReason = `negative_ev_rotation_${expectedValue.toFixed(1)}pct`;
+          return true; // CUT LOSER
+        } else {
+          log(`⏸️  HOLD LOSER: EV ${expectedValue.toFixed(2)}% < 1.5% - rotation costs more than benefit`);
+          return false; // Cheaper to hold and hope for recovery
+        }
+      }
+
       // No proactive capture criteria met - HOLD
       return false;
 
@@ -4377,15 +4493,103 @@ class ProductionTradingEngine {
   }
 
   /**
-   * 🔍 V3.14.21: Count high-quality trading opportunities waiting in queue
-   * Used for capital rotation decision
+   * 🔍 V3.14.24: Get best opportunity's expected return from Profit Predator
+   * Used for commission-aware Expected Value calculation
+   */
+  private async getBestOpportunityExpectedReturn(): Promise<number> {
+    try {
+      const logPath = '/tmp/signalcartel-logs/profit-predator.log';
+      const { execSync } = require('child_process');
+
+      try {
+        const logOutput = execSync(`tail -n 100 ${logPath} 2>/dev/null || echo ""`, { encoding: 'utf-8' });
+
+        // Parse all opportunities from JSON log lines
+        const opportunities: Array<{ symbol: string; score: number }> = [];
+
+        for (const line of logOutput.split('\n')) {
+          if (line.includes('JSON_OPPORTUNITIES:')) {
+            try {
+              const jsonStr = line.substring(line.indexOf('{'));
+              const data = JSON.parse(jsonStr);
+
+              if (data.opportunities && Array.isArray(data.opportunities)) {
+                for (const opp of data.opportunities) {
+                  if (opp.symbol && typeof opp.expectedReturn === 'number') {
+                    opportunities.push({ symbol: opp.symbol, score: opp.expectedReturn });
+                  }
+                }
+              }
+            } catch (parseError) {
+              // Skip malformed JSON lines
+            }
+          }
+        }
+
+        if (opportunities.length > 0) {
+          // Sort by expected return descending, return best
+          opportunities.sort((a, b) => b.score - a.score);
+          return opportunities[0].score;
+        }
+
+        // Fallback: parse simple format if JSON not available
+        const match = logOutput.match(/🎯 Found (\d+) high-expectancy profit opportunities/);
+        if (match) {
+          // If we found opportunities but couldn't parse returns, assume conservative 15%
+          return 15.0;
+        }
+
+        return 0; // No opportunities
+      } catch (execError) {
+        return 0;
+      }
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  /**
+   * 🔍 V3.14.24: Count high-quality trading opportunities waiting in queue
+   * Used for capital rotation decision - REAL IMPLEMENTATION
    */
   private async countHighQualityOpportunities(currentSymbol: string, currentPnL: number): Promise<number> {
     try {
-      // This would query the profit predator or intelligent profit maximizer
-      // For now, return 0 (will be integrated with existing opportunity scanners)
-      return 0;
+      // Read last 100 lines from profit predator log
+      const logPath = '/tmp/signalcartel-logs/profit-predator.log';
+      const { execSync } = require('child_process');
+
+      try {
+        const logOutput = execSync(`tail -n 100 ${logPath} 2>/dev/null || echo ""`, { encoding: 'utf-8' });
+
+        // Look for the line that says "🎯 Found X high-expectancy profit opportunities"
+        const opportunityMatch = logOutput.match(/🎯 Found (\d+) high-expectancy profit opportunities/);
+
+        if (opportunityMatch) {
+          const opportunityCount = parseInt(opportunityMatch[1], 10);
+
+          // Count opportunities better than current position
+          // Logic: If we have profitable position (>2%), only count AMAZING opportunities (>6)
+          //        If we have flat position (<1%), count all good opportunities (>2)
+          if (currentPnL > 2.0) {
+            // High bar: need exceptional opportunities to rotate out of winning position
+            const exceptionalThreshold = 6;
+            return opportunityCount >= exceptionalThreshold ? opportunityCount : 0;
+          } else if (currentPnL < 1.0) {
+            // Low bar: any quality opportunities justify rotating out of flat position
+            return opportunityCount >= 2 ? opportunityCount : 0;
+          } else {
+            // Medium bar: moderate profit, need decent opportunities
+            return opportunityCount >= 4 ? opportunityCount : 0;
+          }
+        }
+
+        return 0;
+      } catch (execError) {
+        log(`⚠️ Failed to read profit predator log: ${execError.message}`);
+        return 0;
+      }
     } catch (error) {
+      log(`⚠️ Error counting opportunities: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return 0;
     }
   }

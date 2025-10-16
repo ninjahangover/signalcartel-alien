@@ -177,12 +177,28 @@ class ProactiveCaptureMonitor {
         console.log(`${COLORS.dim}  Symbol      Side   Current P&L    Peak P&L    Decay    Velocity    Time${COLORS.reset}`);
         console.log(`${COLORS.dim}  ────────────────────────────────────────────────────────────────────${COLORS.reset}`);
 
+        // Fetch live prices for all positions
+        const { krakenPositionPriceFetcher } = await import('../src/lib/kraken-position-price-fetcher');
+
         for (const pos of positions) {
-          // 🔧 V3.14.21: Handle undefined currentPrice (loading from API)
-          const hasCurrentPrice = pos.currentPrice !== null && pos.currentPrice !== undefined && !isNaN(pos.currentPrice);
+          // 🔧 FIX: Fetch live price from Kraken API instead of stale database field
+          let currentPrice = pos.currentPrice;
+          let hasCurrentPrice = false;
+
+          try {
+            const priceResult = await krakenPositionPriceFetcher.getPositionPrice(pos.symbol);
+            if (priceResult.success && priceResult.price > 0) {
+              currentPrice = priceResult.price;
+              hasCurrentPrice = true;
+            }
+          } catch (priceError) {
+            // Fall back to database price if API fails
+            hasCurrentPrice = pos.currentPrice !== null && pos.currentPrice !== undefined && !isNaN(pos.currentPrice);
+            currentPrice = pos.currentPrice;
+          }
 
           const currentPnL = hasCurrentPrice
-            ? ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100
+            ? ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * (pos.side === 'long' ? 1 : -1)
             : 0;
 
           const metadata = pos.metadata as any;
