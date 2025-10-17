@@ -401,22 +401,32 @@ export class QuantumForgeProfitPredator {
 
       const hunts: ProfitHunt[] = [];
 
+      // 🔧 V3.14.25 FIX: Get validated Kraken pairs for filtering
+      const krakenValidatedPairs = QuantumForgeProfitPredator.allTradingPairsCache.length > 0
+        ? QuantumForgeProfitPredator.allTradingPairsCache
+        : (this.cachedPairs || []);
+
+      this.logToFile(`🔍 CMC VALIDATOR: Using ${krakenValidatedPairs.length} validated Kraken pairs for filtering`);
+
       // Process trending coins with massive gains
       for (const coin of trending) {
         // Focus on coins with significant 24h gains
         if (coin.percent_change_24h > 10) {
-          const symbol = coin.symbol + 'USD';
+          const symbolUSD = coin.symbol + 'USD';
+          const symbolUSDT = coin.symbol + 'USDT';
 
-          // Check if this pair exists on Kraken
-          // Use cached pairs for validation
-          const symbolExists = this.cachedPairs && this.cachedPairs.includes(symbol);
-          if (!symbolExists) {
-            // Try with USDT suffix
-            const symbolUSDT = coin.symbol + 'USDT';
-            if (!this.cachedPairs || !this.cachedPairs.includes(symbolUSDT)) {
-              continue;
-            }
+          // 🔧 V3.14.25 FIX: Check against actual Kraken validated pairs
+          const usdExists = krakenValidatedPairs.includes(symbolUSD);
+          const usdtExists = krakenValidatedPairs.includes(symbolUSDT);
+
+          if (!usdExists && !usdtExists) {
+            // Skip coins not tradable on Kraken
+            this.logToFile(`🚫 CMC GAINER SKIPPED: ${symbolUSD} not available on Kraken (${coin.percent_change_24h.toFixed(1)}% gain)`);
+            continue;
           }
+
+          // Use whichever variant exists on Kraken
+          const symbol = usdExists ? symbolUSD : symbolUSDT;
 
           // Calculate expected return based on momentum
           const expectedReturn = Math.min(coin.percent_change_24h * 0.3, 50); // Cap at 50%
@@ -444,7 +454,8 @@ export class QuantumForgeProfitPredator {
             }
           });
 
-          this.logToFile(`💎 CMC GAINER: ${symbol} +${coin.percent_change_24h.toFixed(1)}% (24h), Rank #${coin.market_cap_rank}`);
+          // 🔧 V3.14.25 FIX: Only log after successfully added to hunts
+          this.logToFile(`💎 CMC GAINER VALIDATED: ${symbol} +${coin.percent_change_24h.toFixed(1)}% (24h), Rank #${coin.market_cap_rank} [KRAKEN-TRADABLE]`);
         }
       }
 

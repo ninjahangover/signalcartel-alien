@@ -44,6 +44,8 @@ import { adaptiveProfitBrain } from './src/lib/adaptive-profit-brain';
 import { coinMarketCapService } from './src/lib/coinmarketcap-service';
 // Make CMC service available globally for Bayesian and Sentiment AI
 (global as any).cmcService = coinMarketCapService;
+// 🎯 TRADE THESIS ENGINE - AI-driven target/stop prediction
+import { TradeThesisEngine } from './src/lib/trade-thesis-engine';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -100,7 +102,10 @@ class ProductionTradingEngine {
   private krakenInitialized: boolean = false;
   private adaptivePairFilter: any; // AdaptivePairFilter instance
   private prisma: PrismaClient; // Add Prisma client property
-  
+
+  // 🎯 TRADE THESIS ENGINE - AI-driven target/stop prediction
+  private thesisEngine!: TradeThesisEngine;
+
   // 🧮 TENSOR FUSION MODE (gradual rollout)
   private tensorMode: boolean = process.env.TENSOR_MODE === 'true';
   private tensorEngine: TensorAIFusionEngine = new TensorAIFusionEngine();
@@ -115,7 +120,18 @@ class ProductionTradingEngine {
   // 🔧 V3.14.9 FIX: Kraken pair precision cache (to fix "Invalid price" errors)
   private pairDecimalsCache = new Map<string, { pairDecimals: number; lotDecimals: number; timestamp: number }>();
   private readonly PAIR_DECIMALS_CACHE_TTL = 3600000; // 1 hour (precision rarely changes)
-  
+
+  // 🔧 V3.14.25 FIX: Geographic restriction blocklist (California restrictions, etc.)
+  private geographicBlocklist = new Set<string>();
+  private readonly GEOGRAPHIC_BLOCKLIST_TTL = 86400000; // 24 hours
+
+  // 🔧 V3.14.26: STALE ORDER TRACKING - Prevent capital lockup from unfilled limit orders
+  private pendingOrders = new Map<string, { symbol: string; side: string; volume: string; price: string; placedAt: number }>();
+  private readonly STALE_ORDER_TIMEOUT = 120000; // 2 minutes = stale (aggressive rotation)
+  private readonly VERY_STALE_ORDER_TIMEOUT = 60000; // 1 minute for high-confidence aggressive orders
+  private lastOrderCleanup = 0;
+  private readonly ORDER_CLEANUP_INTERVAL = 30000; // Check every 30 seconds
+
   // 🎯 ELIMINATED: No hardcoded pairs - 100% dynamic mathematical decisions
   
   // 🐅 DYNAMIC PAIRS from PROFIT PREDATOR™ (updated frequently for responsiveness)
@@ -134,6 +150,9 @@ class ProductionTradingEngine {
     this.balanceCalculator = getAvailableBalanceCalculator();
     this.enhancedMarkovPredictor2 = new EnhancedMarkovPredictor();
     this.mathEngine = new MathematicalIntuitionEngine();
+
+    // 🎯 Initialize Trade Thesis Engine
+    this.thesisEngine = new TradeThesisEngine(prisma);
 
     // 🚀 DYNAMIC SYSTEM: Start real-time position updates
     log('🔄 Initializing dynamic trading components...');
@@ -1671,6 +1690,14 @@ class ProductionTradingEngine {
               reason = `emergency_loss_protection_${pnl.toFixed(1)}pct_brain_learned_${(emergencyLossStop * 100).toFixed(1)}pct`;
               log(`🚨 EMERGENCY STOP (brain-learned): ${pnl.toFixed(2)}% loss exceeds ${(emergencyLossStop * 100).toFixed(1)}% threshold`);
             }
+            // 🔧 V3.14.25: PATTERN OVERRIDE - Negative positions with accelerating_down pattern
+            // PROBLEM: AI says HOLD 72% confidence on losing positions, system stuck (-0.27% to -0.69%)
+            // SOLUTION: Override AI for negative positions with clear downward momentum
+            else if (pnl < -0.5 && pattern === 'accelerating_down' && timeHeldMinutes > 10) {
+              shouldExit = true;
+              reason = `pattern_override_accelerating_loss (${pnl.toFixed(2)}%, ${timeHeldMinutes.toFixed(1)}min)`;
+              log(`🚨 V3.14.25 PATTERN OVERRIDE: Accelerating loss detected - cutting position despite AI HOLD signal`);
+            }
             // 💰 PRIORITY 2: Extraordinary profit capture (ABSOLUTE - OVERRIDES EVERYTHING)
             else if (pnl > extraordinaryProfitCapture * 100) {
               shouldExit = true;
@@ -2061,6 +2088,10 @@ class ProductionTradingEngine {
       // Critical: Run this FIRST to ensure discovered opportunities are always integrated
       await this.updateDynamicPairsFromProfitPredator();
 
+      // 🔧 V3.14.26: CANCEL STALE ORDERS (run every cycle, throttled internally to 30s)
+      // Philosophy: Free up locked capital from unfilled limit orders (like V3.14.24 position rotation)
+      await this.cancelStaleOrders();
+
       if (this.cycleCount === 1) {
         log(`🔥 WARM-UP CYCLE: Evaluating market conditions, no trading yet...`);
         log(`📊 Market Analysis: Collecting price data and AI signals for next cycle`);
@@ -2087,7 +2118,59 @@ class ProductionTradingEngine {
       }
       
       log(`✅ Trading with ${marketData.length} validated pairs: ${marketData.map(d => d.symbol).join(', ')}`);
-      
+
+      // 🔧 V3.14.25 FIX: Enrich marketData with predatorScore from Profit Predator opportunities
+      // PROBLEM: V3.14.24 swap logic couldn't find opportunities (predatorScore always undefined)
+      // SOLUTION: Read Profit Predator log and attach scores to marketData objects
+      try {
+        const fs = await import('fs');
+        const logPath = '/tmp/signalcartel-logs/profit-predator.log';
+        const predatorScores = new Map<string, number>();
+
+        try {
+          const logData = fs.readFileSync(logPath, 'utf8');
+          const lines = logData.split('\n').reverse().slice(0, 200); // Last 200 lines
+
+          for (const line of lines) {
+            if (line.includes('JSON_OPPORTUNITIES:')) {
+              try {
+                const jsonMatch = line.match(/JSON_OPPORTUNITIES:\s*(\[.*\])/);
+                if (jsonMatch && jsonMatch[1]) {
+                  const opportunities = JSON.parse(jsonMatch[1]);
+                  opportunities.forEach((opp: any) => {
+                    if (opp.expectedReturn && opp.symbol) {
+                      // Keep highest score for each symbol
+                      const existing = predatorScores.get(opp.symbol);
+                      if (!existing || opp.expectedReturn > existing) {
+                        predatorScores.set(opp.symbol, opp.expectedReturn);
+                      }
+                    }
+                  });
+                  break; // Found JSON, stop searching
+                }
+              } catch (e) {
+                // Skip malformed JSON
+              }
+            }
+          }
+
+          // Enrich marketData with predatorScores
+          marketData.forEach((data: any) => {
+            const score = predatorScores.get(data.symbol);
+            if (score) {
+              data.predatorScore = score;
+              log(`✅ PREDATOR SCORE: ${data.symbol} = ${score.toFixed(1)}%`);
+            }
+          });
+
+          log(`📊 Enriched ${predatorScores.size} pairs with Profit Predator scores`);
+        } catch (logError) {
+          log(`⚠️ Could not read Profit Predator log: ${logError.message}`);
+        }
+      } catch (importError) {
+        log(`⚠️ Could not import fs: ${importError.message}`);
+      }
+
       // 🎯 ADAPTIVE PAIR FILTERING - Focus on high performers, avoid consistent losers
       try {
         const { AdaptivePairFilter } = await import('./src/lib/adaptive-pair-filter');
@@ -2233,6 +2316,12 @@ class ProductionTradingEngine {
       log(`🔍 V3.14.19: Analyzing ${marketData.length} symbols with MULTI-FACTOR scoring (3 quality paths)...`);
 
       for (const data of marketData) {
+        // 🔧 V3.14.25: Skip geographically blocked pairs to prevent retry loops
+        if (this.geographicBlocklist.has(data.symbol)) {
+          log(`🚫 V3.14.25 SKIPPED: ${data.symbol} (geographic restriction - blocked 24h)`);
+          continue;
+        }
+
         // Skip if we've hit position limits during this cycle
         const currentOpenPositions = await this.positionManager.getOpenPositions();
         if (currentOpenPositions.length >= dynamicMaxPositions) {
@@ -2819,6 +2908,41 @@ class ProductionTradingEngine {
             log(`⚠️ PRE-FLIGHT CHECK FAILED: ${balanceError.message} - Proceeding cautiously`);
           }
 
+          // 🎯 TRADE THESIS ENGINE - Predict AI-driven targets and stops
+          let thesisPrediction = null;
+          try {
+            const marketConditions = {
+              symbol: data.symbol,
+              price: data.price,
+              volume: data.volume || 0,
+              avgVolume: data.avgVolume || data.volume || 0,
+              volumeRatio: data.volumeRatio || 1.0,
+              changePercent: data.price_change_24h || 0,
+              high24h: data.high || undefined,
+              low24h: data.low || undefined,
+              aiConfidence: aiAnalysis.confidence,
+              aiDirection: side === 'long' ? 'LONG' as const : 'SHORT' as const,
+              aiExpectedReturn: aiAnalysis.tensorDecision?.expectedReturn || adjustedTakeProfit || 0.03,
+            };
+
+            thesisPrediction = await this.thesisEngine.predictTarget(marketConditions);
+
+            log(`📈 Trade Thesis Prediction:`);
+            log(`   Target: $${thesisPrediction.targetPrice.toFixed(2)} (+${thesisPrediction.expectedReturn.toFixed(1)}%)`);
+            log(`   Stop: $${thesisPrediction.stopLossPrice.toFixed(2)} (-${((data.price - thesisPrediction.stopLossPrice) / data.price * 100).toFixed(1)}%)`);
+            log(`   R:R: ${thesisPrediction.riskRewardRatio.toFixed(2)}:1`);
+            log(`   Confidence: ${(thesisPrediction.predictionConfidence * 100).toFixed(1)}%`);
+            log(`   Reasoning: ${thesisPrediction.reasoning}`);
+
+            // Override hardcoded stops/targets with AI predictions
+            stopLoss = thesisPrediction.stopLossPrice;
+            takeProfit = thesisPrediction.targetPrice;
+
+          } catch (thesisError) {
+            log(`⚠️ Thesis prediction failed, using fallback targets: ${thesisError instanceof Error ? thesisError.message : 'Unknown error'}`);
+            // Fallback to existing stopLoss/takeProfit calculated above
+          }
+
           try {
             // 🔥 Execute trade directly on Kraken API FIRST - only create database position if successful
             let orderResult: any = null;
@@ -2848,8 +2972,10 @@ class ProductionTradingEngine {
                 ordertype: 'limit' as const, // 🔧 V3.14.8: Changed from 'market' to 'limit'
                 volume: actualQuantity.toFixed(lotDecimals), // 🔧 V3.14.9: Use correct lot decimals
                 price: limitPrice.toFixed(pairDecimals), // 🔧 V3.14.9: Use correct pair decimals (was 8 for all)
-                // Add leverage for margin SHORT orders (1x = no leverage for safety)
-                ...(side === 'short' && process.env.ENABLE_MARGIN_TRADING === 'true' ? { leverage: 'none' } : {})
+                // 🔧 V3.14.25: Add leverage for margin SHORT orders (2x minimum for most pairs)
+                // PROBLEM: Kraken rejects 'none' (1x) for pairs like WIFUSD - they require minimum 2x leverage
+                // SOLUTION: Use '2' (2x) for SHORT orders instead of 'none'
+                ...(side === 'short' && process.env.ENABLE_MARGIN_TRADING === 'true' ? { leverage: '2' } : {})
               };
 
               log(`🔥 KRAKEN API: Placing ${side.toUpperCase()} ${side === 'short' ? 'MARGIN' : ''} LIMIT order for ${actualQuantity.toFixed(lotDecimals)} ${data.symbol} @ $${limitPrice.toFixed(pairDecimals)}`);
@@ -2880,6 +3006,16 @@ class ProductionTradingEngine {
                     predictedMove: aiAnalysis.enhancedAnalysis?.predictedMove || adjustedTakeProfit || 1.5,
                     positionSize: quantity,
                     krakenOrderId: krakenOrderId, // Store Kraken order ID for tracking
+                    // 🎯 TRADE THESIS DATA - AI-predicted targets and stops
+                    thesisData: thesisPrediction ? {
+                      targetPrice: thesisPrediction.targetPrice,
+                      stopLossPrice: thesisPrediction.stopLossPrice,
+                      expectedReturn: thesisPrediction.expectedReturn,
+                      expectedTimeframe: thesisPrediction.expectedTimeframe,
+                      riskRewardRatio: thesisPrediction.riskRewardRatio,
+                      predictionConfidence: thesisPrediction.predictionConfidence,
+                      reasoning: thesisPrediction.reasoning,
+                    } : null,
                     tensorDecisionData: {
                       // 🔧 V2.7 DATABASE FIX: Store only database-safe fields from tensor decision
                       direction: aiAnalysis.tensorDecision?.direction,
@@ -2918,8 +3054,18 @@ class ProductionTradingEngine {
               }
               
             } catch (krakenError) {
-              log(`❌ KRAKEN API ERROR: ${krakenError instanceof Error ? krakenError.message : 'Unknown error'}`);
-              // Still keep the webhook as backup notification
+              const errorMessage = krakenError instanceof Error ? krakenError.message : 'Unknown error';
+              log(`❌ KRAKEN API ERROR: ${errorMessage}`);
+
+              // 🔧 V3.14.25: Block geographically restricted pairs to prevent retry loops
+              if (errorMessage.includes('trading restricted') || errorMessage.includes('Invalid permissions')) {
+                this.geographicBlocklist.add(data.symbol);
+                log(`🚫 V3.14.25 GEOGRAPHIC BLOCK: ${data.symbol} added to blocklist (restricted in this region)`);
+                // Don't try webhook backup for blocked pairs
+                continue; // Skip to next opportunity
+              }
+
+              // Still keep the webhook as backup notification (for non-blocked pairs)
               try {
                 const response = await fetch('https://kraken.circuitcartel.com/webhook', {
                   method: 'POST',
@@ -4545,6 +4691,137 @@ class ProductionTradingEngine {
       }
     } catch (error) {
       return 0;
+    }
+  }
+
+  /**
+   * 🔧 V3.14.26: AGGRESSIVE STALE ORDER CLEANUP
+   * Cancel unfilled limit orders that are locking up capital
+   *
+   * Philosophy: Just like V3.14.24 rotates out of flat positions, we should
+   * cancel stale orders that aren't filling. Capital velocity > price perfection.
+   */
+  private async cancelStaleOrders(): Promise<void> {
+    try {
+      const currentTime = Date.now();
+
+      // 🎯 THROTTLE: Only check every 30 seconds
+      if (currentTime - this.lastOrderCleanup < this.ORDER_CLEANUP_INTERVAL) {
+        return;
+      }
+
+      this.lastOrderCleanup = currentTime;
+
+      // 🔍 STEP 1: Fetch all open orders from Kraken
+      const openOrdersResponse = await krakenApiService.getOpenOrders();
+
+      if (!openOrdersResponse?.result?.open) {
+        // No open orders, clear our tracking map
+        if (this.pendingOrders.size > 0) {
+          log(`✅ V3.14.26 ORDER CLEANUP: No open orders, clearing ${this.pendingOrders.size} tracked orders`);
+          this.pendingOrders.clear();
+        }
+        return;
+      }
+
+      const openOrders = openOrdersResponse.result.open;
+      const orderIds = Object.keys(openOrders);
+
+      if (orderIds.length === 0) {
+        if (this.pendingOrders.size > 0) {
+          log(`✅ V3.14.26 ORDER CLEANUP: No open orders, clearing ${this.pendingOrders.size} tracked orders`);
+          this.pendingOrders.clear();
+        }
+        return;
+      }
+
+      log(`🔍 V3.14.26 ORDER AUDIT: Found ${orderIds.length} open orders on Kraken`);
+
+      // 🔍 STEP 2: Track new orders and identify stale ones
+      const ordersToCancel: string[] = [];
+      const now = Date.now();
+
+      for (const orderId of orderIds) {
+        const order = openOrders[orderId];
+        const orderSymbol = order.descr?.pair || 'UNKNOWN';
+        const orderSide = order.descr?.type || 'unknown';
+        const orderPrice = order.descr?.price || '0';
+        const orderVolume = order.vol || '0';
+        const orderAge = order.opentm ? (now / 1000) - order.opentm : 0; // Kraken time is in seconds
+
+        // Track this order if we haven't seen it before
+        if (!this.pendingOrders.has(orderId)) {
+          this.pendingOrders.set(orderId, {
+            symbol: orderSymbol,
+            side: orderSide,
+            volume: orderVolume,
+            price: orderPrice,
+            placedAt: now - (orderAge * 1000) // Estimate when it was placed
+          });
+          log(`📝 V3.14.26: Tracking new order ${orderId}: ${orderSide} ${orderVolume} ${orderSymbol} @ $${orderPrice}`);
+        }
+
+        const trackedOrder = this.pendingOrders.get(orderId)!;
+        const ageMs = now - trackedOrder.placedAt;
+        const ageMinutes = ageMs / 60000;
+
+        // 🚨 CRITERION 1: Very stale (>2 minutes) - Always cancel
+        if (ageMs > this.STALE_ORDER_TIMEOUT) {
+          ordersToCancel.push(orderId);
+          log(`🚨 STALE ORDER (${ageMinutes.toFixed(1)}min): ${orderId} - ${orderSide} ${orderVolume} ${orderSymbol} @ $${orderPrice}`);
+          continue;
+        }
+
+        // 🚨 CRITERION 2: Moderately stale (>1 minute) for aggressive fills
+        // If we used aggressive limit pricing (0.3% past market), order should fill FAST
+        // If it hasn't filled in 1 minute, market moved away - cancel and reassess
+        if (ageMs > this.VERY_STALE_ORDER_TIMEOUT) {
+          // Check if this was an aggressive order (we don't store this, so assume limit orders >1min are stale)
+          ordersToCancel.push(orderId);
+          log(`⚡ AGGRESSIVE ORDER STALE (${ageMinutes.toFixed(1)}min): ${orderId} - ${orderSide} ${orderVolume} ${orderSymbol} @ $${orderPrice}`);
+        }
+      }
+
+      // 🔍 STEP 3: Remove orders from tracking that are no longer open (filled or manually cancelled)
+      const filledOrders: string[] = [];
+      for (const trackedOrderId of this.pendingOrders.keys()) {
+        if (!orderIds.includes(trackedOrderId)) {
+          filledOrders.push(trackedOrderId);
+          const order = this.pendingOrders.get(trackedOrderId)!;
+          const ageMinutes = (now - order.placedAt) / 60000;
+          log(`✅ ORDER FILLED/REMOVED: ${trackedOrderId} - ${order.side} ${order.volume} ${order.symbol} (${ageMinutes.toFixed(1)}min)`);
+        }
+      }
+
+      filledOrders.forEach(orderId => this.pendingOrders.delete(orderId));
+
+      // 🔍 STEP 4: Cancel stale orders
+      if (ordersToCancel.length === 0) {
+        log(`✅ V3.14.26: All ${orderIds.length} orders are fresh (no cancellations needed)`);
+        return;
+      }
+
+      log(`🗑️  V3.14.26: Cancelling ${ordersToCancel.length} stale orders...`);
+
+      for (const orderId of ordersToCancel) {
+        try {
+          await krakenApiService.cancelOrder(orderId);
+          const order = this.pendingOrders.get(orderId);
+          log(`✅ CANCELLED: ${orderId} - ${order?.symbol} ${order?.side} @ $${order?.price}`);
+          this.pendingOrders.delete(orderId);
+
+          // 🔧 V3.14.26: Reset balance cache after cancelling order (capital is now free)
+          this.balanceCalculator.resetCache();
+        } catch (cancelError) {
+          log(`❌ Failed to cancel order ${orderId}: ${cancelError.message}`);
+        }
+      }
+
+      log(`🔄 V3.14.26: Cleanup complete - ${ordersToCancel.length} cancelled, ${filledOrders.length} filled, ${this.pendingOrders.size} still pending`);
+
+    } catch (error) {
+      log(`❌ V3.14.26 ORDER CLEANUP ERROR: ${error.message}`);
+      // Don't throw - cleanup failure shouldn't stop trading
     }
   }
 

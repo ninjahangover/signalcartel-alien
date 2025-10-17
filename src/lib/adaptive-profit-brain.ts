@@ -303,9 +303,12 @@ export class AdaptiveProfitBrain {
 
     // 🧠 NEW: AI confidence respect threshold (when AI says HOLD with >X%, trust it)
     // V3.14.0: Start higher to respect AI more (fewer overrides)
+    // 🔧 V3.14.25 FIX: Lower AI respect threshold to allow more pattern overrides
+    // PROBLEM: AI said HOLD with 72% confidence, system stuck in loop (72% < 80% but pattern override didn't trigger)
+    // SOLUTION: Lower to 75% so we respect AI less often, allow pattern-based exits more frequently
     this.thresholds.set('aiConfidenceRespectThreshold', {
       name: 'aiConfidenceRespectThreshold',
-      currentValue: 0.80, // Start at 80% (was 70%), guide toward 75%
+      currentValue: 0.75, // 🔧 V3.14.25: Lowered from 80% to 75%
       learningRate: baseLearningRate * 1.5, // Faster learning (was 1.2x)
       momentum: momentumDecay,
       velocity: 0,
@@ -315,7 +318,7 @@ export class AdaptiveProfitBrain {
       profitHistory: [],
       adjustmentHistory: [],
       explorationNoise: 0.10, // More exploration (was 0.08)
-      optimalEstimate: 0.75 // Guide toward 75% (was 85%) - balance AI trust with overrides
+      optimalEstimate: 0.70 // 🔧 V3.14.25: Lowered from 75% to 70%
     });
 
     // ⏱️ NEW: Minimum hold time in minutes (start 5min, guide toward 15min)
