@@ -2892,6 +2892,58 @@ class ProductionTradingEngine {
 
           log(`💰 Position Sizing: $${positionSizeInDollars.toFixed(2)} = ${actualQuantity.toFixed(6)} ${data.symbol} @ $${data.price.toFixed(2)}`);
 
+          // 🎯 V3.14.27: PROACTIVE MARKET ENTRY VALIDATION (before balance check)
+          // PROBLEM: System enters reactively when AI signals appear → BTC 11.4% win rate, DOT 5.6%, most 0%
+          // SOLUTION: Validate market momentum, timing, and price targets BEFORE entry
+          try {
+            const { ProactiveEntryValidator } = await import('./src/lib/proactive-entry-validator');
+            const entryValidator = new ProactiveEntryValidator();
+
+            // Get price and volume history for validation
+            const priceHistory = this.getPriceHistory(data.symbol);
+            const volumeHistory = this.getVolumeHistory(data.symbol);
+
+            const validation = await entryValidator.validateEntry(
+              data.symbol,
+              side === 'long' ? 'BUY' : 'SELL',
+              data.price,
+              priceHistory || [],
+              volumeHistory || [],
+              aiAnalysis.confidence,
+              aiAnalysis.tensorDecision?.expectedReturn || adjustedTakeProfit || 0.03
+            );
+
+            log(`🎯 V3.14.27 PROACTIVE VALIDATION: ${data.symbol} ${side.toUpperCase()}`);
+            log(`   Overall Confidence: ${validation.confidence.toFixed(1)}%`);
+            log(`   Momentum: ${validation.momentum.direction} ${validation.momentum.strength}/100 - ${validation.momentum.reasoning}`);
+            log(`   Timing: ${validation.timing.phase} (${validation.timing.confidence}% confidence) - ${validation.timing.reasoning}`);
+            log(`   Price Targets: Entry $${validation.priceTargets.entry.toFixed(6)} → TP $${validation.priceTargets.takeProfit.toFixed(6)} | SL $${validation.priceTargets.stop.toFixed(6)}`);
+            log(`   Risk-Reward: ${validation.priceTargets.riskRewardRatio.toFixed(2)}:1`);
+            log(`   ${validation.priceTargets.reasoning}`);
+
+            if (!validation.shouldEnter) {
+              log(`🚫 V3.14.27 ENTRY BLOCKED: ${validation.summary}`);
+              log(`   Blockers: ${validation.blockers.join(', ')}`);
+              continue; // Skip this trade - market not aligned for profit
+            }
+
+            // ✅ VALIDATION PASSED - Update targets with calculated values
+            log(`✅ V3.14.27 ENTRY APPROVED: ${validation.summary}`);
+
+            // Override AI targets with validated price targets
+            stopLoss = validation.priceTargets.stop;
+            takeProfit = validation.priceTargets.takeProfit;
+            adjustedStopLoss = Math.abs(validation.priceTargets.stop - data.price) / data.price;
+            adjustedTakeProfit = Math.abs(validation.priceTargets.takeProfit - data.price) / data.price;
+
+            log(`🎯 V3.14.27 TARGETS UPDATED: TP $${takeProfit.toFixed(6)} (+${(adjustedTakeProfit*100).toFixed(2)}%), SL $${stopLoss.toFixed(6)} (-${(adjustedStopLoss*100).toFixed(2)}%)`);
+
+          } catch (validationError) {
+            log(`⚠️ V3.14.27 VALIDATION ERROR: ${validationError.message}`);
+            log(`🔄 Falling back to legacy entry logic (not recommended)`);
+            // Continue with legacy logic if validator fails
+          }
+
           // 🛡️ V3.14.2: PRE-FLIGHT BALANCE VALIDATION (prevent "insufficient funds" errors)
           try {
             const currentBalanceCheck = await this.balanceCalculator.getAvailableBalance();

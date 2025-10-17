@@ -1,15 +1,16 @@
-# SignalCartel QUANTUM FORGE™ - Adaptive Learning Trading System V3.14.26
+# SignalCartel QUANTUM FORGE™ - Adaptive Learning Trading System V3.14.27
 
-## 🚀 **LATEST: V3.14.26 STALE ORDER CANCELLATION + V3.14.25 CMC VALIDATION FIX** (October 17, 2025)
+## 🚀 **LATEST: V3.14.27 PROACTIVE ENTRY VALIDATION** (October 17, 2025)
 
-### 🎯 **SYSTEM STATUS: V3.14.26 - FULL CAPITAL VELOCITY OPTIMIZATION**
+### 🎯 **SYSTEM STATUS: V3.14.27 - PROACTIVE MARKET ENTRY VALIDATION**
 
-**V3.14.26 - Stale Order Cancellation**: ⏱️ **FREE LOCKED CAPITAL FROM UNFILLED ORDERS** - No more capital trapped in stale limit orders
-**V3.14.25 - CMC Validation Fix**: 🔍 **REAL OPPORTUNITY COUNTING** - Only count Kraken-tradable coins (was falsely inflating opportunity counts)
-**Philosophy**: 💰 **MAXIMIZE CAPITAL VELOCITY** - Free capital from both stale positions AND stale orders
-**Impact**: ⚡ **COMPLETE CAPITAL OPTIMIZATION** - Rotate positions + cancel unfilled orders + validate opportunities
+**V3.14.27 - Proactive Entry Validation**: 🎯 **VALIDATE BEFORE ENTRY** - Check market momentum, timing, and price targets BEFORE entering positions
+**Problem**: Reactive entries causing losses - BTC 11.4% win rate, DOT 5.6%, most pairs 0%
+**Solution**: 4-factor validation: momentum alignment + optimal timing + calculated targets + 2:1 R:R minimum
+**Philosophy**: 💡 **STOP JUMPING INTO LOSING TRADES** - Only enter when market is primed for profit
 
 **Critical Enhancement History**:
+- ✅ **V3.14.27**: Proactive entry validation - Market momentum + timing + price targets validated before every entry
 - ✅ **V3.14.26**: Stale order cancellation - Free capital from unfilled limit orders after 1-2 minutes
 - ✅ **V3.14.25**: CMC validation fix - Filter non-Kraken coins from Profit Predator opportunity counts
 - ✅ **V3.14.24**: Aggressive capital rotation - Real opportunity counting, flat position killer, dynamic swapping
@@ -22,6 +23,135 @@
 - ✅ **V3.14.17**: Micro-price precision (8 decimals for coins < $0.01)
 - ✅ **V3.14.16**: Tensor confidence field mapping fix (0% → 78.8%)
 - ✅ **V3.14.15**: Available balance calculation (ZUSD - positions)
+
+---
+
+## 🎯 **V3.14.27 PROACTIVE MARKET ENTRY VALIDATION**
+
+### **The Problem: Reactive Trading Causing Losses**
+- **ISSUE 1**: System enters when AI signal appears, not when market is aligned for the move
+- **ISSUE 2**: Price targets showing as $0.00 - no real calculation of where price should go
+- **ISSUE 3**: No momentum validation - entering against the trend or at wrong time
+- **EVIDENCE**:
+  - BTC: 11.4% win rate (537 trades, should be 45%+)
+  - DOT: 5.6% win rate (531 trades)
+  - CAT: 0% win rate (-$2.96 avg loss, 35 trades)
+  - Most pairs: 0% accuracy
+- **ROOT CAUSE**: Reactive entries without market validation = jumping into losing positions
+
+### **The Solution: 4-Factor Proactive Validation** (src/lib/proactive-entry-validator.ts)
+
+**BEFORE EVERY ENTRY, system now validates:**
+
+**1. MARKET MOMENTUM ALIGNMENT** (must pass >40/100 strength):
+```typescript
+- Price Direction: Must match expected direction (BULLISH for BUY, BEARISH for SELL)
+- Price Strength: Recent price movement confirms the trend (10-candle analysis)
+- Volume Confirmation: Volume increasing to support the move (vs older volumes)
+- Volatility Check: In acceptable range (0.1% to 5%)
+```
+
+**2. CALCULATED PRICE TARGETS** (realistic levels, not $0.00):
+```typescript
+- Entry Price: Current market price
+- Take Profit: Based on support/resistance or AI prediction + volatility
+- Stop Loss: Below support (LONG) or above resistance (SHORT) + 1.5x ATR
+- Risk-Reward: MUST be >= 2:1 (hard requirement, blocker if fails)
+- Reasoning: Why these specific levels (logged for learning)
+```
+
+**3. OPTIMAL ENTRY TIMING** (must be > 50% confidence):
+```typescript
+- TOO_EARLY: Move hasn't started yet (<10% complete) - BLOCKED
+- OPTIMAL: Early in move (10-40% complete) - ALLOWED (85% confidence)
+- ACCEPTABLE: Mid-move (40-70% complete) - ALLOWED (65% confidence)
+- TOO_LATE: Most of move done (70-90% complete) - BLOCKED
+- MISS: Move completed (>90%) - BLOCKED
+```
+
+**4. OVERALL CONFIDENCE SCORE** (weighted combination):
+```typescript
+Overall Confidence = (
+  Momentum Strength × 35% +
+  Timing Confidence × 30% +
+  AI Confidence × 20% +
+  Risk-Reward Score × 15%
+)
+Minimum Required: 60% overall confidence to enter
+```
+
+### **Implementation** (production-trading-multi-pair.ts:2895-2945)
+
+```typescript
+// 🎯 V3.14.27: PROACTIVE MARKET ENTRY VALIDATION (before balance check)
+const { ProactiveEntryValidator } = await import('./src/lib/proactive-entry-validator');
+const entryValidator = new ProactiveEntryValidator();
+
+const validation = await entryValidator.validateEntry(
+  symbol,
+  side === 'long' ? 'BUY' : 'SELL',
+  currentPrice,
+  priceHistory,
+  volumeHistory,
+  aiConfidence,
+  aiExpectedReturn
+);
+
+log(`🎯 V3.14.27 PROACTIVE VALIDATION: ${symbol} ${side.toUpperCase()}`);
+log(`   Overall Confidence: ${validation.confidence.toFixed(1)}%`);
+log(`   Momentum: ${validation.momentum.direction} ${validation.momentum.strength}/100`);
+log(`   Timing: ${validation.timing.phase} (${validation.timing.confidence}%)`);
+log(`   Price Targets: Entry $${validation.priceTargets.entry.toFixed(6)} → TP $${validation.priceTargets.takeProfit.toFixed(6)} | SL $${validation.priceTargets.stop.toFixed(6)}`);
+log(`   Risk-Reward: ${validation.priceTargets.riskRewardRatio.toFixed(2)}:1`);
+
+if (!validation.shouldEnter) {
+  log(`🚫 V3.14.27 ENTRY BLOCKED: ${validation.summary}`);
+  log(`   Blockers: ${validation.blockers.join(', ')}`);
+  continue; // Skip this trade - market not aligned for profit
+}
+
+// ✅ VALIDATION PASSED - Update targets with calculated values
+stopLoss = validation.priceTargets.stop;
+takeProfit = validation.priceTargets.takeProfit;
+```
+
+### **Impact Analysis**
+
+**BEFORE V3.14.27** (Reactive Entries):
+- ❌ Enters when AI signal appears (reactive)
+- ❌ No momentum validation (enters against trends)
+- ❌ No timing validation (too early or too late)
+- ❌ Price targets = $0.00 (no real calculation)
+- ❌ BTC: 11.4% win rate (537 trades)
+- ❌ DOT: 5.6% win rate (531 trades)
+- ❌ CAT: 0% win rate, -$2.96 avg loss
+
+**AFTER V3.14.27** (Proactive Validation):
+- ✅ Validates momentum BEFORE entry (40+ strength required)
+- ✅ Validates timing BEFORE entry (50%+ timing confidence)
+- ✅ Calculates real price targets (support/resistance + volatility)
+- ✅ Enforces 2:1 minimum risk-reward ratio
+- ✅ Overall 60%+ confidence required to enter
+- ✅ Expected: Win rate improvement from 5-11% → 45%+
+
+### **Monitoring V3.14.27**
+
+```bash
+# Monitor proactive validation decisions in real-time
+./monitor-v3-27.sh
+
+# Shows:
+# - Entry validation checks (momentum, timing, R:R)
+# - Blocked entries with reasons
+# - Approved entries with confidence scores
+# - Calculated price targets for each entry
+```
+
+### **Expected Results**
+- **Higher Win Rate**: Only enter when market is primed (expect 45%+ vs current 5-11%)
+- **Better Entries**: No more jumping into positions at wrong time
+- **Real Targets**: Every entry has calculated stop/target levels
+- **Fewer Bad Trades**: Momentum/timing blockers prevent reactive losses
 
 ---
 
