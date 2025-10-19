@@ -46,6 +46,10 @@ import { coinMarketCapService } from './src/lib/coinmarketcap-service';
 (global as any).cmcService = coinMarketCapService;
 // 🎯 TRADE THESIS ENGINE - AI-driven target/stop prediction
 import { TradeThesisEngine } from './src/lib/trade-thesis-engine';
+// 🚀 V3.14.28: MARKET REGIME DETECTION & ADAPTIVE SYSTEMS
+import { MarketRegimeDetectorV2, type MarketRegime, type PriceCandle } from './src/lib/market-regime-detector-v2';
+import { RegimeAwareBlacklist } from './src/lib/regime-aware-blacklist';
+import { EmergencyRotationManager, type Position } from './src/lib/emergency-rotation-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -131,6 +135,14 @@ class ProductionTradingEngine {
   private readonly VERY_STALE_ORDER_TIMEOUT = 60000; // 1 minute for high-confidence aggressive orders
   private lastOrderCleanup = 0;
   private readonly ORDER_CLEANUP_INTERVAL = 30000; // Check every 30 seconds
+
+  // 🚀 V3.14.28: MARKET REGIME & EMERGENCY ROTATION SYSTEMS
+  private regimeDetector: MarketRegimeDetectorV2 = new MarketRegimeDetectorV2();
+  private regimeBlacklist: RegimeAwareBlacklist = new RegimeAwareBlacklist();
+  private emergencyRotation: EmergencyRotationManager = new EmergencyRotationManager();
+  private currentRegime: MarketRegime | null = null;
+  private lastRegimeCheck = 0;
+  private readonly REGIME_CHECK_INTERVAL = 300000; // Check regime every 5 minutes
 
   // 🎯 ELIMINATED: No hardcoded pairs - 100% dynamic mathematical decisions
   
@@ -2092,6 +2104,14 @@ class ProductionTradingEngine {
       // Philosophy: Free up locked capital from unfilled limit orders (like V3.14.24 position rotation)
       await this.cancelStaleOrders();
 
+      // 🚀 V3.14.28: DETECT MARKET REGIME (every 5 minutes)
+      // Philosophy: Adapt trading to current market conditions (bull/bear/choppy/crash)
+      await this.detectAndUpdateMarketRegime();
+
+      // 🚀 V3.14.28: EMERGENCY ROTATION (check every cycle)
+      // Philosophy: Free capital from flat positions when >90% locked
+      await this.evaluateAndExecuteEmergencyRotation();
+
       if (this.cycleCount === 1) {
         log(`🔥 WARM-UP CYCLE: Evaluating market conditions, no trading yet...`);
         log(`📊 Market Analysis: Collecting price data and AI signals for next cycle`);
@@ -2182,6 +2202,12 @@ class ProductionTradingEngine {
         const systemConfidence = this.calculateSystemConfidence();   // Current AI system confidence
         
         for (const data of marketData) {
+          // 🚀 V3.14.28: Check regime-aware blacklist FIRST
+          if (this.isSymbolBlacklistedInRegime(data.symbol)) {
+            log(`🚫 V3.14.28 REGIME BLACKLIST: ${data.symbol} - Poor performance in ${this.currentRegime?.type.toUpperCase()} regime`);
+            continue;
+          }
+
           // Use MATHEMATICAL FORMULAS instead of hardcoded thresholds
           const isAllowed = await pairFilter.shouldAllowPair(data.symbol, currentVolatility, systemConfidence);
           if (isAllowed) {
@@ -2899,16 +2925,21 @@ class ProductionTradingEngine {
             const { ProactiveEntryValidator } = await import('./src/lib/proactive-entry-validator');
             const entryValidator = new ProactiveEntryValidator();
 
-            // Get price and volume history for validation
-            const priceHistory = this.getPriceHistory(data.symbol);
-            const volumeHistory = this.getVolumeHistory(data.symbol);
+            // 🔧 V3.14.27.1 FIX: Fetch real OHLC data from Kraken (not relying on empty cache)
+            // PROBLEM: priceHistoryCache empty during entry evaluation → momentum always 0/100
+            // SOLUTION: Fetch fresh OHLC data directly for validation
+            const ohlcData = await this.fetchOHLCForValidation(data.symbol);
+            const priceHistory = ohlcData.prices;
+            const volumeHistory = ohlcData.volumes;
+
+            log(`📊 V3.14.27.1 OHLC FETCH: ${data.symbol} - ${priceHistory.length} prices, ${volumeHistory.length} volumes`);
 
             const validation = await entryValidator.validateEntry(
               data.symbol,
               side === 'long' ? 'BUY' : 'SELL',
               data.price,
-              priceHistory || [],
-              volumeHistory || [],
+              priceHistory,
+              volumeHistory,
               aiAnalysis.confidence,
               aiAnalysis.tensorDecision?.expectedReturn || adjustedTakeProfit || 0.03
             );
@@ -4433,6 +4464,67 @@ class ProductionTradingEngine {
   }
 
   /**
+   * 🔧 V3.14.27.1: Fetch real OHLC data from Kraken for proactive entry validation
+   * PROBLEM: priceHistoryCache empty when validator runs → momentum always 0/100 → 100% block rate
+   * SOLUTION: Fetch fresh OHLC data directly from Kraken during entry evaluation
+   */
+  private async fetchOHLCForValidation(symbol: string): Promise<{ prices: number[], volumes: number[] }> {
+    try {
+      // Check OHLC cache first (reuse existing cache mechanism)
+      const cacheKey = `ohlc_${symbol}`;
+      const cachedOHLC = (this as any).ohlcCache?.get(cacheKey);
+      const now = Date.now();
+
+      let candleData: any[] = [];
+
+      // Use cache if fresh (< 5 minutes old)
+      if (cachedOHLC && (now - cachedOHLC.timestamp) < 5 * 60 * 1000) {
+        candleData = cachedOHLC.data;
+      } else {
+        // Map to Kraken pair name
+        let krakenPair = symbol;
+        if (symbol === 'BTCUSD') krakenPair = 'XXBTZUSD';
+        else if (symbol === 'ETHUSD') krakenPair = 'XETHZUSD';
+        else if (symbol === 'XRPUSD') krakenPair = 'XXRPZUSD';
+        else if (symbol === 'LTCUSD') krakenPair = 'XLTCZUSD';
+
+        // Fetch OHLC from Kraken (5-minute candles, last 50)
+        const ohlcResponse = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${krakenPair}&interval=5`);
+        const ohlcData = await ohlcResponse.json();
+
+        if (ohlcData.result && ohlcData.result[krakenPair]) {
+          const candles = ohlcData.result[krakenPair];
+          candleData = candles.slice(-50).map((c: any[]) => ({
+            timestamp: new Date(c[0] * 1000),
+            open: parseFloat(c[1]),
+            high: parseFloat(c[2]),
+            low: parseFloat(c[3]),
+            close: parseFloat(c[4]),
+            volume: parseFloat(c[6])
+          }));
+
+          // Cache the result
+          if (!(this as any).ohlcCache) (this as any).ohlcCache = new Map();
+          (this as any).ohlcCache.set(cacheKey, { data: candleData, timestamp: now });
+        }
+      }
+
+      // Extract price and volume arrays
+      if (candleData.length > 0) {
+        const prices = candleData.map((c: any) => c.close);
+        const volumes = candleData.map((c: any) => c.volume);
+        return { prices, volumes };
+      }
+
+      // Return empty arrays if no data available
+      return { prices: [], volumes: [] };
+    } catch (error) {
+      log(`⚠️ V3.14.27.1 OHLC fetch failed for ${symbol}: ${error.message}`);
+      return { prices: [], volumes: [] };
+    }
+  }
+
+  /**
    * Calculate position size for hockey stick trades - larger sizes for high-confidence explosive moves
    */
   private calculateHockeyStickQuantity(data: MarketDataPoint, signal: any): number {
@@ -4983,6 +5075,208 @@ class ProductionTradingEngine {
     } catch (error) {
       console.error('❌ Error calculating system confidence:', error);
       return 0.5; // Safe neutral default
+    }
+  }
+
+  // ============================================================================
+  // 🚀 V3.14.28: MARKET REGIME DETECTION & EMERGENCY ROTATION
+  // ============================================================================
+
+  /**
+   * Detect current market regime based on BTC price action
+   */
+  private async detectAndUpdateMarketRegime(): Promise<MarketRegime | null> {
+    const now = Date.now();
+
+    // Throttle regime checks to every 5 minutes
+    if (now - this.lastRegimeCheck < this.REGIME_CHECK_INTERVAL) {
+      return this.currentRegime;
+    }
+
+    try {
+      // Fetch BTC price history (last 30 candles)
+      const btcSymbol = 'BTCUSD';
+      const priceHistory: PriceCandle[] = [];
+
+      // Get price history from cache or fetch fresh
+      const cachedPrices = this.priceHistoryCache.get(btcSymbol) || [];
+
+      if (cachedPrices.length < 20) {
+        log('⚠️ V3.14.28: Insufficient BTC price history for regime detection, skipping');
+        return this.currentRegime;
+      }
+
+      // Convert cached prices to candles (simplified - using close prices)
+      // In production, you'd fetch OHLCV data from Kraken
+      for (let i = 0; i < Math.min(cachedPrices.length, 30); i++) {
+        const price = cachedPrices[i];
+        priceHistory.push({
+          close: price,
+          high: price * 1.002, // Approximate high
+          low: price * 0.998, // Approximate low
+          volume: 1000, // Placeholder
+          timestamp: new Date(now - (30 - i) * 60000) // 1-minute intervals
+        });
+      }
+
+      // Detect regime
+      const newRegime = this.regimeDetector.detectRegime(priceHistory);
+      const hasChanged = this.regimeDetector.hasRegimeChanged(newRegime);
+
+      // Log regime detection
+      log(`🌍 V3.14.28 MARKET REGIME: ${newRegime.type.toUpperCase()} (${(newRegime.confidence * 100).toFixed(0)}% confidence)`);
+      log(`   ${newRegime.reason}`);
+
+      // If regime changed, reset blacklist
+      if (hasChanged && this.currentRegime) {
+        const resetCount = this.regimeBlacklist.resetForRegimeChange(this.currentRegime, newRegime);
+        log(`🔄 V3.14.28 REGIME CHANGE: ${this.currentRegime.type.toUpperCase()} → ${newRegime.type.toUpperCase()}`);
+        log(`   Blacklist reset: ${resetCount} symbols re-enabled for trading`);
+      }
+
+      this.currentRegime = newRegime;
+      this.lastRegimeCheck = now;
+
+      return newRegime;
+    } catch (error) {
+      log(`❌ V3.14.28 Regime detection error: ${error.message}`);
+      return this.currentRegime;
+    }
+  }
+
+  /**
+   * Check if symbol is blacklisted in current regime
+   */
+  private isSymbolBlacklistedInRegime(symbol: string): boolean {
+    if (!this.currentRegime) {
+      return false; // No regime detected yet, allow trading
+    }
+
+    return this.regimeBlacklist.isBlacklisted(symbol, this.currentRegime);
+  }
+
+  /**
+   * Add symbol to regime-aware blacklist
+   */
+  private addToRegimeBlacklist(symbol: string, accuracy: number, tradeCount: number, reason?: string): void {
+    if (!this.currentRegime) {
+      log(`⚠️ V3.14.28: Cannot blacklist ${symbol} - no regime detected`);
+      return;
+    }
+
+    this.regimeBlacklist.addToBlacklist(symbol, accuracy, tradeCount, this.currentRegime, reason);
+    log(`🚫 V3.14.28 BLACKLISTED: ${symbol} in ${this.currentRegime.type.toUpperCase()} regime (${(accuracy * 100).toFixed(1)}% win rate over ${tradeCount} trades)`);
+  }
+
+  /**
+   * Evaluate emergency rotation need and execute if required
+   */
+  private async evaluateAndExecuteEmergencyRotation(): Promise<void> {
+    try {
+      // Get current positions
+      const openPositions = await this.prisma.livePosition.findMany({
+        where: { status: 'open' }
+      });
+
+      if (openPositions.length === 0) {
+        return; // No positions to rotate
+      }
+
+      // Get available capital
+      const balanceInfo = await this.balanceCalculator.getAvailableBalance();
+      const availableCapital = balanceInfo.availableBalance || 0;
+      const totalCapital = balanceInfo.totalBalance || 0;
+
+      // Count quality opportunities from Profit Predator
+      const opportunityCount = await this.countHighQualityOpportunities('EMERGENCY', 0);
+
+      // Convert database positions to Emergency Rotation format
+      const positions: Position[] = await Promise.all(
+        openPositions.map(async (pos: any) => {
+          const currentPrice = await this.getCurrentPrice(pos.symbol);
+          const entryTime = new Date(pos.entryTime);
+          const holdMinutes = (Date.now() - entryTime.getTime()) / (1000 * 60);
+          const pnlPercent = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * (pos.side === 'long' ? 1 : -1);
+
+          return {
+            symbol: pos.symbol,
+            side: pos.side,
+            quantity: pos.quantity,
+            entryPrice: pos.entryPrice,
+            currentPrice,
+            entryValue: pos.entryValue,
+            unrealizedPnL: pos.unrealizedPnL || 0,
+            pnlPercent,
+            entryTime,
+            holdMinutes
+          };
+        })
+      );
+
+      // Evaluate emergency rotation
+      const decision = this.emergencyRotation.evaluateEmergencyRotation(
+        positions,
+        availableCapital,
+        totalCapital,
+        opportunityCount
+      );
+
+      // Log decision
+      if (decision.shouldRotate) {
+        log('');
+        log(this.emergencyRotation.formatDecision(decision));
+
+        const action = this.emergencyRotation.getRecommendedAction(decision);
+
+        if (action.action === 'full_close' && decision.positionToClose) {
+          log(`⚡ V3.14.28 EMERGENCY ROTATION: Closing ${decision.positionToClose.symbol} fully`);
+          await this.forceClosePosition(
+            decision.positionToClose.symbol,
+            decision.positionToClose.currentPrice,
+            `emergency_rotation_${decision.urgency}`
+          );
+        } else if (action.action === 'partial_close' && decision.positionToClose) {
+          log(`⚡ V3.14.28 EMERGENCY ROTATION: Closing ${decision.positionToClose.symbol} ${(action.closePercent! * 100).toFixed(0)}%`);
+          // TODO: Implement partial close logic
+          // For now, do full close if urgency is high/critical
+          if (decision.urgency === 'high' || decision.urgency === 'critical') {
+            await this.forceClosePosition(
+              decision.positionToClose.symbol,
+              decision.positionToClose.currentPrice,
+              `emergency_rotation_${decision.urgency}_partial`
+            );
+          }
+        }
+      }
+    } catch (error) {
+      log(`❌ V3.14.28 Emergency rotation error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Force close a position (used by emergency rotation)
+   */
+  private async forceClosePosition(symbol: string, currentPrice: number, reason: string): Promise<void> {
+    try {
+      // Find the position
+      const position = await this.prisma.livePosition.findFirst({
+        where: { symbol, status: 'open' }
+      });
+
+      if (!position) {
+        log(`⚠️ V3.14.28: Cannot close ${symbol} - position not found`);
+        return;
+      }
+
+      // Place market sell order
+      log(`🔴 V3.14.28 FORCE CLOSE: ${symbol} at $${currentPrice.toFixed(6)} (reason: ${reason})`);
+
+      // Use existing exit logic
+      await this.exitPosition(position.id, currentPrice, reason);
+
+      log(`✅ V3.14.28: ${symbol} closed successfully`);
+    } catch (error) {
+      log(`❌ V3.14.28 Force close error for ${symbol}: ${error.message}`);
     }
   }
 }

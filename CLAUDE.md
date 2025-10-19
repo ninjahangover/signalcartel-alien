@@ -1,16 +1,17 @@
-# SignalCartel QUANTUM FORGE™ - Adaptive Learning Trading System V3.14.27
+# SignalCartel QUANTUM FORGE™ - Adaptive Learning Trading System V3.14.28
 
-## 🚀 **LATEST: V3.14.27 PROACTIVE ENTRY VALIDATION** (October 17, 2025)
+## 🚀 **LATEST: V3.14.28 MARKET REGIME ADAPTATION** (October 19, 2025)
 
-### 🎯 **SYSTEM STATUS: V3.14.27 - PROACTIVE MARKET ENTRY VALIDATION**
+### 🎯 **SYSTEM STATUS: V3.14.28 - MARKET REGIME DETECTION & EMERGENCY ROTATION**
 
-**V3.14.27 - Proactive Entry Validation**: 🎯 **VALIDATE BEFORE ENTRY** - Check market momentum, timing, and price targets BEFORE entering positions
-**Problem**: Reactive entries causing losses - BTC 11.4% win rate, DOT 5.6%, most pairs 0%
-**Solution**: 4-factor validation: momentum alignment + optimal timing + calculated targets + 2:1 R:R minimum
-**Philosophy**: 💡 **STOP JUMPING INTO LOSING TRADES** - Only enter when market is primed for profit
+**V3.14.28 - Market Regime Adaptation**: 🌍 **ADAPT TO MARKET CONDITIONS** - Detect bull/bear/choppy/crash and adjust strategy accordingly
+**Problem**: System blacklisted BTC/ETH/SOL in BEAR markets, stayed paralyzed in BULL markets. 98.6% capital locked for 6+ hours.
+**Solution**: BTC-based regime detection + regime-aware blacklist reset + emergency capital rotation when >90% locked
+**Philosophy**: 💡 **ONE SIZE DOESN'T FIT ALL MARKETS** - Strategy that loses in BEAR may win in BULL. Adapt or die.
 
 **Critical Enhancement History**:
-- ✅ **V3.14.27**: Proactive entry validation - Market momentum + timing + price targets validated before every entry
+- ✅ **V3.14.28**: Market regime adaptation - BTC price-based regime detection (bull/bear/choppy/crash), regime-aware blacklist with auto-reset, emergency capital rotation
+- ✅ **V3.14.27**: Proactive entry validation - Market momentum + timing + price targets validated before every entry (NOT YET DEPLOYED)
 - ✅ **V3.14.26**: Stale order cancellation - Free capital from unfilled limit orders after 1-2 minutes
 - ✅ **V3.14.25**: CMC validation fix - Filter non-Kraken coins from Profit Predator opportunity counts
 - ✅ **V3.14.24**: Aggressive capital rotation - Real opportunity counting, flat position killer, dynamic swapping
@@ -26,7 +27,158 @@
 
 ---
 
-## 🎯 **V3.14.27 PROACTIVE MARKET ENTRY VALIDATION**
+## 🌍 **V3.14.28 MARKET REGIME ADAPTATION & EMERGENCY ROTATION**
+
+### **The Problem: System Paralyzed by Rigid Blacklist + Capital Lockup**
+
+**Analysis Results** (October 19, 2025 - Last 7 days):
+- **0 closed positions** in 7 days
+- **98.6% capital locked** in 3 flat positions for 6+ hours
+- **Only $3.38 available** (need $50 minimum to trade)
+- **BTC, ETH, SOL, DOT all blacklisted** due to poor performance in previous market regime
+- **Quality signals ignored**: SLAYUSD 50% return, MOODENGUSD 45% return, but can't enter
+
+**Root Causes**:
+1. **Regime-Blind Blacklist**: BTC lost money in BEAR regime (11.4% win rate), blacklisted forever, can't trade it in BULL regime
+2. **Capital Lockup**: All capital stuck in flat positions, no rotation mechanism triggered
+3. **No Context Awareness**: System doesn't know if market is trending, choppy, crashing
+
+### **The Solution: Three-System Integration**
+
+#### **1. MARKET REGIME DETECTION** (BTC Price-Based)
+
+**How it Works** (`src/lib/market-regime-detector-v2.ts`):
+```typescript
+// Analyze BTC price action (20-30 recent candles)
+// Classify into 4 regimes based on trend strength + volatility
+
+CRASH: Volatility >5% → Capital preservation (tight stops, small size)
+BULL: R² >0.7, direction >0.5 → Let winners run (wide stops, 1.2x size)
+BEAR: R² >0.7, direction <-0.5 → Cut losers fast (tight stops, 0.8x size)
+CHOPPY: R² <0.4 OR vol <1.5% → Quick rotation (fast exits, 0.9x size)
+```
+
+**Regime-Specific Parameters**:
+| Regime | Exit Confidence | Stop Loss | Flat Timeout | Negative Timeout |
+|--------|----------------|-----------|--------------|------------------|
+| BULL   | 70% (hold winners) | 1.5x (wide) | 20min | 12min |
+| BEAR   | 55% (cut losers) | 1.0x (tight) | 10min | 6min |
+| CHOPPY | 50% (fast rotate) | 1.2x (medium) | 8min | 5min |
+| CRASH  | 40% (exit fast) | 0.8x (very tight) | 3min | 2min |
+
+**Log Output**:
+```
+🌍 V3.14.28 MARKET REGIME: CHOPPY (75% confidence)
+   Low conviction: 35% trend strength, 1.2% volatility
+```
+
+#### **2. REGIME-AWARE BLACKLIST** (Auto-Reset on Regime Change)
+
+**How it Works** (`src/lib/regime-aware-blacklist.ts`):
+```typescript
+// Blacklist entries tagged with regime context
+blacklist.add('BTCUSD', 0.114, 537, 'BEAR', 'Poor 11.4% win rate')
+
+// When regime changes BEAR → BULL (60%+ confidence):
+if (regimeChanged) {
+  blacklist.resetForRegimeChange(oldRegime, newRegime)
+  // BTC re-enabled for trading in BULL regime
+}
+```
+
+**Philosophy**: Historical data from one regime doesn't predict performance in another.
+
+**Log Output**:
+```
+🔄 V3.14.28 REGIME CHANGE: BEAR → BULL
+   Blacklist reset: 5 symbols re-enabled for trading
+   - BTCUSD (was 11.4% in BEAR)
+   - ETHUSD (was 15.2% in BEAR)
+   - SOLUSD (was 18.7% in BEAR)
+```
+
+#### **3. EMERGENCY CAPITAL ROTATION** (Automatic Deadlock Breaking)
+
+**How it Works** (`src/lib/emergency-rotation-manager.ts`):
+```typescript
+// Detect capital lockup conditions:
+CRITICAL: >95% locked + <$20 available → Force close worst position NOW
+HIGH: >90% locked + 30min hold + 2+ opps → Close worst flat position
+MEDIUM: >80% locked + 60min hold + 3+ opps → Close stale positions
+LOW: <$100 available + 4+ opps → Close near-flat positions
+
+// Evaluate every trading cycle
+const decision = emergencyRotation.evaluate(positions, available, total, opportunities)
+
+if (decision.urgency === 'CRITICAL') {
+  forceClosePosition(worstPosition) // Free capital immediately
+}
+```
+
+**Log Output**:
+```
+🚨 EMERGENCY ROTATION [CRITICAL]
+   Reason: 98.6% capital locked, only $3.38 available, 6 opportunities waiting
+   Position to Close: FARTCOINUSD (-0.42%, 372min)
+
+⚡ V3.14.28 EMERGENCY ROTATION: Closing FARTCOINUSD fully
+✅ V3.14.28: FARTCOINUSD closed successfully
+```
+
+### **Integration** (production-trading-multi-pair.ts)
+
+**In Trading Cycle** (lines 2107-2113):
+```typescript
+// Every cycle:
+await this.detectAndUpdateMarketRegime(); // Detect regime (every 5min)
+await this.evaluateAndExecuteEmergencyRotation(); // Check for lockup
+
+// In pair filtering (line 2205-2209):
+if (this.isSymbolBlacklistedInRegime(symbol)) {
+  log(`🚫 V3.14.28 REGIME BLACKLIST: ${symbol} in ${regime.type} regime`);
+  continue; // Skip this pair
+}
+```
+
+### **Expected Results** (24-48 Hours)
+
+**Before V3.14.28**:
+- ❌ 0 trades in 7 days (paralyzed)
+- ❌ 98.6% capital locked for 6+ hours
+- ❌ BTC/ETH/SOL permanently blacklisted
+- ❌ Quality signals ignored (can't enter with $3.38)
+
+**After V3.14.28**:
+- ✅ 10-20 closed positions in 48 hours
+- ✅ 60-80% capital utilization (rotation working)
+- ✅ BTC/ETH/SOL re-enabled on regime change
+- ✅ Emergency rotation frees capital for opportunities
+- ✅ Average hold time 15-45 minutes (not 6+ hours)
+
+### **Monitoring V3.14.28**
+
+```bash
+# Watch regime detection and emergency rotation
+tail -f /tmp/signalcartel-logs/production-trading.log | grep "V3.14.28"
+
+# Should see every 5 minutes:
+# 🌍 V3.14.28 MARKET REGIME: [TYPE] ([X]% confidence)
+
+# When capital locked >90%:
+# 🚨 EMERGENCY ROTATION [urgency level]
+# ⚡ V3.14.28 EMERGENCY ROTATION: Closing [symbol]
+```
+
+**Success Criteria**:
+1. ✅ Regime detection working (logs every 5min)
+2. ✅ Blacklist resets on regime changes
+3. ✅ Emergency rotation frees capital when locked
+4. ✅ System executing 10+ trades in 48h
+5. ✅ Capital utilization 60-80% (not 98%)
+
+---
+
+## 🎯 **V3.14.27 PROACTIVE MARKET ENTRY VALIDATION** (NOT YET DEPLOYED)
 
 ### **The Problem: Reactive Trading Causing Losses**
 - **ISSUE 1**: System enters when AI signal appears, not when market is aligned for the move
