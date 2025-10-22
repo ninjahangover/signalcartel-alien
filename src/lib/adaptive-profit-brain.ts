@@ -491,11 +491,19 @@ export class AdaptiveProfitBrain {
 
     console.log('📊 Initialized self-learning thresholds:');
     for (const [name, param] of this.thresholds) {
-      const displayValue = name === 'minLossBeforeExit'
-        ? `${(param.currentValue * 100).toFixed(1)}%`
-        : name === 'minHoldTimeMinutes'
-        ? `${param.currentValue.toFixed(1)}min`
-        : `${(param.currentValue * 100).toFixed(1)}%`;
+      // 🔧 V3.14.27.2 FIX: Correct display formatting for time/count thresholds
+      // PROBLEM: diminishingReturnsMinutes showed as "3000%" instead of "30min"
+      // PROBLEM: capitalRotationOpportunityCount showed as "300%" instead of "3 opps"
+      let displayValue: string;
+      if (name === 'minLossBeforeExit') {
+        displayValue = `${(param.currentValue * 100).toFixed(1)}%`;
+      } else if (name === 'minHoldTimeMinutes' || name === 'diminishingReturnsMinutes') {
+        displayValue = `${param.currentValue.toFixed(1)}min`;
+      } else if (name === 'capitalRotationOpportunityCount') {
+        displayValue = `${param.currentValue.toFixed(1)} opps`;
+      } else {
+        displayValue = `${(param.currentValue * 100).toFixed(1)}%`;
+      }
       console.log(`   ${name}: ${displayValue}`);
     }
   }

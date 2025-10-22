@@ -70,6 +70,37 @@ export class ProactiveEntryValidator {
     const blockers: string[] = [];
 
     // ============================================
+    // STEP 0: GREEN CANDLE GATE (V3.14.27.3)
+    // ============================================
+    // 🎯 V3.14.27.3 FIX: "Always enter when price action is green"
+    // PROBLEM: Every trade starts negative - entering on red candles or stale signals
+    // SOLUTION: Require CURRENT price movement in expected direction
+    if (priceHistory && priceHistory.length >= 3) {
+      const currentPrice = priceHistory[priceHistory.length - 1];
+      const priceOneMinuteAgo = priceHistory[priceHistory.length - 2];
+      const priceTwoMinutesAgo = priceHistory[priceHistory.length - 3];
+
+      const immediateChange = ((currentPrice - priceOneMinuteAgo) / priceOneMinuteAgo) * 100;
+      const shortTermChange = ((currentPrice - priceTwoMinutesAgo) / priceTwoMinutesAgo) * 100;
+
+      // Check if price is moving in expected direction RIGHT NOW
+      const isGreenForBuy = immediateChange > 0.05; // Price up >0.05% in last candle
+      const isRedForSell = immediateChange < -0.05; // Price down >0.05% in last candle
+
+      // Require short-term momentum alignment (last 2 candles)
+      const shortTermAligned = (expectedDirection === 'BUY' && shortTermChange > 0) ||
+                               (expectedDirection === 'SELL' && shortTermChange < 0);
+
+      if (expectedDirection === 'BUY' && !isGreenForBuy) {
+        blockers.push(`Price not green - immediate change ${immediateChange.toFixed(3)}% (need +0.05%)`);
+      } else if (expectedDirection === 'SELL' && !isRedForSell) {
+        blockers.push(`Price not red - immediate change ${immediateChange.toFixed(3)}% (need -0.05%)`);
+      } else if (!shortTermAligned) {
+        blockers.push(`Short-term momentum not aligned (${shortTermChange.toFixed(2)}% over 2 candles)`);
+      }
+    }
+
+    // ============================================
     // STEP 1: CALCULATE PRICE TARGETS
     // ============================================
     const priceTargets = this.calculatePriceTargets(
@@ -100,19 +131,23 @@ export class ProactiveEntryValidator {
       volumeHistory
     );
 
-    // BLOCKER: Momentum must align with expected direction
-    const directionMatch = (
-      (expectedDirection === 'BUY' && momentum.direction === 'BULLISH') ||
-      (expectedDirection === 'SELL' && momentum.direction === 'BEARISH')
+    // 🔧 V3.14.27.2 FIX: Allow NEUTRAL momentum if direction doesn't conflict
+    // PROBLEM: 40+ momentum + direction match was TOO STRICT (blocked 100% of trades)
+    // SOLUTION: Only block if momentum ACTIVELY CONFLICTS (e.g., BUY signal with BEARISH momentum)
+    const directionConflict = (
+      (expectedDirection === 'BUY' && momentum.direction === 'BEARISH') ||
+      (expectedDirection === 'SELL' && momentum.direction === 'BULLISH')
     );
 
-    if (!directionMatch) {
+    if (directionConflict) {
       blockers.push(`Momentum ${momentum.direction} conflicts with ${expectedDirection} signal`);
     }
 
-    // BLOCKER: Momentum must be strong enough (>40 minimum)
-    if (momentum.strength < 40) {
-      blockers.push(`Weak momentum ${momentum.strength.toFixed(0)}/100 (need 40+)`);
+    // 🔧 V3.14.27.2 FIX: Lower momentum requirement from 40 to 25
+    // RATIONALE: 40+ was blocking good opportunities in ranging markets
+    // 25+ allows entry in neutral markets IF other factors (R:R, timing, AI) are strong
+    if (momentum.strength < 25) {
+      blockers.push(`Weak momentum ${momentum.strength.toFixed(0)}/100 (need 25+)`);
     }
 
     // ============================================
@@ -126,18 +161,19 @@ export class ProactiveEntryValidator {
       priceTargets
     );
 
-    // BLOCKER: Timing must be optimal or acceptable
-    if (timing.phase === 'TOO_EARLY') {
-      blockers.push(`Entry too early - wait for setup confirmation`);
-    } else if (timing.phase === 'TOO_LATE') {
-      blockers.push(`Entry too late - move already happened`);
+    // 🔧 V3.14.27.2 FIX: Only block TOO_LATE and MISS phases
+    // PROBLEM: TOO_EARLY was blocking entries that could still be profitable
+    // SOLUTION: Allow TOO_EARLY if other factors strong (AI knows something we don't from OHLC)
+    if (timing.phase === 'TOO_LATE') {
+      blockers.push(`Entry too late - ${timing.reasoning}`);
     } else if (timing.phase === 'MISS') {
-      blockers.push(`Missed entry opportunity - move completed`);
+      blockers.push(`Missed entry opportunity - ${timing.reasoning}`);
     }
 
-    // BLOCKER: Timing confidence must be reasonable (>50)
-    if (timing.confidence < 50) {
-      blockers.push(`Low timing confidence ${timing.confidence.toFixed(0)}% (need 50+)`);
+    // 🔧 V3.14.27.2 FIX: Lower timing confidence from 50% to 35%
+    // RATIONALE: Timing is inherently uncertain, trust AI if confidence is reasonable
+    if (timing.confidence < 35) {
+      blockers.push(`Low timing confidence ${timing.confidence.toFixed(0)}% (need 35+)`);
     }
 
     // ============================================
@@ -162,7 +198,9 @@ export class ProactiveEntryValidator {
     // STEP 5: FINAL DECISION
     // ============================================
 
-    const shouldEnter = blockers.length === 0 && overallConfidence >= 60;
+    // 🔧 V3.14.27.2 FIX: Lower overall confidence from 60% to 50%
+    // RATIONALE: With stricter blocker checks (R:R 2:1+, illiquid filter), 50% is sufficient
+    const shouldEnter = blockers.length === 0 && overallConfidence >= 50;
 
     const summary = shouldEnter
       ? `✅ ENTRY APPROVED: ${symbol} ${expectedDirection} @ $${currentPrice.toFixed(6)} | Target: $${priceTargets.takeProfit.toFixed(6)} | Stop: $${priceTargets.stop.toFixed(6)} | R:R ${priceTargets.riskRewardRatio.toFixed(1)}:1 | Momentum: ${momentum.strength}/100 | Timing: ${timing.phase}`
@@ -205,6 +243,14 @@ export class ProactiveEntryValidator {
     const avgRange = priceRanges.reduce((a, b) => a + b, 0) / priceRanges.length;
     const volatilityPct = (avgRange / currentPrice) * 100;
 
+    // 🔧 V3.14.27.2 FIX: Detect illiquid/flat markets (avgRange near zero)
+    // PROBLEM: DUCKUSD, SLAYUSD, etc. have identical OHLC → avgRange = $0.00 → stop = entry → R:R 0:1
+    // SOLUTION: If avgRange < 0.1% of price, use conservative fallback (minimum 1.5% stop/target)
+    if (avgRange < currentPrice * 0.001) {
+      // Illiquid/flat market - use conservative targets
+      return this.getConservativePriceTargets(direction, currentPrice, aiExpectedReturn);
+    }
+
     // Find support/resistance levels
     const support = Math.min(...recentPrices);
     const resistance = Math.max(...recentPrices);
@@ -222,6 +268,14 @@ export class ProactiveEntryValidator {
       const atrStop = currentPrice - (avgRange * 1.5);
       const supportStop = support * 0.995; // Slightly below support
       stop = Math.max(atrStop, supportStop);
+
+      // 🔧 V3.14.27.2 FIX: Ensure stop is meaningfully below entry (minimum 0.5%)
+      // PROBLEM: In tight ranges, stop could equal entry → R:R = 0:1
+      // SOLUTION: Force minimum 0.5% distance
+      const minStopDistance = currentPrice * 0.005; // 0.5% minimum
+      if (currentPrice - stop < minStopDistance) {
+        stop = currentPrice - minStopDistance;
+      }
 
       // Take profit: AI target or resistance, adjusted for volatility
       const aiTarget = currentPrice * (1 + aiExpectedReturn);
@@ -248,6 +302,12 @@ export class ProactiveEntryValidator {
       const atrStop = currentPrice + (avgRange * 1.5);
       const resistanceStop = resistance * 1.005; // Slightly above resistance
       stop = Math.min(atrStop, resistanceStop);
+
+      // 🔧 V3.14.27.2 FIX: Ensure stop is meaningfully above entry (minimum 0.5%)
+      const minStopDistance = currentPrice * 0.005; // 0.5% minimum
+      if (stop - currentPrice < minStopDistance) {
+        stop = currentPrice + minStopDistance;
+      }
 
       // Take profit: AI target or support
       const aiTarget = currentPrice * (1 - aiExpectedReturn);

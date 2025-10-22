@@ -3038,13 +3038,16 @@ class ProductionTradingEngine {
               // Convert internal side ('long'/'short') to Kraken API format ('buy'/'sell')
               const krakenSide = side === 'long' ? 'buy' : 'sell';
 
-              // 🔧 V3.14.8 FIX: Use limit orders to reduce costs (0.56% → 0.135%)
-              // Market orders: 0.26% fee + 0.2% slippage + 0.1% spread = 0.56% cost
-              // Limit orders: 0.16% fee - 0.025% improvement = 0.135% cost (4x cheaper!)
-              const useAggressiveLimitOrder = aiAnalysis.confidence > 0.7; // High confidence = aggressive fill
-              const limitPrice = useAggressiveLimitOrder
-                ? (krakenSide === 'buy' ? data.price * 1.003 : data.price * 0.997) // 0.3% past market for quick fill
-                : (krakenSide === 'buy' ? data.price * 0.999 : data.price * 1.001); // 0.1% better than market for price improvement
+              // 🔧 V3.14.27.3 FIX: "Always enter when price action is green" - aggressive limit orders
+              // PROBLEM: Passive limit orders (0.999x) only fill when price moves AGAINST you
+              // PROBLEM: Every trade starts negative due to waiting for price to drop to limit
+              // SOLUTION: ALWAYS use aggressive limit orders that fill immediately in favorable conditions
+              // - BUY: Place limit at 1.002x (0.2% above market) = fills when price is RISING
+              // - SELL: Place limit at 0.998x (0.2% below market) = fills when price is FALLING
+              // Philosophy: V3.14.27.3 green candle gate ensures momentum is correct - enter fast!
+              const limitPrice = krakenSide === 'buy'
+                ? data.price * 1.002  // BUY: 0.2% above market (fills immediately on uptrend)
+                : data.price * 0.998; // SELL: 0.2% below market (fills immediately on downtrend)
 
               // 🔧 V3.14.9 FIX: Get correct decimal precision for this pair (prevents "Invalid price" errors)
               const { pairDecimals, lotDecimals } = await this.getKrakenPairDecimals(data.symbol);
@@ -3062,7 +3065,7 @@ class ProductionTradingEngine {
               };
 
               log(`🔥 KRAKEN API: Placing ${side.toUpperCase()} ${side === 'short' ? 'MARGIN' : ''} LIMIT order for ${actualQuantity.toFixed(lotDecimals)} ${data.symbol} @ $${limitPrice.toFixed(pairDecimals)}`);
-              log(`📊 LIMIT ORDER: ${useAggressiveLimitOrder ? 'Aggressive' : 'Passive'} (confidence: ${(aiAnalysis.confidence * 100).toFixed(1)}%) - saves 0.42% vs market order`);
+              log(`📊 V3.14.27.3 AGGRESSIVE LIMIT: 0.2% ${krakenSide === 'buy' ? 'above' : 'below'} market (fills immediately on favorable momentum)`);
               log(`🔧 V3.14.9 PRECISION: Using ${pairDecimals} price decimals, ${lotDecimals} lot decimals (Kraken validated)`);
 
               orderResult = await krakenApiService.placeOrder(orderRequest);
@@ -5094,30 +5097,37 @@ class ProductionTradingEngine {
     }
 
     try {
-      // Fetch BTC price history (last 30 candles)
+      // 🔧 V3.14.28.1 FIX: Fetch real BTC OHLC data from Kraken
+      // PROBLEM: priceHistoryCache doesn't have BTC (not traded) → regime detection skipped
+      // SOLUTION: Fetch OHLC directly from Kraken public API (same as V3.14.27.1)
       const btcSymbol = 'BTCUSD';
-      const priceHistory: PriceCandle[] = [];
+      const btcOHLC = await this.fetchOHLCForValidation(btcSymbol);
 
-      // Get price history from cache or fetch fresh
-      const cachedPrices = this.priceHistoryCache.get(btcSymbol) || [];
-
-      if (cachedPrices.length < 20) {
-        log('⚠️ V3.14.28: Insufficient BTC price history for regime detection, skipping');
+      if (btcOHLC.prices.length < 20) {
+        log('⚠️ V3.14.28: Insufficient BTC OHLC data for regime detection, skipping');
         return this.currentRegime;
       }
 
-      // Convert cached prices to candles (simplified - using close prices)
-      // In production, you'd fetch OHLCV data from Kraken
-      for (let i = 0; i < Math.min(cachedPrices.length, 30); i++) {
-        const price = cachedPrices[i];
+      // Convert OHLC data to PriceCandle format
+      const priceHistory: PriceCandle[] = [];
+      for (let i = 0; i < btcOHLC.prices.length; i++) {
+        const close = btcOHLC.prices[i];
+        const volume = btcOHLC.volumes[i] || 0;
+
+        // Estimate high/low from close (conservative approximation)
+        const high = close * 1.005; // Assume 0.5% range
+        const low = close * 0.995;
+
         priceHistory.push({
-          close: price,
-          high: price * 1.002, // Approximate high
-          low: price * 0.998, // Approximate low
-          volume: 1000, // Placeholder
-          timestamp: new Date(now - (30 - i) * 60000) // 1-minute intervals
+          close,
+          high,
+          low,
+          volume,
+          timestamp: new Date(now - (btcOHLC.prices.length - i) * 5 * 60000) // 5-minute candles
         });
       }
+
+      log(`📊 V3.14.28.1: Fetched ${priceHistory.length} BTC candles for regime detection`);
 
       // Detect regime
       const newRegime = this.regimeDetector.detectRegime(priceHistory);
