@@ -165,7 +165,8 @@ class ProactiveCaptureMonitor {
     console.log(`${COLORS.bright}${COLORS.green}┌─ 📊 CURRENT POSITIONS (Profit Tracking Active) ─────────────────────────┐${COLORS.reset}`);
 
     try {
-      const positions = await prisma.managedPosition.findMany({
+      // 🔧 FIX: Query LivePosition instead of ManagedPosition
+      const positions = await prisma.livePosition.findMany({
         where: { status: 'open' },
         orderBy: { createdAt: 'desc' },
         take: 10
@@ -201,16 +202,13 @@ class ProactiveCaptureMonitor {
             ? ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * (pos.side === 'long' ? 1 : -1)
             : 0;
 
-          const metadata = pos.metadata as any;
-          const tracking = metadata?.profitTracking;
-
-          const peakPnL = tracking?.peak?.value || currentPnL;
-          const peakDecay = peakPnL > 0 ? ((peakPnL - currentPnL) / peakPnL) * 100 : 0;
-
-          const velocityHistory = tracking?.velocityHistory || [];
-          const recentVelocity = velocityHistory.length >= 2
-            ? velocityHistory.slice(-2).reduce((a: number, b: number) => a + b, 0) / 2
-            : 0;
+          // 🔧 FIX: LivePosition doesn't have metadata field like ManagedPosition
+          // Profit tracking data is in-memory only (production-trading-multi-pair.ts)
+          // Monitor shows current P&L but not peak/velocity tracking (not persisted to DB)
+          const peakPnL = currentPnL; // Assume peak = current (no tracking data in LivePosition)
+          const peakDecay = 0; // Not tracked in LivePosition schema
+          const velocityHistory: number[] = [];
+          const recentVelocity = 0; // Not tracked in LivePosition schema
 
           const timeHeld = pos.entryTime
             ? ((Date.now() - pos.entryTime.getTime()) / (1000 * 60))
@@ -358,8 +356,9 @@ class ProactiveCaptureMonitor {
     console.log(`${COLORS.bright}${COLORS.cyan}┌─ 💰 PERFORMANCE SUMMARY ─────────────────────────────────────────────────┐${COLORS.reset}`);
 
     try {
+      // 🔧 FIX: Query LivePosition instead of ManagedPosition (system migrated to LivePosition)
       // Get closed positions from last 24 hours
-      const closedPositions = await prisma.managedPosition.findMany({
+      const closedPositions = await prisma.livePosition.findMany({
         where: {
           status: 'closed',
           exitTime: {
@@ -369,12 +368,13 @@ class ProactiveCaptureMonitor {
         orderBy: { exitTime: 'desc' }
       });
 
+      // 🔧 FIX: Check positionNotes field for exit reason (LivePosition schema)
       const proactiveCaptures = closedPositions.filter(p =>
-        (p.metadata as any)?.exitReason?.includes('proactive_capture')
+        p.positionNotes?.includes('proactive_capture')
       );
 
       const regularExits = closedPositions.filter(p =>
-        !(p.metadata as any)?.exitReason?.includes('proactive_capture')
+        !p.positionNotes?.includes('proactive_capture')
       );
 
       // Calculate stats
